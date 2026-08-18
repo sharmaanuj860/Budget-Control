@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "sharmaanuj860@gmail.com" || request.auth.token.email == "admin@rajgarhforest.app") ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+    
+    function isDEO() {
+      return isAuthenticated() && (
+        request.auth.token.email == "da123@rajgarhforest.app" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'deo')
+      );
+    }
+
+    function isApprover() {
+      return isAuthenticated() && (
+        request.auth.token.email == "da789@rajgarhforest.app" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'approver' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'DA'))
+      );
+    }
+
+    function isDA() {
+      return isAuthenticated() && 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'DA' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'approver'));
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    match /financialYears/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /ranges/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /schemes/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /sectors/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /activities/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /subActivities/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /soeHeads/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /approvedBudgets/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /treasuryReceipts/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /soeBudgets/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /allocations/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /expenditures/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /appSettings/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /bills/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /surrenders/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /payees/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /featureLocks/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /approvedBudgetFiles/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /distributedBudgetFiles/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /notifications/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /memos/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /auditLogs/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /{document=**} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

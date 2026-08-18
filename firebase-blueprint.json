@@ -1,0 +1,327 @@
+{
+  "entities": {
+    "FinancialYear": {
+      "title": "Financial Year",
+      "description": "Represents a financial year (e.g., 2025-26)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the financial year" }
+      },
+      "required": ["name"]
+    },
+    "Range": {
+      "title": "Range",
+      "description": "Represents a forest range",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the range" }
+      },
+      "required": ["name"]
+    },
+    "Scheme": {
+      "title": "Scheme",
+      "description": "Represents a budget scheme",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the scheme" },
+        "fyId": { "type": "string", "description": "ID of the financial year" }
+      },
+      "required": ["name", "fyId"]
+    },
+    "Sector": {
+      "title": "Sector",
+      "description": "Represents a sector within a scheme",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the sector" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" }
+      },
+      "required": ["name", "schemeId"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Represents an activity within a sector or scheme",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the activity" },
+        "sectorId": { "type": "string", "description": "ID of the sector (optional)" },
+        "schemeId": { "type": "string", "description": "ID of the scheme (optional)" }
+      },
+      "required": ["name"]
+    },
+    "SubActivity": {
+      "title": "Sub Activity",
+      "description": "Represents a sub-activity within an activity",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the sub-activity" },
+        "activityId": { "type": "string", "description": "ID of the activity" }
+      },
+      "required": ["name", "activityId"]
+    },
+    "SOEHead": {
+      "title": "SOE Head",
+      "description": "Represents an SOE budget head",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the SOE head" },
+        "schemeId": { "type": "string", "description": "ID of the scheme (optional)" },
+        "sectorId": { "type": "string", "description": "ID of the sector (optional)" },
+        "activityId": { "type": "string", "description": "ID of the activity (optional)" },
+        "subActivityId": { "type": "string", "description": "ID of the sub-activity (optional)" }
+      },
+      "required": ["name"]
+    },
+    "ApprovedBudget": {
+      "title": "Approved Budget",
+      "description": "Represents an administrative sanction for a specific hierarchy",
+      "type": "object",
+      "properties": {
+        "fyId": { "type": "string", "description": "ID of the financial year" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" },
+        "sectorId": { "type": "string", "description": "ID of the sector (optional)" },
+        "activityId": { "type": "string", "description": "ID of the activity (optional)" },
+        "subActivityId": { "type": "string", "description": "ID of the sub-activity (optional)" },
+        "amount": { "type": "number", "description": "The sanctioned amount" }
+      },
+      "required": ["fyId", "schemeId", "amount"]
+    },
+    "TreasuryReceipt": {
+      "title": "Treasury Receipt",
+      "description": "Represents physical cash received in the treasury for an SOE head",
+      "type": "object",
+      "properties": {
+        "fyId": { "type": "string", "description": "ID of the financial year" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" },
+        "sectorId": { "type": "string", "description": "ID of the sector (optional)" },
+        "activityId": { "type": "string", "description": "ID of the activity (optional)" },
+        "subActivityId": { "type": "string", "description": "ID of the sub-activity (optional)" },
+        "soeId": { "type": "string", "description": "ID of the SOE head" },
+        "amount": { "type": "number", "description": "The received amount" }
+      },
+      "required": ["fyId", "schemeId", "soeId", "amount"]
+    },
+    "Allocation": {
+      "title": "Allocation",
+      "description": "Represents a budget allocation to a range",
+      "type": "object",
+      "properties": {
+        "rangeId": { "type": "string", "description": "ID of the range" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" },
+        "sectorId": { "type": "string", "description": "ID of the sector (optional)" },
+        "activityId": { "type": "string", "description": "ID of the activity (optional)" },
+        "subActivityId": { "type": "string", "description": "ID of the sub-activity (optional)" },
+        "amount": { "type": "number", "description": "The sanctioned amount for the range" },
+        "status": { "type": "string", "enum": ["Pending SOE Funds", "Funded"], "description": "Funding status" },
+        "fundedSOEs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "soeId": { "type": "string" },
+              "amount": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["rangeId", "schemeId", "amount", "status"]
+    },
+    "Expenditure": {
+      "title": "Expenditure",
+      "description": "Represents an expenditure entry",
+      "type": "object",
+      "properties": {
+        "allocationId": { "type": "string", "description": "ID of the allocation" },
+        "soeId": { "type": "string", "description": "ID of the SOE head being booked against" },
+        "amount": { "type": "number", "description": "The expenditure amount" },
+        "date": { "type": "string", "description": "The date of expenditure (ISO format)" },
+        "description": { "type": "string", "description": "Description of the expenditure" },
+        "createdBy": { "type": "string", "description": "UID of the user who created the expenditure" },
+        "createdByRole": { "type": "string", "description": "Role of the user who created the expenditure" },
+        "updatedBy": { "type": "string", "description": "UID of the user who last updated the expenditure" },
+        "updatedByRole": { "type": "string", "description": "Role of the user who last updated the expenditure" },
+        "deductionType": { "type": "string", "enum": ["None", "TDS", "TDS_GST", "Both"], "description": "Type of tax deduction applied" },
+        "deductions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string" },
+              "amount": { "type": "number" }
+            }
+          }
+        },
+        "deductedAmount": { "type": "number", "description": "Total amount deducted" },
+        "tdsAmount": { "type": "number", "description": "TDS amount (1%)" },
+        "tdsGstAmount": { "type": "number", "description": "TDS on GST amount (2%)" },
+        "netAmount": { "type": "number", "description": "Net amount payable after deductions" },
+        "panNumber": { "type": "string", "description": "PAN number of the payee" },
+        "gstNumber": { "type": "string", "description": "GST number of the payee" }
+      },
+      "required": ["allocationId", "soeId", "amount", "date", "description"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Represents an application user",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "The user's email" },
+        "role": { "type": "string", "enum": ["admin", "deo", "approver", "DA", "Sarahan", "Narag", "Habban", "Division", "Rajgarh"], "description": "The user's role" },
+        "maxSessions": { "type": "number", "description": "Maximum allowed concurrent sessions" },
+        "activeSessions": { "type": "array", "items": { "type": "string" }, "description": "List of active session IDs" }
+      },
+      "required": ["email", "role"]
+    },
+    "FeatureLock": {
+      "title": "Feature Lock",
+      "description": "Represents a lock on a specific feature for a role or range",
+      "type": "object",
+      "properties": {
+        "feature": { "type": "string", "enum": ["Allocation", "Expenditure"], "description": "The feature to lock" },
+        "target": { "type": "string", "description": "The role or range ID to apply the lock to" },
+        "isLocked": { "type": "boolean", "description": "Whether the feature is locked" },
+        "updatedBy": { "type": "string", "description": "UID of the admin who updated the lock" },
+        "updatedAt": { "type": "number", "description": "Timestamp of the update" }
+      },
+      "required": ["feature", "target", "isLocked"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "Represents a treasury bill containing multiple expenditures",
+      "type": "object",
+      "properties": {
+        "billNo": { "type": "string", "description": "The bill number" },
+        "billDate": { "type": "string", "description": "The date of the bill" },
+        "expenseIds": { "type": "array", "items": { "type": "string" }, "description": "List of expenditure IDs" },
+        "fyId": { "type": "string", "description": "ID of the financial year" },
+        "financialYear": { "type": "string", "description": "Name of the financial year" },
+        "totalAmount": { "type": "number", "description": "Total amount of the bill" },
+        "status": { "type": "string", "enum": ["draft", "finalized"], "description": "Status of the bill" },
+        "remarks": { "type": "string", "description": "Optional remarks" },
+        "createdBy": { "type": "string", "description": "UID of the user who created the bill" }
+      },
+      "required": ["billNo", "billDate", "expenseIds", "fyId", "financialYear", "totalAmount", "status"]
+    },
+    "Surrender": {
+      "title": "Surrender",
+      "description": "Represents a budget surrender entry",
+      "type": "object",
+      "properties": {
+        "rangeId": { "type": "string", "description": "ID of the range" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" },
+        "sectorId": { "type": "string", "description": "ID of the sector" },
+        "activityId": { "type": "string", "description": "ID of the activity" },
+        "subActivityId": { "type": "string", "description": "ID of the sub-activity" },
+        "soeId": { "type": "string", "description": "ID of the SOE head" },
+        "amount": { "type": "number", "description": "The surrendered amount" },
+        "date": { "type": "string", "description": "The date of surrender (ISO format)" },
+        "remarks": { "type": "string", "description": "Optional remarks" },
+        "fyId": { "type": "string", "description": "ID of the financial year" },
+        "financialYear": { "type": "string", "description": "Name of the financial year" }
+      },
+      "required": ["rangeId", "schemeId", "sectorId", "activityId", "subActivityId", "soeId", "amount", "date", "fyId", "financialYear"]
+    },
+    "Payee": {
+      "title": "Payee",
+      "description": "Represents a payee detail",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the payee" },
+        "address": { "type": "string", "description": "The address of the payee" },
+        "accountNumber": { "type": "string", "description": "The bank account number of the payee" },
+        "ifscCode": { "type": "string", "description": "Bank IFSC code" },
+        "panNumber": { "type": "string", "description": "PAN number of the payee" },
+        "gstNumber": { "type": "string", "description": "GST number of the payee" },
+        "treasuryCode": { "type": "string", "description": "Treasury portal payee ID / code" },
+        "rangeId": { "type": "string", "description": "ID of the range (optional)" },
+        "createdBy": { "type": "string", "description": "UID of the user who created the payee" },
+        "createdAt": { "type": "number", "description": "Timestamp of creation" },
+        "updatedAt": { "type": "number", "description": "Timestamp of last update" }
+      },
+      "required": ["name", "address", "accountNumber", "createdBy", "createdAt", "updatedAt"]
+    },
+    "ApprovedBudgetFile": {
+      "title": "Approved Budget File",
+      "description": "Represents a PDF file for approved budget",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "File name" },
+        "url": { "type": "string", "description": "Storage URL" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" },
+        "sectorId": { "type": "string", "description": "ID of the sector" },
+        "uploadedBy": { "type": "string", "description": "UID of the uploader" },
+        "uploadedAt": { "type": "number", "description": "Timestamp of upload" },
+        "fyId": { "type": "string", "description": "ID of the financial year" }
+      },
+      "required": ["name", "url", "schemeId", "sectorId", "uploadedBy", "uploadedAt", "fyId"]
+    },
+    "DistributedBudgetFile": {
+      "title": "Distributed Budget File",
+      "description": "Represents a PDF file for distributed budget",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "File name" },
+        "url": { "type": "string", "description": "Storage URL" },
+        "schemeId": { "type": "string", "description": "ID of the scheme" },
+        "rangeId": { "type": "string", "description": "ID of the range" },
+        "uploadedBy": { "type": "string", "description": "UID of the uploader" },
+        "uploadedAt": { "type": "number", "description": "Timestamp of upload" },
+        "fyId": { "type": "string", "description": "ID of the financial year" }
+      },
+      "required": ["name", "url", "schemeId", "rangeId", "uploadedBy", "uploadedAt", "fyId"]
+    },
+    "MemoForFund": {
+      "title": "Memo For Fund",
+      "description": "Represents a Memo for Fund letter containing multiple payee payment entries",
+      "type": "object",
+      "properties": {
+        "memoNo": { "type": "string", "description": "Reference memo number" },
+        "date": { "type": "string", "description": "Date of memo" },
+        "monthYear": { "type": "string", "description": "Month and year of fund demand" },
+        "schemeId": { "type": "string", "description": "ID of scheme" },
+        "schemeName": { "type": "string", "description": "Name of scheme" },
+        "sectorId": { "type": "string", "description": "ID of sector" },
+        "sectorName": { "type": "string", "description": "Name of sector" },
+        "rangeId": { "type": "string", "description": "ID of range" },
+        "rangeName": { "type": "string", "description": "Name of range" },
+        "financialYear": { "type": "string", "description": "Financial year name" },
+        "status": { "type": "string", "enum": ["draft", "submitted", "correction"], "description": "Status of memo" },
+        "totalAmount": { "type": "number", "description": "Total gross amount" },
+        "totalITax": { "type": "number", "description": "Total ITax deducted" },
+        "totalGst": { "type": "number", "description": "Total GST TDS deducted" },
+        "totalNetRtgs": { "type": "number", "description": "Total net RTGS amount" },
+        "payeeEntries": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "List of payee entries"
+        },
+        "createdBy": { "type": "string", "description": "Creator UID" },
+        "createdByRole": { "type": "string", "description": "Creator role" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" },
+        "updatedAt": { "type": "number", "description": "Update timestamp" }
+      },
+      "required": ["memoNo", "date", "monthYear", "status", "totalAmount", "payeeEntries", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/financialYears": { "schema": "FinancialYear", "description": "Collection of financial years" },
+    "/ranges": { "schema": "Range", "description": "Collection of forest ranges" },
+    "/schemes": { "schema": "Scheme", "description": "Collection of budget schemes" },
+    "/sectors": { "schema": "Sector", "description": "Collection of sectors" },
+    "/activities": { "schema": "Activity", "description": "Collection of activities" },
+    "/subActivities": { "schema": "SubActivity", "description": "Collection of sub-activities" },
+    "/soeHeads": { "schema": "SOEHead", "description": "Collection of SOE heads" },
+    "/approvedBudgets": { "schema": "ApprovedBudget", "description": "Collection of administrative sanctions" },
+    "/treasuryReceipts": { "schema": "TreasuryReceipt", "description": "Collection of physical cash receipts" },
+    "/allocations": { "schema": "Allocation", "description": "Collection of budget allocations" },
+    "/expenditures": { "schema": "Expenditure", "description": "Collection of expenditures" },
+    "/users": { "schema": "User", "description": "Collection of application users" },
+    "/bills": { "schema": "Bill", "description": "Collection of treasury bills" },
+    "/surrenders": { "schema": "Surrender", "description": "Collection of budget surrenders" },
+    "/payees": { "schema": "Payee", "description": "Collection of payee details" },
+    "/featureLocks": { "schema": "FeatureLock", "description": "Collection of feature locks" },
+    "/approvedBudgetFiles": { "schema": "ApprovedBudgetFile", "description": "Collection of approved budget PDF files" },
+    "/distributedBudgetFiles": { "schema": "DistributedBudgetFile", "description": "Collection of distributed budget PDF files" },
+    "/memos": { "schema": "MemoForFund", "description": "Collection of memos for fund" }
+  }
+}

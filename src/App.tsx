@@ -1,0 +1,16034 @@
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2 } from 'lucide-react';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { 
+  auth, db, storage, signInWithPopup, googleProvider, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, setPersistence, browserSessionPersistence, browserLocalPersistence,
+  collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, where, or, orderBy, addDoc, updateDoc, deleteDoc, getDocFromServer, firebaseConfig, runTransaction, writeBatch,
+  ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject
+} from './firebase';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+import { preloadDatabase } from './preloadData';
+import { emergencyRestoreData } from './emergencyRestoreData';
+
+// --- Types ---
+type FinancialYear = { id: string; name: string };
+type Range = { id: string; name: string };
+type Scheme = { id: string; name: string };
+type Sector = { id: string; schemeId: string; name: string };
+type ActivityItem = { id: string; sectorId?: string; schemeId?: string; name: string };
+type SubActivity = { id: string; activityId: string; name: string };
+type SOE = { 
+  id: string; 
+  name: string; 
+  isProvisional?: boolean;
+  schemeId?: string; 
+  sectorId?: string; 
+  activityId?: string; 
+  subActivityId?: string; 
+  approvedBudget: number; 
+  receivedInTry: number;
+  fyId?: string;
+  financialYear?: string;
+  approvedBudgetAmount?: number;
+  receivedInTryAmount?: number;
+  tryAmount?: number;
+  updatedAt?: number;
+  createdAt?: number;
+};
+
+type Allocation = { 
+  id: string; 
+  rangeId: string; 
+  schemeId: string; 
+  sectorId?: string; 
+  activityId?: string; 
+  subActivityId?: string; 
+  amount: number; 
+  status: 'Pending SOE Funds' | 'Funded'; 
+  fundedSOEs: { soeId: string; amount: number }[]; 
+  fyId?: string; 
+  financialYear?: string; 
+  remarks?: string;
+  updatedAt?: number;
+  createdAt?: number;
+};
+
+type Expense = { 
+  id: string; 
+  allocationId: string; 
+  soeId: string; 
+  schemeId?: string;
+  sectorId?: string;
+  amount: number; 
+  date: string; 
+  description: string; 
+  fyId?: string; 
+  financialYear?: string; 
+  status: 'pending' | 'approved' | 'rejected'; 
+  isLocked: boolean; 
+  approvalId?: number;
+  createdBy?: string;
+  createdByRole?: string;
+  updatedBy?: string;
+  updatedByRole?: string;
+  updatedAt?: number;
+  createdAt?: number;
+  approvalReason?: string;
+  payeeId?: string;
+  payeeName?: string;
+  rangeId?: string;
+  deductionType?: 'None' | 'TDS' | 'TDS_GST' | 'Both';
+  deductions?: { type: 'TDS' | 'TDS_GST'; amount: number }[];
+  deductedAmount?: number;
+  tdsAmount?: number;
+  tdsGstAmount?: number;
+  panNumber?: string;
+  gstNumber?: string;
+  netAmount?: number;
+  syncedMemoId?: string;
+  syncedMemoNo?: string;
+};
+
+type Notification = {
+  id: string;
+  name: string;
+  url: string;
+  type: string;
+  createdAt: number;
+  uploadedBy: string;
+  description?: string;
+  targetRanges?: string[];
+};
+
+type Bill = {
+  id: string;
+  billNo: string;
+  billDate: string;
+  expenseIds: string[];
+  fyId: string;
+  financialYear: string;
+  totalAmount: number;
+  status: 'draft' | 'finalized';
+  createdAt: number;
+  updatedAt: number;
+  remarks?: string;
+};
+
+type Payee = {
+  id: string;
+  name: string;
+  address: string;
+  accountNumber: string;
+  ifscCode?: string;
+  panNumber?: string;
+  gstNumber?: string;
+  treasuryCode?: string;
+  rangeId?: string;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string;
+};
+
+type MemoSubVoucher = {
+  id: string;
+  voucherNo?: string;
+  description?: string;
+  amount: number;
+};
+
+type MemoPayeeEntry = {
+  id?: string;
+  payeeId?: string;
+  name: string;
+  address: string;
+  accountNumber: string;
+  ifscCode: string;
+  treasuryCode?: string;
+  panNumber: string;
+  gstNumber?: string;
+  totalAmount: number;
+  deductITax?: boolean;
+  iTaxPercent: number;
+  iTaxAmount: number;
+  deductGst?: boolean;
+  gstPercent?: number;
+  gstAmount?: number;
+  netRtgsAmount: number;
+  description?: string;
+  subVouchers?: MemoSubVoucher[];
+};
+
+type MemoForFund = {
+  id: string;
+  memoNo: string;
+  date: string;
+  monthYear: string;
+  schemeId?: string;
+  schemeName?: string;
+  sectorId?: string;
+  sectorName?: string;
+  rangeId?: string;
+  rangeName?: string;
+  toAuthority?: string;
+  financialYear: string;
+  fyId?: string;
+  status: 'draft' | 'submitted' | 'correction';
+  totalAmount: number;
+  totalITax: number;
+  totalGst?: number;
+  totalNetRtgs: number;
+  payeeEntries: MemoPayeeEntry[];
+  createdBy: string;
+  createdByRole?: string;
+  createdByName?: string;
+  createdAt: number;
+  updatedAt: number;
+  remarks?: string;
+};
+
+type BudgetFile = {
+  id: string;
+  name: string;
+  url: string;
+  schemeId: string;
+  sectorId?: string;
+  rangeId?: string;
+  type: 'approved' | 'distributed';
+  uploadedBy: string;
+  uploadedAt: number;
+  fyId: string;
+};
+
+type AppUser = { 
+  id: string; 
+  email: string; 
+  role: 'admin' | 'deo' | 'approver' | 'DA' | 'Sarahan' | 'Narag' | 'Habban' | 'Division' | 'Rajgarh'; 
+  password?: string;
+  maxSessions?: number;
+  activeSessions?: string[];
+  isDisabled?: boolean;
+  updatedAt?: number;
+};
+
+type FeatureLock = {
+  id: string;
+  feature: 'Allocation' | 'Expenditure' | 'Access' | 'Memo' | 'MemoSync';
+  target: string; // role or rangeId
+  isLocked: boolean;
+  updatedBy: string;
+  updatedAt: number;
+};
+
+type Surrender = {
+  id: string;
+  rangeId: string;
+  schemeId: string;
+  sectorId: string;
+  activityId: string;
+  subActivityId: string;
+  soeId: string;
+  amount: number;
+  date: string;
+  remarks: string;
+  fyId: string;
+  financialYear: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function convertNumberToWords(amount: number): string {
+  if (isNaN(amount) || amount <= 0) return 'Zero';
+  
+  const single = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+  const double = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  function numToWords(n: number): string {
+    let str = '';
+    if (n > 99) {
+      str += single[Math.floor(n / 100)] + ' Hundred ';
+      n %= 100;
+    }
+    if (n > 19) {
+      str += tens[Math.floor(n / 10)] + ' ';
+      n %= 10;
+    } else if (n >= 10) {
+      str += double[n - 10] + ' ';
+      n = 0;
+    }
+    if (n > 0) {
+      str += single[n] + ' ';
+    }
+    return str;
+  }
+
+  const rounded = Math.floor(Math.abs(amount));
+  let str = '';
+  
+  const crore = Math.floor(rounded / 10000000);
+  let rem = rounded % 10000000;
+  
+  const lakh = Math.floor(rem / 100000);
+  rem %= 100000;
+  
+  const thousand = Math.floor(rem / 1000);
+  rem %= 1000;
+  
+  const hundred = rem;
+
+  if (crore > 0) str += numToWords(crore) + 'Crore ';
+  if (lakh > 0) str += numToWords(lakh) + 'Lakh ';
+  if (thousand > 0) str += numToWords(thousand) + 'Thousand ';
+  if (hundred > 0) str += numToWords(hundred);
+
+  return str.trim() || 'Zero';
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email || undefined,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId || undefined,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+const TryUpdateInput = ({ soeId, initialValue, onUpdate }: { soeId: string, initialValue: number, onUpdate: (id: string, val: number) => void }) => {
+  const [val, setVal] = useState(initialValue);
+  
+  useEffect(() => {
+    setVal(initialValue);
+  }, [initialValue]);
+
+  return (
+    <div className="flex items-center gap-1">
+      <input 
+        type="number" 
+        value={val} 
+        onChange={(e) => setVal(parseFloat(e.target.value) || 0)}
+        className="w-24 p-1 text-xs border rounded focus:ring-1 focus:ring-indigo-500 outline-none"
+      />
+      <button 
+        onClick={() => onUpdate(soeId, val)}
+        className="p-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors"
+        title="Update Treasury"
+      >
+        <Check className="w-3 h-3" />
+      </button>
+    </div>
+  );
+};
+
+const getApprovedBudget = (s: any) => {
+  const val = s.approvedBudget || s.approvedBudgetAmount || s.approved_budget || s.budget || 0;
+  return Number(val) || 0;
+};
+
+const getReceivedInTry = (s: any) => {
+  const val = s.receivedInTry || s.receivedInTryAmount || s.tryAmount || s.received_in_try || 0;
+  return Number(val) || 0;
+};
+
+const ALLOWED_SOES = ['20 OC', '21 Maint', '30MV', '33M&S', '36M&W', 'Provisional'];
+
+// --- Payee Selector Component ---
+const PayeeSelector = ({ 
+  payees, 
+  selectedPayees, 
+  onSelect, 
+  onRemove, 
+  onAmountChange,
+  ranges,
+  availableBalance,
+  selectedDeductions = [],
+  gstNumber = ''
+}: { 
+  payees: Payee[], 
+  selectedPayees: { payeeId: string, amount: string }[], 
+  onSelect: (payeeId: string) => void, 
+  onRemove: (payeeId: string) => void, 
+  onAmountChange: (payeeId: string, amount: string) => void,
+  ranges: Range[],
+  availableBalance?: number,
+  selectedDeductions?: string[],
+  gstNumber?: string
+}) => {
+  const [search, setSearch] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredPayees = useMemo(() => {
+    const lower = search.toLowerCase();
+    const base = payees.filter(p => !selectedPayees.some(sp => sp.payeeId === p.id));
+    const seen: Record<string, boolean> = {};
+    const uniqueList: Payee[] = [];
+    base.forEach(p => {
+      if (p.id && !seen[p.id]) {
+        seen[p.id] = true;
+        uniqueList.push(p);
+      }
+    });
+    if (!search) return uniqueList;
+    return uniqueList.filter(p => 
+      p.name?.toLowerCase().includes(lower) || 
+      p.accountNumber?.toLowerCase().includes(lower) ||
+      p.panNumber?.toLowerCase().includes(lower) ||
+      p.gstNumber?.toLowerCase().includes(lower) ||
+      p.treasuryCode?.toLowerCase().includes(lower)
+    );
+  }, [search, payees, selectedPayees]);
+
+  const totalAmount = useMemo(() => 
+    selectedPayees.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+  , [selectedPayees]);
+
+  const totalCalculatedDeductions = useMemo(() => {
+    let totalDeductions = 0;
+    selectedPayees.forEach(sp => {
+      const p = payees.find(payee => payee.id === sp.payeeId);
+      const pAmt = parseFloat(sp.amount) || 0;
+      const pGst = p?.gstNumber || gstNumber;
+      const pTds = (selectedDeductions.includes('TDS') && pAmt > 30000) ? Math.round(pAmt * 0.01) : 0;
+      const pGstTds = (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) ? Math.round(pAmt * 0.02) : 0;
+      totalDeductions += (pTds + pGstTds);
+    });
+    return totalDeductions;
+  }, [selectedPayees, payees, selectedDeductions, gstNumber]);
+
+  return (
+    <div className="space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-200" ref={dropdownRef}>
+      <div className="flex justify-between items-center">
+        <label className="block text-[10px] font-bold text-gray-500 uppercase">Payee Selection & Tax Breakdown</label>
+        {availableBalance !== undefined && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-gray-500 uppercase">Available:</span>
+            <span className="text-xs font-bold text-blue-700">₹{availableBalance.toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+      
+      <div className="space-y-2">
+        <div className="flex flex-col gap-2">
+          {/* Select Payee Dropdown */}
+          <select 
+            className="w-full p-2 text-sm border rounded bg-white shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none font-medium text-gray-800"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) {
+                onSelect(e.target.value);
+                setSearch('');
+                setShowResults(false);
+              }
+            }}
+          >
+            <option value="">-- Select Payee from List --</option>
+            {filteredPayees.map((p, idx) => {
+              const rName = ranges.find(r => r.id === p.rangeId)?.name || '';
+              return (
+                <option key={`opt-payee-${p.id}-${idx}`} value={p.id} title={`${p.name} (A/C: ${p.accountNumber})`}>
+                  {p.name} (A/C: {p.accountNumber}){rName ? ` - [${rName}]` : ''}
+                </option>
+              );
+            })}
+          </select>
+
+          {/* Search Input Box */}
+          <div className="relative flex-1">
+            <Search className="absolute left-2 top-2.5 w-4 h-4 text-gray-400" />
+            <input 
+              type="text" 
+              placeholder="Or type to search payee..." 
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setShowResults(true); }}
+              onFocus={() => setShowResults(true)}
+              className="w-full pl-8 pr-8 p-2 text-sm border rounded bg-white shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+            />
+            <button 
+              type="button"
+              onClick={() => setShowResults(!showResults)}
+              className="absolute right-2 top-2 text-gray-400 hover:text-gray-600"
+            >
+              {showResults ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {showResults && (
+          <div className="relative w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto z-20">
+            {filteredPayees.length > 0 ? (
+              filteredPayees.map((p, idx) => (
+                <button
+                  key={`btn-payee-${p.id}-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    onSelect(p.id);
+                    setSearch('');
+                    setShowResults(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 border-b last:border-0 group transition-colors"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-bold text-gray-800">{p.name}</div>
+                      <div className="text-[10px] text-gray-500 font-mono">A/C: {p.accountNumber}</div>
+                      <div className="flex flex-wrap gap-1.5 mt-0.5">
+                        {p.treasuryCode && <span className="text-[9px] bg-emerald-50 border border-emerald-200 px-1 rounded text-emerald-800 font-bold font-mono">TRY: {p.treasuryCode}</span>}
+                        {p.ifscCode && <span className="text-[9px] bg-blue-50 px-1 rounded text-blue-700">IFSC: {p.ifscCode}</span>}
+                        {p.panNumber && <span className="text-[9px] bg-gray-100 px-1 rounded text-gray-600">PAN: {p.panNumber}</span>}
+                        {p.gstNumber && <span className="text-[9px] bg-gray-100 px-1 rounded text-gray-600">GST: {p.gstNumber}</span>}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[9px] font-bold text-emerald-600 truncate max-w-[80px]">{ranges.find(r => r.id === p.rangeId)?.name || 'N/A'}</div>
+                    </div>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="px-4 py-3 text-sm text-gray-500 italic text-center">No matching payees available</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {selectedPayees.length > 0 && (
+        <div className="space-y-2">
+          {selectedPayees.map((sp, idx) => {
+            const p = payees.find(payee => payee.id === sp.payeeId);
+            const pAmt = parseFloat(sp.amount) || 0;
+            const pGst = p?.gstNumber || gstNumber;
+            const pTds = (selectedDeductions.includes('TDS') && pAmt > 30000) ? Math.round(pAmt * 0.01) : 0;
+            const pGstTds = (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) ? Math.round(pAmt * 0.02) : 0;
+            const pTax = pTds + pGstTds;
+            const pNet = pAmt - pTax;
+
+            return (
+              <div key={`sel-payee-${sp.payeeId}-${idx}`} className="bg-white p-2.5 rounded-lg border border-gray-200 shadow-xs space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold text-gray-900 truncate">{p?.name}</div>
+                    <div className="text-[10px] text-gray-500 font-mono truncate">A/C: {p?.accountNumber}{p?.ifscCode ? ` | IFSC: ${p.ifscCode}` : ''}</div>
+                  </div>
+                  <div className="w-36 shrink-0">
+                    <div className="relative">
+                      <span className="absolute left-2 top-2 text-xs font-bold text-gray-400">₹</span>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        placeholder="0.00" 
+                        value={sp.amount}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                            onAmountChange(sp.payeeId, val);
+                          }
+                        }}
+                        className="w-full pl-5 pr-2 py-1.5 text-sm border-2 border-emerald-100 rounded text-right font-bold text-emerald-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="shrink-0">
+                    <button 
+                      type="button"
+                      onClick={() => onRemove(sp.payeeId)}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="Remove Payee"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tax & Net Pay Info per Payee */}
+                {pAmt > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1.5 border-t border-gray-100 text-[11px] bg-slate-50/90 px-2.5 py-1.5 rounded-md">
+                    <div className="flex flex-wrap items-center gap-2 text-gray-700">
+                      <span>Gross: <strong className="text-gray-900 font-bold">₹{pAmt.toLocaleString('en-IN')}</strong></span>
+                      {pTds > 0 && (
+                        <span className="text-red-600 font-semibold bg-red-50 px-1.5 py-0.5 rounded border border-red-100">
+                          TDS (1%): -₹{pTds.toLocaleString('en-IN')}
+                        </span>
+                      )}
+                      {pGstTds > 0 && (
+                        <span className="text-purple-600 font-semibold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                          TDS GST (2%): -₹{pGstTds.toLocaleString('en-IN')}
+                        </span>
+                      )}
+                      {pTax === 0 && selectedDeductions.length > 0 && (
+                        <span className="text-gray-400 text-[10px]">
+                          TDS: ₹0 {selectedDeductions.includes('TDS') && pAmt <= 30000 ? '(≤₹30k threshold)' : ''}
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-extrabold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      Net Pay (RTGS): ₹{pNet.toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="space-y-1 pt-2 border-t border-gray-200">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-bold text-gray-500 uppercase">Total Gross Amount:</span>
+              <span className="text-sm font-bold text-gray-900">₹{totalAmount.toLocaleString()}</span>
+            </div>
+            {totalCalculatedDeductions > 0 && (
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[10px] font-bold text-red-600 uppercase">Total Tax Deductions:</span>
+                <span className="font-bold text-red-600">-₹{totalCalculatedDeductions.toLocaleString()}</span>
+              </div>
+            )}
+            {selectedDeductions.length > 0 && (
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[10px] font-bold text-emerald-700 uppercase">Total Net Payable (RTGS):</span>
+                <span className="text-sm font-black text-emerald-700">₹{(totalAmount - totalCalculatedDeductions).toLocaleString()}</span>
+              </div>
+            )}
+            {availableBalance !== undefined && (
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-bold text-gray-500 uppercase">Remaining Balance:</span>
+                <span className={`text-sm font-bold ${availableBalance - totalAmount < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                  ₹{(availableBalance - totalAmount).toLocaleString()}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('Dashboard');
+  const [allocationAmount, setAllocationAmount] = useState<string>('');
+  const [expenseAmount, setExpenseAmount] = useState<string>('');
+  const [expenseDate, setExpenseDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [expenseDescription, setExpenseDescription] = useState<string>('');
+  const [trackerSearch, setTrackerSearch] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [deductionType, setDeductionType] = useState<'None' | 'TDS' | 'TDS_GST' | 'Both'>('None');
+  const [selectedDeductions, setSelectedDeductions] = useState<('TDS' | 'TDS_GST')[]>([]);
+  const [panNumber, setPanNumber] = useState('');
+  const [gstNumber, setGstNumber] = useState('');
+  const [payeePan, setPayeePan] = useState('');
+  const [payeeGst, setPayeeGst] = useState('');
+  const [uploadTasks, setUploadTasks] = useState<{[key: string]: any}>({});
+  const [billSearchTerm, setBillSearchTerm] = useState('');
+  const [payeeSearchTerm, setPayeeSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [dashboardSearch, setDashboardSearch] = useState('');
+  const [showAllBudget, setShowAllBudget] = useState(false);
+  const [rangeSearch, setRangeSearch] = useState('');
+  const [soeSearchTerm, setSoeSearchTerm] = useState('');
+  const [soeAbstractSearch, setSoeAbstractSearch] = useState('');
+  const [showAllRange, setShowAllRange] = useState(false);
+  const [isFormExpanded, setIsFormExpanded] = useState(window.innerWidth > 1024);
+  const [formWidth, setFormWidth] = useState<'normal' | 'wide' | 'extra'>(() => (localStorage.getItem('fbc_form_width') as 'normal' | 'wide' | 'extra') || 'wide');
+  const [isSoeTrackerExpanded, setIsSoeTrackerExpanded] = useState(false);
+  const [showMobileReportSearch, setShowMobileReportSearch] = useState(false);
+  const [showReconSummary, setShowReconSummary] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [userRole, setUserRole] = useState<'admin' | 'deo' | 'approver' | 'DA' | 'Sarahan' | 'Narag' | 'Habban' | 'Division' | 'Rajgarh' | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fundingAllocation, setFundingAllocation] = useState<Allocation | null>(null);
+  const [isSoesLoaded, setIsSoesLoaded] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      if (user) {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const activeSessions = userDoc.data().activeSessions || [];
+          const updatedSessions = activeSessions.filter((id: string) => id !== sessionId);
+          await updateDoc(doc(db, 'users', user.uid), { activeSessions: updatedSessions });
+        }
+      }
+      await signOut(auth);
+      setUser(null);
+      setUserRole(null);
+      setActiveTab('Dashboard');
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({ isOpen: false, message: '' });
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; message: string; onConfirm: () => void }>({ isOpen: false, message: '', onConfirm: () => {} });
+
+  const showAlert = (message: string) => setAlertModal({ isOpen: true, message });
+  const showConfirm = (message: string, onConfirm: () => void) => setConfirmModal({ isOpen: true, message, onConfirm });
+
+  // --- State ---
+  const [fys, setFys] = useState<FinancialYear[]>([]);
+  const [selectedFY, setSelectedFY] = useState<string>('2026-27');
+  const [loginFY, setLoginFY] = useState<string>('2026-27');
+
+  const fyOptions = useMemo(() => {
+    const defaultFYs = ['2026-27', '2025-26', '2024-25'];
+    const fetchedFYs = fys.map(f => f.name).filter(Boolean);
+    return Array.from(new Set([...defaultFYs, ...fetchedFYs]));
+  }, [fys]);
+  const [isFyHiddenForUsers, setIsFyHiddenForUsers] = useState<boolean>(false);
+  const [ranges, setRanges] = useState<Range[]>([]);
+  const [schemes, setSchemes] = useState<Scheme[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [subActivities, setSubActivities] = useState<SubActivity[]>([]);
+  const [soes, setSoes] = useState<SOE[]>([]);
+  const [surrenders, setSurrenders] = useState<Surrender[]>([]);
+  const [surrenderFilters, setSurrenderFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+  const hasSeeded = React.useRef(false);
+
+  const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [payees, setPayees] = useState<Payee[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [featureLocks, setFeatureLocks] = useState<FeatureLock[]>([]);
+  const [sessionId] = useState(() => Math.random().toString(36).substring(2, 15));
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'deo' | 'approver' | 'Sarahan' | 'Narag' | 'Habban' | 'Division' | 'Rajgarh'>('deo');
+  const [visiblePasswords, setVisiblePasswords] = useState<{[key: string]: boolean}>({});
+  const [editingPasswordId, setEditingPasswordId] = useState<string | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [selectedLockTarget, setSelectedLockTarget] = useState<string>('');
+
+  // --- Filters ---
+  const [expDateRange, setExpDateRange] = useState({ start: '', end: '' });
+  const [expFilters, setExpFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '' });
+  const [expenditureSubTab, setExpenditureSubTab] = useState<'list' | 'bills' | 'payees' | 'memo'>('list');
+  const [showExpenditurePrintModal, setShowExpenditurePrintModal] = useState(false);
+  const [showPayeePrintModal, setShowPayeePrintModal] = useState(false);
+  const [treasuryCodeModalPayee, setTreasuryCodeModalPayee] = useState<Payee | null>(null);
+  const [treasuryCodeInput, setTreasuryCodeInput] = useState<string>('');
+
+  // Memo Sync state
+  const [selectedSyncedMemo, setSelectedSyncedMemo] = useState<{ memoId: string; memoNo: string; entryId?: string } | null>(null);
+  const [showMemoSyncModal, setShowMemoSyncModal] = useState<boolean>(false);
+  const [memoSearchTerm, setMemoSearchTerm] = useState<string>('');
+
+  // Audit Logs State & Helper
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
+
+  const logAuditAction = async (action: string, details?: string) => {
+    try {
+      const logData = {
+        action,
+        details: details || '',
+        userName: user?.displayName || user?.email?.split('@')[0] || 'User',
+        userEmail: user?.email || '',
+        userRole: userRole || 'User',
+        timestamp: Date.now()
+      };
+      await addDoc(collection(db, 'auditLogs'), logData);
+    } catch (err) {
+      console.warn("Could not log audit action:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    if (userRole && !['admin', 'deo', 'DA', 'approver'].includes(userRole)) {
+      setAuditLogs([]);
+      return;
+    }
+    const q = query(collection(db, 'auditLogs'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const logs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }) as any);
+      logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setAuditLogs(logs.slice(0, 50));
+    }, (error) => {
+      console.warn("Audit logs listener error:", error);
+    });
+    return () => unsubscribe();
+  }, [user, userRole]);
+
+  const isMemoSyncEnabled = !featureLocks.some(l => l.feature === 'MemoSync' && (l.target === 'global' || l.target === 'all') && l.isLocked);
+  const userRangeRoleName = userRole && ['Sarahan', 'Narag', 'Habban', 'Division', 'Rajgarh'].includes(userRole) ? userRole : '';
+  const isMemoLockedForUser = userRole !== 'admin' && featureLocks.some(l => l.feature === 'Memo' && l.isLocked && (l.target === 'all' || l.target === 'global' || l.target === userRangeRoleName || l.target === userRole));
+
+  // Memo for Fund states
+  const [memos, setMemos] = useState<MemoForFund[]>([]);
+  const [editingMemo, setEditingMemo] = useState<MemoForFund | null>(null);
+  const [viewingMemo, setViewingMemo] = useState<MemoForFund | null>(null);
+
+  const [viewingBillPdf, setViewingBillPdf] = useState<{ url: string; bill: any } | null>(null);
+  const [allocFilters, setAllocFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+  const [soeFilters, setSoeFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeName: '' });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showExpenditurePrintModal) setShowExpenditurePrintModal(false);
+        if (showPayeePrintModal) setShowPayeePrintModal(false);
+        if (viewingMemo) setViewingMemo(null);
+        if (showMemoSyncModal) setShowMemoSyncModal(false);
+        if (viewingBillPdf) setViewingBillPdf(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showExpenditurePrintModal, showPayeePrintModal, viewingMemo, showMemoSyncModal, viewingBillPdf]);
+
+  // Form Header State
+  const [memoNoInput, setMemoNoInput] = useState<string>('');
+  const [memoDateInput, setMemoDateInput] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [memoMonthYearInput, setMemoMonthYearInput] = useState<string>('08/2026');
+  const [memoSchemeIdInput, setMemoSchemeIdInput] = useState<string>('');
+  const [memoSectorIdInput, setMemoSectorIdInput] = useState<string>('');
+  const [memoFromInput, setMemoFromInput] = useState<string>('RFO Sarahan');
+  const [memoToInput, setMemoToInput] = useState<string>('DCF Rajgarh');
+
+  // Payee Entry Form State
+  const [memoPayeeEntries, setMemoPayeeEntries] = useState<MemoPayeeEntry[]>([]);
+  const [entryPayeeId, setEntryPayeeId] = useState<string>('');
+  const [entryName, setEntryName] = useState<string>('');
+  const [entryAddress, setEntryAddress] = useState<string>('');
+  const [entryAccountNo, setEntryAccountNo] = useState<string>('');
+  const [entryIfsc, setEntryIfsc] = useState<string>('');
+  const [entryTreasuryCode, setEntryTreasuryCode] = useState<string>('');
+  const [entryPan, setEntryPan] = useState<string>('');
+  const [entryGst, setEntryGst] = useState<string>('');
+  const [entryTotalAmount, setEntryTotalAmount] = useState<string>('');
+  const [entryDeductITax, setEntryDeductITax] = useState<boolean>(true);
+  const [entryITaxPercent, setEntryITaxPercent] = useState<string>('1');
+  const [entryDeductGst, setEntryDeductGst] = useState<boolean>(false);
+  const [entryGstPercent, setEntryGstPercent] = useState<string>('2');
+  const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
+
+  // Payee Sub-Vouchers / Bills Breakdown State
+  const [entrySubVouchers, setEntrySubVouchers] = useState<MemoSubVoucher[]>([]);
+  const [showSubVoucherSection, setShowSubVoucherSection] = useState<boolean>(false);
+  const [subVoucherNoInput, setSubVoucherNoInput] = useState<string>('');
+  const [subVoucherDescInput, setSubVoucherDescInput] = useState<string>('');
+  const [subVoucherAmountInput, setSubVoucherAmountInput] = useState<string>('');
+
+  const [selectedMemoPayeeId, setSelectedMemoPayeeId] = useState<string>('');
+  const [selectedMemoSchemeId, setSelectedMemoSchemeId] = useState<string>('');
+  const [selectedMemoSectorId, setSelectedMemoSectorId] = useState<string>('');
+  const [memoMonthYear, setMemoMonthYear] = useState<string>(() => {
+    const now = new Date();
+    return now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  });
+  const [memoRefNo, setMemoRefNo] = useState<string>('RFO/RAJGARH/Memo/2026-27/01');
+  const [memoDate, setMemoDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [manualMemoAmount, setManualMemoAmount] = useState<string>('');
+  const [selectedExpensesForBill, setSelectedExpensesForBill] = useState<string[]>([]);
+  const [billFilters, setBillFilters] = useState({ billNo: '', rangeId: '', soeId: '', amount: '' });
+  const [billExpFilters, setBillExpFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+  const [isBillFormFullScreen, setIsBillFormFullScreen] = useState(false);
+  const [isTableFullScreen, setIsTableFullScreen] = useState(false);
+
+  const [notifSearchTerm, setNotifSearchTerm] = useState('');
+  const [notifPage, setNotifPage] = useState(1);
+  const [notifItemsPerPage, setNotifItemsPerPage] = useState<number | 'All'>(25);
+
+  const [budgetSearchTerm, setBudgetSearchTerm] = useState('');
+  const [budgetPage, setBudgetPage] = useState(1);
+  const [budgetItemsPerPage, setBudgetItemsPerPage] = useState<number | 'All'>(25);
+
+  const [reportFilters, setReportFilters] = useState({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
+  const [ledgerFilters, setLedgerFilters] = useState({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '' });
+  const [showLedgerFilters, setShowLedgerFilters] = useState(false);
+  const [ledgerSearchTerm, setLedgerSearchTerm] = useState('');
+  const [reportSubTab, setReportSubTab] = useState('summary');
+  const [reportSearchTerm, setReportSearchTerm] = useState('');
+  const [reportPage, setReportPage] = useState(1);
+  const [reportItemsPerPage, setReportItemsPerPage] = useState(25);
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+  const [selectedExpenseForApproval, setSelectedExpenseForApproval] = useState<Expense | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState<'approved' | 'rejected'>('approved');
+  const [approvalReason, setApprovalReason] = useState('');
+  const [isExpFilterExpanded, setIsExpFilterExpanded] = useState(false);
+  const [isAllocFilterExpanded, setIsAllocFilterExpanded] = useState(false);
+  const [isSoeFilterExpanded, setIsSoeFilterExpanded] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  const menuItems = useMemo<({ name: string; icon: React.ReactNode; children?: { name: string; icon: React.ReactNode }[] })[]>(() => {
+    const adminItems = [
+      { name: 'Dashboard', icon: <Home className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Notifications', icon: <Bell className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Financial Years', icon: <Calendar className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Ranges', icon: <Map className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Manage Scheme', 
+        icon: <Landmark className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Schemes', icon: <TreePine className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Sectors', icon: <Shield className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Activities', icon: <Activity className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Sub-Activities', icon: <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'SOE Heads', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Manage Budget', 
+        icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Approved Budget', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Distributed Budget', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Allocations', icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Expenditures', icon: <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Surrender', icon: <CornerUpLeft className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'Reconciliation', icon: <RefreshCcw className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Reports', 
+        icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Ledger', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Reports', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'Audit Log', icon: <History className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Users', icon: <User className="w-3 h-3 sm:w-4 sm:h-4" /> }
+    ];
+
+    const deoItems = [
+      { name: 'Dashboard', icon: <Home className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Notifications', icon: <Bell className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Manage Budget', 
+        icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Approved Budget', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Distributed Budget', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Allocations', icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Expenditures', icon: <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Surrender', icon: <CornerUpLeft className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'Reconciliation', icon: <RefreshCcw className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Reports', 
+        icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Ledger', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Reports', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'Audit Log', icon: <History className="w-3 h-3 sm:w-4 sm:h-4" /> }
+    ];
+
+    const daItems = [
+      { name: 'Dashboard', icon: <Home className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Notifications', icon: <Bell className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Manage Budget', 
+        icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Approved Budget', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Distributed Budget', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Allocations', icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Expenditures', icon: <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'Reconciliation', icon: <RefreshCcw className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Reports', 
+        icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Ledger', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Reports', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { name: 'Audit Log', icon: <History className="w-3 h-3 sm:w-4 sm:h-4" /> }
+    ];
+
+    const otherItems = [
+      { name: 'Dashboard', icon: <Home className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { name: 'Notifications', icon: <Bell className="w-3 h-3 sm:w-4 sm:h-4" /> },
+      { 
+        name: 'Manage Budget', 
+        icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Approved Budget', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Distributed Budget', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Allocations', icon: <Wallet className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Expenditures', icon: <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Surrender', icon: <CornerUpLeft className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      },
+      { 
+        name: 'Reports', 
+        icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" />,
+        children: [
+          { name: 'Ledger', icon: <FileText className="w-3 h-3 sm:w-4 sm:h-4" /> },
+          { name: 'Reports', icon: <FileBarChart className="w-3 h-3 sm:w-4 sm:h-4" /> }
+        ]
+      }
+    ];
+
+    if (userRole === 'admin') return adminItems;
+    if (userRole === 'deo') return deoItems;
+    if (userRole === 'DA' || userRole === 'approver') return daItems;
+    return otherItems;
+  }, [userRole]);
+
+    // Auto-collapse filters and reset all filters on tab change
+    useEffect(() => {
+      setIsExpFilterExpanded(false);
+      setIsAllocFilterExpanded(false);
+      setIsSoeFilterExpanded(false);
+      setShowReportFilters(false);
+      
+      // Reset all filters when switching main tabs
+      setReportFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
+      setLedgerFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '' });
+      setReportSearchTerm('');
+      setLedgerSearchTerm('');
+      setReportPage(1);
+      setExpFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '' });
+      setAllocFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+      setSoeFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeName: '' });
+      setExpDateRange({ start: '', end: '' });
+      setSearchTerm('');
+      setBillSearchTerm('');
+      setPayeeSearchTerm('');
+      setSelectedExpensesForBill([]);
+      setBillExpFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+      setDashboardSearch('');
+      setRangeSearch('');
+      setSoeSearchTerm('');
+      setSoeAbstractSearch('');
+      setTrackerSearch('');
+      setDeductionType('None');
+      setReconSearchTerm('');
+      setReconSchemeId('');
+      setBudgetFileSelection({ schemeId: '', sectorId: '', rangeId: '' });
+      setShowLedgerFilters(false);
+    }, [activeTab]);
+
+    // Reset report filters on sub-tab change
+    useEffect(() => {
+      setReportFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
+      setReportSearchTerm('');
+      setSoeAbstractSearch('');
+      setLedgerSearchTerm('');
+      setReportPage(1);
+      setShowReportFilters(false);
+    }, [reportSubTab]);
+  const [showReportFilters, setShowReportFilters] = useState(false);
+  const [surrenderFormSelection, setSurrenderFormSelection] = useState<any>({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', soeId: '', rangeId: '' });
+  const [approvedBudgetFiles, setApprovedBudgetFiles] = useState<BudgetFile[]>([]);
+  const [distributedBudgetFiles, setDistributedBudgetFiles] = useState<BudgetFile[]>([]);
+  
+  // Per-type upload status
+  const [uploadStatus, setUploadStatus] = useState<{
+    [key: string]: {
+      isUploading: boolean;
+      progress: number;
+      fileName: string;
+      transferred: number;
+      total: number;
+      error: string | null;
+    }
+  }>({
+    approved: { isUploading: false, progress: 0, fileName: '', transferred: 0, total: 0, error: null },
+    distributed: { isUploading: false, progress: 0, fileName: '', transferred: 0, total: 0, error: null }
+  });
+
+  const [budgetFileSelection, setBudgetFileSelection] = useState({ schemeId: '', sectorId: '', rangeId: '' });
+  const [expenseFormSelection, setExpenseFormSelection] = useState<any>({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', soeId: '', rangeId: '' });
+  const [showSoeAbstract, setShowSoeAbstract] = useState(true);
+  const [showDetailedReport, setShowDetailedReport] = useState(true);
+  const [allocationFormFilters, setAllocationFormFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', soeId: '', fundingSoeName: '', rangeId: '' });
+  const [reconSchemeId, setReconSchemeId] = useState('');
+  const [reconSearchTerm, setReconSearchTerm] = useState('');
+  const [reconData, setReconData] = useState<any>({});
+  const [selectedPayeesForExpense, setSelectedPayeesForExpense] = useState<{ payeeId: string; amount: string }[]>([]);
+  const [currentSoeBalance, setCurrentSoeBalance] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (activeTab !== 'Expenditures') {
+      setCurrentSoeBalance(undefined);
+      setSelectedPayeesForExpense([]);
+    }
+  }, [activeTab]);
+
+  // --- Editing State ---
+  const [editingItem, setEditingItem] = useState<{ type: string; item: any } | null>(null);
+
+  useEffect(() => {
+    if (!editingItem) {
+      setExpenseAmount('');
+      setSelectedPayeesForExpense([]);
+      // Removed setCurrentSoeBalance(undefined) to prevent race conditions with CascadingDropdowns
+    }
+  }, [editingItem, expenseFormSelection.schemeId, expenseFormSelection.sectorId, expenseFormSelection.activityId, expenseFormSelection.subActivityId]);
+  const [viewingSoeExp, setViewingSoeExp] = useState<{ soeId: string; soeName: string; hierarchy: string } | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 300);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // --- Auth & Role Check ---
+  useEffect(() => {
+    // Set persistence to local - will keep user logged in even if tab is closed
+    // But we will manually check for the 10-minute grace period
+    const initAuth = async () => {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (err) {
+        console.error("Persistence error:", err);
+      }
+    };
+    initAuth();
+
+    // --- Grace Period Check ---
+    const lastClosedTime = localStorage.getItem('lastClosedTime');
+    if (lastClosedTime) {
+      const timeDiff = Date.now() - parseInt(lastClosedTime);
+      if (timeDiff > 10 * 60 * 1000) { // 10 minutes
+        signOut(auth).catch(err => console.error("Sign out error:", err));
+        localStorage.removeItem('lastClosedTime');
+      }
+    }
+
+    const handleUnload = () => {
+      localStorage.setItem('lastClosedTime', Date.now().toString());
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
+      }
+    }
+    testConnection();
+
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setLoading(true);
+        const email = currentUser.email?.toLowerCase();
+        
+        try {
+          // Parallelize initial data fetching for faster load
+          const [userDoc, locksSnap, rangesSnap] = await Promise.all([
+            getDoc(doc(db, 'users', currentUser.uid)),
+            getDocs(query(
+              collection(db, 'featureLocks'),
+              where('feature', '==', 'Access'),
+              where('isLocked', '==', true)
+            )),
+            getDocs(collection(db, 'ranges'))
+          ]);
+
+          let userData = userDoc.exists() ? userDoc.data() as AppUser : null;
+
+          // Hardcode roles for specific emails
+          if (!userData) {
+            if (email === 'admin@rajgarhforest.app' || email === 'sharmaanuj860@gmail.com') {
+              userData = { id: currentUser.uid, email: currentUser.email!, role: 'admin', maxSessions: 999999, activeSessions: [] };
+              await setDoc(doc(db, 'users', currentUser.uid), userData, { merge: true });
+            } else if (email === 'da123@rajgarhforest.app') {
+              userData = { id: currentUser.uid, email: currentUser.email!, role: 'deo', maxSessions: 999999, activeSessions: [] };
+              await setDoc(doc(db, 'users', currentUser.uid), userData, { merge: true });
+            } else if (email === 'da789@rajgarhforest.app') {
+              userData = { id: currentUser.uid, email: currentUser.email!, role: 'approver', maxSessions: 999999, activeSessions: [] };
+              await setDoc(doc(db, 'users', currentUser.uid), userData, { merge: true });
+            }
+          }
+
+          if (userData) {
+            // Check if user is disabled individually
+            if (userData.isDisabled) {
+              showAlert("Your account has been disabled by the administrator. Please contact support.");
+              await signOut(auth);
+              setLoading(false);
+              return;
+            }
+
+            // Check if user's role or range is disabled via featureLocks
+            if (userData.role !== 'admin') {
+              const activeAccessLocks = locksSnap.docs.map(d => d.data() as FeatureLock);
+              
+              // Check individual user lock via featureLocks (legacy or fallback)
+              if (activeAccessLocks.some(l => l.target === userData!.id)) {
+                showAlert(`Access for your account has been disabled by the administrator.`);
+                await signOut(auth);
+                setLoading(false);
+                return;
+              }
+              
+              // Check role lock
+              if (activeAccessLocks.some(l => l.target === userData!.role)) {
+                showAlert(`Access for the ${userData.role.toUpperCase()} role has been disabled by the administrator.`);
+                await signOut(auth);
+                setLoading(false);
+                return;
+              }
+
+              // Check range lock (if role is a range name)
+              if (['Sarahan', 'Narag', 'Habban', 'Division', 'Rajgarh'].includes(userData.role)) {
+                const userRange = rangesSnap.docs.find(d => d.data().name === userData!.role);
+                if (userRange && activeAccessLocks.some(l => l.target === userRange.id)) {
+                  showAlert(`Access for the ${userData.role} range has been disabled by the administrator.`);
+                  await signOut(auth);
+                  setLoading(false);
+                  return;
+                }
+              }
+            }
+
+            // Session Validation
+            const activeSessions = userData.activeSessions || [];
+            if (!activeSessions.includes(sessionId)) {
+              // Default to 999999 (unlimited) if not specified, but admins are always unlimited
+              const maxSessions = userData.role === 'admin' ? 999999 : (userData.maxSessions || 999999);
+              if (activeSessions.length >= maxSessions) {
+                showAlert(`Maximum concurrent sessions (${maxSessions}) reached for this account. Please logout from other devices.`);
+                await signOut(auth);
+                setLoading(false);
+                return;
+              }
+              // Add current session
+              const updatedSessions = [...activeSessions, sessionId];
+              try {
+                await updateDoc(doc(db, 'users', currentUser.uid), { activeSessions: updatedSessions });
+              } catch (err) {
+                handleFirestoreError(err, OperationType.UPDATE, `users/${currentUser.uid}`);
+              }
+            }
+
+            setUser(currentUser);
+            setUserRole(userData.role);
+            setActiveTab('Dashboard');
+            // Clear last closed time as user is now active
+            localStorage.removeItem('lastClosedTime');
+          } else {
+            // If first user ever, make admin
+            try {
+              const usersSnap = await getDocs(collection(db, 'users'));
+              if (usersSnap.empty) {
+                const newRole = 'admin';
+                const newUserData = { email: currentUser.email, role: newRole, maxSessions: 999999, activeSessions: [sessionId] };
+                await setDoc(doc(db, 'users', currentUser.uid), newUserData);
+                setUser(currentUser);
+                setUserRole(newRole);
+              } else {
+                setUserRole(null);
+              }
+            } catch (e) {
+              console.warn("Could not check for first user (likely permission denied), assuming not first user.");
+              setUserRole(null);
+            }
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
+        }
+      } else {
+        setUser(null);
+        setUserRole(null);
+      }
+      setLoading(false);
+    });
+    return () => {
+      unsubscribe();
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, []);
+
+  // --- Session Expiry Logic (Activity Timer) ---
+  useEffect(() => {
+    if (!user || !userRole) return;
+
+    let timeoutId: any;
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      // Admin: 20 mins, Others: 15 mins
+      const timeoutMinutes = userRole === 'admin' ? 20 : 15;
+      timeoutId = setTimeout(() => {
+        showAlert(`Session expired due to inactivity (${timeoutMinutes} mins). Please login again.`);
+        handleLogout();
+      }, timeoutMinutes * 60 * 1000);
+    };
+
+    // Initial start
+    resetTimer();
+
+    // Listen for activity
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    activityEvents.forEach(event => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [user, userRole]);
+
+  // --- Real-time Data Sync (Master Data) ---
+  useEffect(() => {
+    if (!user || !userRole) return;
+
+    const unsubFys = onSnapshot(collection(db, 'financialYears'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as FinancialYear));
+      setFys(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'financialYears'));
+
+    const unsubRanges = onSnapshot(collection(db, 'ranges'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Range));
+      setRanges(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'ranges'));
+
+    const unsubSchemes = onSnapshot(collection(db, 'schemes'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Scheme));
+      setSchemes(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'schemes'));
+
+    const unsubSectors = onSnapshot(collection(db, 'sectors'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Sector));
+      setSectors(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'sectors'));
+
+    const unsubActivities = onSnapshot(collection(db, 'activities'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as ActivityItem));
+      setActivities(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'activities'));
+
+    const unsubSubActivities = onSnapshot(collection(db, 'subActivities'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as SubActivity));
+      setSubActivities(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'subActivities'));
+
+    const unsubUsers = userRole === 'admin' ? onSnapshot(collection(db, 'users'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as AppUser));
+      setUsers(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'users')) : () => {};
+
+    // Listen to current user's document for real-time disablement (for non-admins)
+    const unsubCurrentUser = user && userRole !== 'admin' ? onSnapshot(doc(db, 'users', user.uid), (snap) => {
+      const userData = snap.data() as AppUser;
+      if (userData?.isDisabled) {
+        showAlert("Your account has been disabled by the administrator. Please contact support.");
+        handleLogout();
+      }
+    }, (error) => {
+      // Ignore permission errors if user is already disabled and doc becomes unreadable
+      if (!error.message.includes('insufficient permissions')) {
+        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+      }
+    }) : () => {};
+
+    const unsubLocks = onSnapshot(collection(db, 'featureLocks'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as FeatureLock));
+      setFeatureLocks(data);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'featureLocks'));
+
+    const unsubPayees = onSnapshot(collection(db, 'payees'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Payee));
+      setPayees(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'payees'));
+
+    const unsubNotifications = onSnapshot(collection(db, 'notifications'), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Notification));
+      setNotifications(data.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'notifications'));
+
+    return () => {
+      unsubFys(); unsubRanges(); unsubSchemes(); unsubSectors(); unsubActivities();
+      unsubSubActivities(); unsubUsers(); unsubCurrentUser(); unsubPayees(); unsubLocks();
+      unsubNotifications();
+    };
+  }, [user, userRole]);
+
+  // --- Real-time Data Sync (Transactional Data filtered by FY) ---
+  useEffect(() => {
+    if (!user || !userRole || !selectedFY) return;
+
+    setIsSoesLoaded(false);
+
+    const activeFy = fys.find(f => f.name === selectedFY || f.id === selectedFY);
+    const fyQueryValues = activeFy ? Array.from(new Set([activeFy.id, activeFy.name])) : [selectedFY];
+    if (fyQueryValues.length === 0 || (fyQueryValues.length === 1 && !fyQueryValues[0])) return;
+
+    const soesQuery = query(
+      collection(db, 'soeHeads'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubSoes = onSnapshot(soesQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as SOE));
+      setSoes(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+      setIsSoesLoaded(true);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'soeHeads'));
+
+    const allocsQuery = query(
+      collection(db, 'allocations'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubAllocations = onSnapshot(allocsQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Allocation));
+      console.log('Fetched allocations for FY:', fyQueryValues, 'Count:', data.length);
+      setAllocations(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'allocations'));
+
+    const expensesQuery = query(
+      collection(db, 'expenditures'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubExpenses = onSnapshot(expensesQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Expense));
+      setExpenses(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'expenditures'));
+
+    const billsQuery = query(
+      collection(db, 'bills'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubBills = onSnapshot(billsQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Bill));
+      setBills(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'bills'));
+
+    const surrendersQuery = query(
+      collection(db, 'surrenders'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubSurrenders = onSnapshot(surrendersQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as Surrender));
+      setSurrenders(data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'surrenders'));
+
+    const approvedFilesQuery = query(
+      collection(db, 'approvedBudgetFiles'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubApprovedFiles = onSnapshot(approvedFilesQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as BudgetFile));
+      setApprovedBudgetFiles(data.sort((a, b) => b.uploadedAt - a.uploadedAt));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'approvedBudgetFiles'));
+
+    const distributedFilesQuery = query(
+      collection(db, 'distributedBudgetFiles'), 
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubDistributedFiles = onSnapshot(distributedFilesQuery, (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as BudgetFile));
+      setDistributedBudgetFiles(data.sort((a, b) => b.uploadedAt - a.uploadedAt));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'distributedBudgetFiles'));
+
+    const memosQuery = query(
+      collection(db, 'memos'),
+      or(where('financialYear', 'in', fyQueryValues), where('fyId', 'in', fyQueryValues))
+    );
+    const unsubMemos = onSnapshot(memosQuery, (snap) => {
+      const data = snap.docs.map(d => {
+        const raw = { ...d.data(), id: d.id } as MemoForFund;
+        const roundedPayeeEntries = (raw.payeeEntries || []).map(entry => {
+          const tot = Math.round(Number(entry.totalAmount) || 0);
+          const itax = Math.round(Number(entry.iTaxAmount) || 0);
+          const gst = Math.round(Number(entry.gstAmount) || 0);
+          const net = Math.round(Number(entry.netRtgsAmount) || (tot - itax - gst));
+          return {
+            ...entry,
+            totalAmount: tot,
+            iTaxAmount: itax,
+            gstAmount: gst,
+            netRtgsAmount: net,
+          };
+        });
+
+        const totalGross = roundedPayeeEntries.length > 0
+          ? roundedPayeeEntries.reduce((sum, e) => sum + e.totalAmount, 0)
+          : Math.round(Number(raw.totalAmount) || 0);
+        const totalITax = roundedPayeeEntries.length > 0
+          ? roundedPayeeEntries.reduce((sum, e) => sum + e.iTaxAmount, 0)
+          : Math.round(Number(raw.totalITax) || 0);
+        const totalGst = roundedPayeeEntries.length > 0
+          ? roundedPayeeEntries.reduce((sum, e) => sum + (e.gstAmount || 0), 0)
+          : Math.round(Number(raw.totalGst) || 0);
+        const totalNetRtgs = roundedPayeeEntries.length > 0
+          ? roundedPayeeEntries.reduce((sum, e) => sum + e.netRtgsAmount, 0)
+          : Math.round(Number(raw.totalNetRtgs) || (totalGross - totalITax - totalGst));
+
+        return {
+          ...raw,
+          totalAmount: totalGross,
+          totalITax: totalITax,
+          totalGst: totalGst,
+          totalNetRtgs: totalNetRtgs,
+          payeeEntries: roundedPayeeEntries,
+        };
+      });
+      setMemos(data.sort((a: any, b: any) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'memos'));
+
+    return () => {
+      unsubSoes(); unsubAllocations(); unsubExpenses(); unsubBills(); unsubSurrenders(); unsubApprovedFiles(); unsubDistributedFiles(); unsubMemos();
+    };
+  }, [user, userRole, selectedFY, fys]);
+
+  // --- Silent Auto-Seeding for 2025-26 ---
+  useEffect(() => {
+    if (!user || !userRole || selectedFY !== '2025-26' || !isSoesLoaded) return;
+
+    if (soes.length === 0 && !hasSeeded.current) {
+      hasSeeded.current = true;
+      const seedData = async () => {
+        try {
+          console.log("Silently seeding emergency restore data for FY 2025-26...");
+          
+          const fy = fys.find(f => f.name === '2025-26');
+          const fyId = fy ? fy.id : '2025-26';
+
+          let localSchemes = [...schemes];
+          let localSectors = [...sectors];
+          let localActivities = [...activities];
+          let localSubActivities = [...subActivities];
+
+          for (const item of emergencyRestoreData) {
+            // Determine IDs based on hierarchy string
+            let schemeId = null;
+            let sectorId = null;
+            let activityId = null;
+            let subActivityId = null;
+
+            const parts = item.hierarchy.split(' -> ');
+            
+            if (parts.length > 0) {
+              let sch = localSchemes.find(s => s.name === parts[0]);
+              if (!sch) {
+                const docRef = await addDoc(collection(db, 'schemes'), { name: parts[0], createdAt: Date.now(), updatedAt: Date.now() });
+                sch = { id: docRef.id, name: parts[0] };
+                localSchemes.push(sch);
+              }
+              schemeId = sch.id;
+            }
+            if (parts.length > 1) {
+              let sec = localSectors.find(s => s.name === parts[1] && s.schemeId === schemeId);
+              if (!sec) {
+                const docRef = await addDoc(collection(db, 'sectors'), { name: parts[1], schemeId, createdAt: Date.now(), updatedAt: Date.now() });
+                sec = { id: docRef.id, name: parts[1], schemeId };
+                localSectors.push(sec);
+              }
+              sectorId = sec.id;
+            }
+            if (parts.length > 2) {
+              let act = localActivities.find(a => a.name === parts[2] && a.sectorId === sectorId);
+              if (!act) {
+                const docRef = await addDoc(collection(db, 'activities'), { name: parts[2], sectorId, createdAt: Date.now(), updatedAt: Date.now() });
+                act = { id: docRef.id, name: parts[2], sectorId };
+                localActivities.push(act);
+              }
+              activityId = act.id;
+            }
+            if (parts.length > 3) {
+              let sa = localSubActivities.find(s => s.name === parts[3] && s.activityId === activityId);
+              if (!sa) {
+                const docRef = await addDoc(collection(db, 'subActivities'), { name: parts[3], activityId, createdAt: Date.now(), updatedAt: Date.now() });
+                sa = { id: docRef.id, name: parts[3], activityId };
+                localSubActivities.push(sa);
+              }
+              subActivityId = sa.id;
+            }
+
+            await addDoc(collection(db, 'soeHeads'), {
+              name: item.soeName,
+              schemeId,
+              sectorId,
+              activityId,
+              subActivityId,
+              approvedBudget: item.approvedBudget,
+              approvedBudgetAmount: item.approvedBudget,
+              receivedInTry: item.receivedInTry,
+              receivedInTryAmount: item.receivedInTry,
+              tryAmount: item.receivedInTry,
+              financialYear: fyId,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            });
+          }
+          console.log("Silent seeding completed successfully.");
+        } catch (error) {
+          console.error("Failed to silently seed data:", error);
+          handleFirestoreError(error, OperationType.CREATE, 'soeHeads');
+        }
+      };
+
+      seedData();
+    }
+  }, [user, userRole, selectedFY, isSoesLoaded, soes.length, schemes, sectors, activities, subActivities, fys]);
+
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isRefreshingApp, setIsRefreshingApp] = useState(false);
+
+  const handleForceAppRefresh = async () => {
+    setIsRefreshingApp(true);
+    try {
+      // 1. Clear all browser and service worker caches
+      if ('caches' in window) {
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map(key => caches.delete(key)));
+      }
+
+      // 2. Unregister or update all active Service Workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          await reg.update();
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to clear cache during refresh:', err);
+    } finally {
+      // 3. Force hard reload bypassing cache with a timestamp query param
+      const url = new URL(window.location.href);
+      url.searchParams.set('_t', Date.now().toString());
+      window.location.replace(url.toString());
+    }
+  };
+
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+    if (loginFY) {
+      setSelectedFY(loginFY);
+    }
+    if (!navigator.onLine) {
+      setLoginError('No internet connection. Please check your network.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const emailToUseTrimmed = loginEmail.trim();
+
+      if (!emailToUseTrimmed) {
+        setLoginError('Please enter your User ID or Email.');
+        setLoading(false);
+        return;
+      }
+      if (!loginPassword) {
+        setLoginError('Please enter your password.');
+        setLoading(false);
+        return;
+      }
+
+      let emailToUse = emailToUseTrimmed;
+      if (!emailToUse.includes('@')) {
+        emailToUse = `${emailToUse}@rajgarhforest.app`;
+      }
+      // Ensure persistence is set before login
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithEmailAndPassword(auth, emailToUse, loginPassword);
+    } catch (error: any) {
+      console.error('Auth error:', error);
+      if (error.code === 'auth/network-request-failed') {
+        setLoginError('Network request failed. This may be due to a poor connection or browser restrictions. Please refresh and try again.');
+      } else if (error.code === 'auth/too-many-requests') {
+        setLoginError('Too many failed login attempts. Please try again later or reset your password.');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        setLoginError('Email/Password authentication is not enabled in your Firebase project. Please go to the Firebase Console -> Authentication -> Sign-in method, and enable "Email/Password".');
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+        setLoginError('Invalid User ID or Password. Please try again.');
+      } else if (error.code === 'auth/invalid-email') {
+        setLoginError('The User ID or Email format is invalid.');
+      } else {
+        setLoginError(error.message || 'Authentication failed. Please check your credentials.');
+      }
+      setLoading(false);
+    }
+  };
+
+
+  // --- Derived Data / Helpers ---
+  const currentSchemes = schemes;
+  const currentSectors = sectors;
+  const currentActivities = activities;
+  const currentSubActivities = subActivities;
+  const userRangeId = useMemo(() => {
+    console.log('Calculating userRangeId. userRole:', userRole);
+    if (userRole && ['Sarahan', 'Narag', 'Habban', 'Division', 'Rajgarh'].includes(userRole)) {
+      const r = ranges.find(r => r.name === userRole);
+      console.log('Found range for role:', r);
+      return r?.id;
+    }
+    return null;
+  }, [userRole, ranges]);
+
+  const filteredPayeesList = useMemo(() => {
+    const seen: Record<string, boolean> = {};
+    const uniquePayees: Payee[] = [];
+    payees.forEach(p => {
+      if (p.id && !seen[p.id]) {
+        seen[p.id] = true;
+        uniquePayees.push(p);
+      }
+    });
+    if (!userRole) return uniquePayees;
+    const roleLower = userRole.toLowerCase();
+    if (roleLower === 'admin' || roleLower === 'deo' || roleLower === 'da' || roleLower === 'approver') {
+      return uniquePayees;
+    }
+    if (userRangeId) {
+      return uniquePayees.filter(p => !p.rangeId || p.rangeId === userRangeId || p.createdBy === user?.uid);
+    }
+    return uniquePayees;
+  }, [payees, userRole, userRangeId, user?.uid]);
+
+  const isAdmin = () => userRole === 'admin';
+  const isDEO = () => userRole === 'deo';
+
+  // --- Real-time Access Control Enforcement ---
+  useEffect(() => {
+    if (!user || userRole === 'admin' || featureLocks.length === 0) return;
+
+    const accessLock = featureLocks.find(l => 
+      l.feature === 'Access' && 
+      l.isLocked && 
+      (l.target === userRole || (userRangeId && l.target === userRangeId) || l.target === user.uid)
+    );
+
+    if (accessLock) {
+      showAlert(`Access for your ${accessLock.target === userRole ? 'role' : (accessLock.target === user.uid ? 'account' : 'range')} has been disabled by the administrator.`);
+      handleLogout();
+    }
+  }, [user, userRole, userRangeId, featureLocks]);
+
+  const currentSoes = useMemo(() => {
+    let filtered = soes.filter(s => ALLOWED_SOES.includes(s.name || 'Provisional'));
+    
+    // SOE Heads don't have rangeId directly, so we don't filter by userRangeId or soeFilters.rangeId
+    
+    if (soeFilters.schemeId) {
+      filtered = filtered.filter(s => s.schemeId === soeFilters.schemeId);
+    }
+    if (soeFilters.sectorId) {
+      filtered = filtered.filter(s => s.sectorId === soeFilters.sectorId);
+    }
+    if (soeFilters.activityId) {
+      filtered = filtered.filter(s => s.activityId === soeFilters.activityId);
+    }
+    if (soeFilters.subActivityId) {
+      filtered = filtered.filter(s => s.subActivityId === soeFilters.subActivityId);
+    }
+    if (soeFilters.soeName) {
+      filtered = filtered.filter(s => s.name === soeFilters.soeName);
+    }
+    
+    return filtered;
+  }, [soes, soeFilters]);
+
+  const baseAllocations = useMemo(() => {
+    let filtered = allocations;
+    if (userRangeId) {
+      filtered = filtered.filter(a => a.rangeId === userRangeId);
+    }
+    return filtered;
+  }, [allocations, userRangeId]);
+
+  const baseExpenses = useMemo(() => {
+    let filtered = expenses;
+    if (userRangeId) {
+      const userAllocIds = baseAllocations.map(a => a.id);
+      filtered = filtered.filter(e => userAllocIds.includes(e.allocationId));
+    }
+    return filtered;
+  }, [expenses, baseAllocations, userRangeId]);
+
+  const currentAllocations = useMemo(() => {
+    let filtered = baseAllocations;
+    
+    if (userRangeId) {
+      filtered = filtered.filter(a => a.rangeId === userRangeId);
+    }
+
+    if (allocFilters.schemeId) {
+      filtered = filtered.filter(a => a.schemeId === allocFilters.schemeId);
+    }
+    if (allocFilters.sectorId) {
+      filtered = filtered.filter(a => a.sectorId === allocFilters.sectorId);
+    }
+    if (allocFilters.activityId) {
+      filtered = filtered.filter(a => a.activityId === allocFilters.activityId);
+    }
+    if (allocFilters.subActivityId) {
+      filtered = filtered.filter(a => a.subActivityId === allocFilters.subActivityId);
+    }
+    if (allocFilters.rangeId) {
+      filtered = filtered.filter(a => a.rangeId === allocFilters.rangeId);
+    }
+    if (allocFilters.soeId) {
+      filtered = filtered.filter(a => a.fundedSOEs && a.fundedSOEs.some(f => f.soeId === allocFilters.soeId));
+    }
+
+    // Filter out "Division" allocations with 0 amount to avoid cluttering as requested
+    filtered = filtered.filter(a => {
+      const r = ranges.find(range => range.id === a.rangeId);
+      const isDivision = r?.name === 'Division' || r?.name === 'Rajgarh Forest Division';
+      if (isDivision && a.amount === 0) return false;
+      return true;
+    });
+
+    console.log('currentAllocations count:', filtered.length);
+    return filtered;
+  }, [baseAllocations, allocFilters, userRangeId, ranges]);
+
+  const currentExpenses = useMemo(() => {
+    let filtered = expenses;
+    
+    if (userRangeId) {
+      const userAllocIds = currentAllocations.map(a => a.id);
+      filtered = filtered.filter(e => userAllocIds.includes(e.allocationId));
+    }
+
+    if (expDateRange.start) filtered = filtered.filter(e => e.date >= expDateRange.start);
+    if (expDateRange.end) filtered = filtered.filter(e => e.date <= expDateRange.end);
+    
+    if (expFilters.schemeId) {
+      filtered = filtered.filter(e => {
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        return alloc?.schemeId === expFilters.schemeId;
+      });
+    }
+    
+    if (expFilters.sectorId) {
+      filtered = filtered.filter(e => {
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        return alloc?.sectorId === expFilters.sectorId;
+      });
+    }
+    
+    if (expFilters.activityId) {
+      filtered = filtered.filter(e => {
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        return alloc?.activityId === expFilters.activityId;
+      });
+    }
+
+    if (expFilters.subActivityId) {
+      filtered = filtered.filter(e => {
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        return alloc?.subActivityId === expFilters.subActivityId;
+      });
+    }
+
+    if (expFilters.rangeId) {
+      filtered = filtered.filter(e => {
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        return alloc?.rangeId === expFilters.rangeId;
+      });
+    }
+
+    return filtered;
+  }, [expenses, currentAllocations, expDateRange, expFilters, allocations, userRangeId]);
+
+  // Memo for Fund Computed Values
+  const selectedPayeeObj = useMemo(() => {
+    return payees.find(p => p.id === selectedMemoPayeeId);
+  }, [payees, selectedMemoPayeeId]);
+
+  const selectedSchemeObj = useMemo(() => {
+    return currentSchemes.find(s => s.id === selectedMemoSchemeId);
+  }, [currentSchemes, selectedMemoSchemeId]);
+
+  const selectedSectorObj = useMemo(() => {
+    return currentSectors.find(s => s.id === selectedMemoSectorId);
+  }, [currentSectors, selectedMemoSectorId]);
+
+  const isRangeRole = Boolean(userRole && ['Sarahan', 'Narag', 'Habban', 'Rajgarh', 'Division'].some(r => r.toLowerCase() === userRole.toLowerCase()));
+
+  const userRangeName = useMemo(() => {
+    const r = ranges.find(r => r.id === userRangeId);
+    if (r) return r.name;
+    if (userRole === 'Sarahan') return 'Sarahan Range';
+    if (userRole === 'Narag') return 'Narag Range';
+    if (userRole === 'Habban') return 'Habban Range';
+    if (userRole === 'Rajgarh') return 'Rajgarh Range';
+    if (userRole === 'Division') return 'Division Office';
+    return 'Rajgarh Forest Division';
+  }, [ranges, userRangeId, userRole]);
+
+  const filteredMemos = useMemo(() => {
+    return memos.filter(m => {
+      if (isRangeRole) {
+        const userRoleLower = userRole!.toLowerCase();
+        const codeMap: Record<string, string> = {
+          sarahan: 'SRH',
+          narag: 'NRG',
+          habban: 'HBN',
+          rajgarh: 'RJG',
+          division: 'DIV',
+        };
+        const code = codeMap[userRoleLower];
+
+        const matchRangeId = userRangeId && m.rangeId === userRangeId;
+        const matchRangeName = m.rangeName && (
+          m.rangeName.toLowerCase().includes(userRoleLower) ||
+          (userRangeName && m.rangeName.toLowerCase().includes(userRangeName.toLowerCase()))
+        );
+        const matchCreatedByRole = m.createdByRole && m.createdByRole.toLowerCase() === userRoleLower;
+        const matchCreatedBy = m.createdBy && user?.uid && m.createdBy === user.uid;
+        const matchMemoCode = code && m.memoNo && m.memoNo.toUpperCase().includes(`/${code}/`);
+
+        if (!matchRangeId && !matchRangeName && !matchCreatedByRole && !matchCreatedBy && !matchMemoCode) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [memos, isRangeRole, userRole, userRangeId, userRangeName, user?.uid]);
+
+  const filteredMemosForSync = useMemo(() => {
+    return filteredMemos.filter(m => {
+      if (selectedFY && m.financialYear && m.financialYear !== selectedFY && m.fyId !== selectedFY) {
+        return false;
+      }
+      if (memoSearchTerm.trim()) {
+        const q = memoSearchTerm.toLowerCase();
+        const matchNo = m.memoNo?.toLowerCase().includes(q);
+        const matchMonth = m.monthYear?.toLowerCase().includes(q);
+        const matchScheme = m.schemeName?.toLowerCase().includes(q);
+        const matchPayee = m.payeeEntries?.some(p => p.name?.toLowerCase().includes(q) || p.accountNumber?.includes(q));
+        return matchNo || matchMonth || matchScheme || matchPayee;
+      }
+      return true;
+    });
+  }, [filteredMemos, selectedFY, memoSearchTerm]);
+
+  const memoFilteredExpenses = useMemo(() => {
+    if (!selectedMemoPayeeId) return [];
+    return currentExpenses.filter(e => {
+      const alloc = allocations.find(a => a.id === e.allocationId);
+      const eSchemeId = e.schemeId || alloc?.schemeId;
+      const eSectorId = e.sectorId || alloc?.sectorId;
+      const payeeMatch = e.payeeId === selectedMemoPayeeId || (selectedPayeeObj && e.payeeName === selectedPayeeObj.name);
+      const schemeMatch = !selectedMemoSchemeId || eSchemeId === selectedMemoSchemeId;
+      const sectorMatch = !selectedMemoSectorId || eSectorId === selectedMemoSectorId;
+      return payeeMatch && schemeMatch && sectorMatch;
+    });
+  }, [currentExpenses, selectedMemoPayeeId, selectedMemoSchemeId, selectedMemoSectorId, selectedPayeeObj, allocations]);
+
+  const memoTotalAmount = useMemo(() => {
+    if (manualMemoAmount !== '' && !isNaN(Number(manualMemoAmount))) {
+      return Number(manualMemoAmount);
+    }
+    return memoFilteredExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [memoFilteredExpenses, manualMemoAmount]);
+
+  const comprehensiveReportData = useMemo(() => {
+    return baseAllocations.map(a => {
+      const allocExpenses = baseExpenses.filter(e => e.allocationId === a.id && e.status !== 'rejected');
+      const totalExp = allocExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const range = ranges.find(r => r.id === a.rangeId);
+      const scheme = schemes.find(s => s.id === a.schemeId);
+      const sector = sectors.find(s => s.id === a.sectorId);
+      const activity = activities.find(act => act.id === a.activityId);
+      const subActivity = subActivities.find(sa => sa.id === a.subActivityId);
+
+      const soeBreakdown = soes.reduce((acc: any, soe) => {
+        const soeAlloc = a.fundedSOEs?.find(f => f.soeId === soe.id)?.amount || 0;
+        const soeExp = allocExpenses
+          .filter(e => e.soeId === soe.id)
+          .reduce((sum, e) => sum + e.amount, 0);
+        acc[soe.name] = { alloc: soeAlloc, exp: soeExp };
+        return acc;
+      }, {});
+
+      return {
+        id: a.id,
+        range: range?.name === 'Rajgarh Forest Division' ? 'Division' : (range?.name || 'Unknown'),
+        scheme: scheme?.name || 'Unknown',
+        sector: sector?.name || 'Unknown',
+        activity: activity?.name || 'Unknown',
+        subActivity: subActivity?.name || 'Unknown',
+        totalAlloc: a.amount,
+        totalExp,
+        balance: a.amount - totalExp,
+        soeBreakdown
+      };
+    });
+  }, [baseAllocations, baseExpenses, ranges, schemes, sectors, activities, subActivities, soes]);
+
+  const allocationExpenditureData = useMemo(() => {
+    return currentSoes.map(s => {
+      const soeAllocations = baseAllocations.filter(a => 
+        a.fundedSOEs?.some(f => f.soeId === s.id)
+      );
+      const soeExpenses = baseExpenses.filter(e => e.soeId === s.id && e.status !== 'rejected');
+      
+      const totalAllocated = soeAllocations.reduce((sum, a) => {
+        const funded = a.fundedSOEs?.find(f => f.soeId === s.id)?.amount || 0;
+        return sum + funded;
+      }, 0);
+      
+      const totalExp = soeExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const approvedBudget = getApprovedBudget(s);
+
+      return {
+        soeName: s.name,
+        approvedBudget,
+        totalAllocated,
+        totalExp,
+        balance: totalAllocated - totalExp,
+        treasuryBalance: approvedBudget - totalAllocated
+      };
+    });
+  }, [currentSoes, baseAllocations, baseExpenses]);
+
+  const combinedReportData = useMemo(() => {
+    return [...comprehensiveReportData, ...allocationExpenditureData];
+  }, [comprehensiveReportData, allocationExpenditureData]);
+
+  const uniqueSchemes = useMemo(() => 
+    Array.from(new Set(comprehensiveReportData.map((item: any) => item.scheme).filter(Boolean))).sort()
+  , [comprehensiveReportData]);
+
+  const uniqueSectors = useMemo(() => 
+    Array.from(new Set(comprehensiveReportData.map((item: any) => item.sector).filter(Boolean))).sort()
+  , [comprehensiveReportData]);
+
+  const uniqueActivities = useMemo(() => 
+    Array.from(new Set(comprehensiveReportData.map((item: any) => item.activity).filter(Boolean))).sort()
+  , [comprehensiveReportData]);
+
+  const uniqueSubActivities = useMemo(() => 
+    Array.from(new Set(comprehensiveReportData.map((item: any) => item.subActivity).filter(Boolean))).sort()
+  , [comprehensiveReportData]);
+
+  const uniqueRangesList = useMemo(() => 
+    Array.from(new Set(comprehensiveReportData.map((item: any) => item.range).filter(Boolean))).sort()
+  , [comprehensiveReportData]);
+
+  const uniqueSoes = useMemo(() => 
+    Array.from(new Set(soes.map(s => s.name))).sort()
+  , [soes]);
+
+  const filteredLedgerData = useMemo(() => {
+    const filtered = currentAllocations.filter(alloc => {
+      const r = ranges.find(r => r.id === alloc.rangeId);
+      const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+      const act = activities.find(a => a.id === (alloc.subActivityId ? sa?.activityId : alloc.activityId));
+      const sec = sectors.find(sec => sec.id === act?.sectorId);
+      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+      const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean) || [];
+      
+      let hierarchy = '';
+      if (alloc.subActivityId) {
+        hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+      } else if (alloc.activityId) {
+        hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+      }
+
+      const searchLower = ledgerSearchTerm.toLowerCase();
+      const matchesSearch = !ledgerSearchTerm || (
+        hierarchy.toLowerCase().includes(searchLower) ||
+        soeNames.join(' ').toLowerCase().includes(searchLower) ||
+        r?.name.toLowerCase().includes(searchLower) ||
+        alloc.remarks?.toLowerCase().includes(searchLower) ||
+        alloc.id.toLowerCase().includes(searchLower)
+      );
+
+      const matchesFilters = (
+        (!ledgerFilters.scheme || sch?.name === ledgerFilters.scheme) &&
+        (!ledgerFilters.sector || sec?.name === ledgerFilters.sector) &&
+        (!ledgerFilters.activity || act?.name === ledgerFilters.activity) &&
+        (!ledgerFilters.subActivity || sa?.name === ledgerFilters.subActivity) &&
+        (!ledgerFilters.range || r?.name === ledgerFilters.range) &&
+        (!ledgerFilters.soe || soeNames.includes(ledgerFilters.soe))
+      );
+      return matchesSearch && matchesFilters;
+    });
+
+    let totalCredit = 0;
+    let totalDebit = 0;
+
+    filtered.forEach(alloc => {
+      totalCredit += alloc.amount;
+      const allocExpenses = expenses.filter(e => e.allocationId === alloc.id && e.status !== 'rejected');
+      totalDebit += allocExpenses.reduce((sum, e) => sum + e.amount, 0);
+    });
+
+    return {
+      allocations: filtered,
+      totals: {
+        credit: totalCredit,
+        debit: totalDebit,
+        balance: totalCredit - totalDebit
+      }
+    };
+  }, [currentAllocations, ledgerSearchTerm, ledgerFilters, ranges, subActivities, activities, sectors, schemes, soes, expenses]);
+
+    const downloadLedgerPDF = () => {
+      const doc = new jsPDF('landscape');
+      doc.setFontSize(16);
+      doc.text("Passbook Ledger Report", 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Financial Year: ${fys.find(f => f.id === selectedFY)?.name || selectedFY}`, 14, 22);
+      
+      const headers = ["Date", "Range", "Hierarchy & SOE", "Description", "Approval ID", "Credit (Rs.)", "Debit (Rs.)", "Unspent Balance (Rs.)"];
+      const body: any[] = [];
+      
+      filteredLedgerData.allocations.forEach(alloc => {
+        const r = ranges.find(r => r.id === alloc.rangeId);
+        const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(', ') || 'Pending Funds';
+        
+        let hierarchy = '';
+        if (alloc.subActivityId) {
+          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+          const act = activities.find(a => a.id === sa?.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+        } else if (alloc.activityId) {
+          const act = activities.find(a => a.id === alloc.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+        }
+
+        const allocExpenses = expenses.filter(e => e.allocationId === alloc.id && e.status !== 'rejected').sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        let currentBalance = alloc.amount;
+        
+        // Initial Allocation Row
+        body.push([
+          "-",
+          r?.name || 'N/A',
+          `${hierarchy || 'N/A'}\n${soeNames}`,
+          "Initial Allocation",
+          "-",
+          alloc.amount.toLocaleString('en-IN'),
+          "-",
+          currentBalance.toLocaleString('en-IN')
+        ]);
+
+        // Expense Rows
+        allocExpenses.forEach(exp => {
+          currentBalance -= exp.amount;
+          body.push([
+            exp.date ? exp.date.split('-').reverse().join('/') : '',
+            r?.name || 'N/A',
+            `${hierarchy || 'N/A'}\n${soeNames}`,
+            exp.description,
+            exp.approvalId ? `#${exp.approvalId}` : '-',
+            "-",
+            exp.amount.toLocaleString('en-IN'),
+            currentBalance.toLocaleString('en-IN')
+          ]);
+        });
+      });
+
+      autoTable(doc, {
+        head: [headers],
+        body: body,
+        startY: 30,
+        styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+        headStyles: { fillColor: [5, 150, 105] },
+        columnStyles: {
+          0: { cellWidth: 20 },
+          1: { cellWidth: 25 },
+          2: { cellWidth: 80 },
+          3: { cellWidth: 60 },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 25, halign: 'right' },
+          6: { cellWidth: 25, halign: 'right' },
+          7: { cellWidth: 25, halign: 'right' }
+        }
+      });
+
+      doc.save(`ledger_report_${selectedFY}.pdf`);
+    };
+
+    const downloadLedgerExcel = async () => {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Passbook Ledger");
+      
+      const title = `Passbook Ledger Report - FY ${fys.find(f => f.id === selectedFY)?.name || selectedFY}`;
+      const titleRow = sheet.addRow([title]);
+      titleRow.font = { bold: true, size: 14 };
+      sheet.mergeCells(1, 1, 1, 8);
+      titleRow.alignment = { horizontal: 'center' };
+
+      const headers = ["Date", "Range", "Hierarchy & SOE", "Description", "Approval ID", "Credit (Rs.)", "Debit (Rs.)", "Unspent Balance (Rs.)"];
+      const headerRow = sheet.addRow(headers);
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE0E0E0' }
+        };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      });
+
+      filteredLedgerData.allocations.forEach(alloc => {
+        const r = ranges.find(r => r.id === alloc.rangeId);
+        const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(', ') || 'Pending Funds';
+        
+        let hierarchy = '';
+        if (alloc.subActivityId) {
+          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+          const act = activities.find(a => a.id === sa?.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+        } else if (alloc.activityId) {
+          const act = activities.find(a => a.id === alloc.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+        }
+
+        const allocExpenses = expenses.filter(e => e.allocationId === alloc.id && e.status !== 'rejected').sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        let currentBalance = alloc.amount;
+        
+        const row1 = sheet.addRow([
+          "-",
+          r?.name || 'N/A',
+          `${hierarchy || 'N/A'}\n${soeNames}`,
+          "Initial Allocation",
+          "-",
+          alloc.amount,
+          "-",
+          currentBalance
+        ]);
+        row1.eachCell(cell => {
+          cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+          cell.alignment = { wrapText: true, vertical: 'middle' };
+        });
+
+        allocExpenses.forEach(exp => {
+          currentBalance -= exp.amount;
+          const row = sheet.addRow([
+            exp.date ? exp.date.split('-').reverse().join('/') : '',
+            r?.name || 'N/A',
+            `${hierarchy || 'N/A'}\n${soeNames}`,
+            exp.description,
+            exp.approvalId ? `#${exp.approvalId}` : '-',
+            "-",
+            exp.amount,
+            currentBalance
+          ]);
+          row.eachCell(cell => {
+            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+            cell.alignment = { wrapText: true, vertical: 'middle' };
+          });
+        });
+      });
+
+      sheet.columns.forEach((column, i) => {
+        column.width = [12, 15, 45, 40, 15, 15, 15, 15][i];
+        if (i >= 5) {
+          column.alignment = { horizontal: 'right', vertical: 'middle' };
+          column.numFmt = '#,##0.00';
+        }
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `ledger_report_${selectedFY}.xlsx`);
+    };
+
+  const getSoeAllocated = (soeId: string) => {
+    const allocated = baseAllocations.reduce((sum, a) => sum + (a.fundedSOEs?.find(f => f.soeId === soeId)?.amount || 0), 0);
+    const surrendered = surrenders.filter(s => s.soeId === soeId && s.fyId === selectedFY).reduce((sum, s) => sum + s.amount, 0);
+    return allocated - surrendered;
+  };
+  const getAllocSpent = (allocId: string) => currentExpenses.filter(e => e.allocationId === allocId).reduce((sum, e) => sum + e.amount, 0);
+
+  const totalAllocated = baseAllocations.reduce((sum, a) => sum + a.amount, 0);
+  const totalSpent = baseExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalBudget = userRangeId ? totalAllocated : currentSoes.reduce((sum, s) => sum + getApprovedBudget(s), 0);
+  const totalReceivedInTry = userRangeId ? 0 : currentSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0);
+  const remainingBalance = totalAllocated - totalSpent;
+  const totalTryBalance = totalReceivedInTry - totalAllocated;
+
+  const chartData = userRangeId ? [
+    { name: 'Allocated (Unspent)', value: Math.max(0, totalAllocated - totalSpent), color: '#007bff' },
+    { name: 'Spent', value: totalSpent, color: '#dc3545' }
+  ] : [
+    { name: 'Allocated (Unspent)', value: Math.max(0, totalAllocated - totalSpent), color: '#007bff' },
+    { name: 'Spent', value: totalSpent, color: '#dc3545' },
+    { name: 'Unallocated', value: Math.max(0, totalBudget - totalAllocated), color: '#28a745' }
+  ];
+
+  const soeAbstractData = useMemo(() => {
+    return currentSoes.map(soe => {
+      const sch = schemes.find(s => s.id === soe.schemeId);
+      const sec = sectors.find(s => s.id === soe.sectorId);
+      const act = activities.find(a => a.id === soe.activityId);
+      const sa = subActivities.find(s => s.id === soe.subActivityId);
+      const hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+
+      const allocated = baseAllocations.reduce((sum, a) => {
+        const funded = a.fundedSOEs?.find(f => f.soeId === soe.id);
+        return sum + (funded?.amount || 0);
+      }, 0);
+
+      const spent = baseExpenses.filter(e => e.soeId === soe.id).reduce((sum, e) => sum + e.amount, 0);
+      const approvedBudget = getApprovedBudget(soe);
+      const receivedInTry = getReceivedInTry(soe);
+
+      return {
+        id: soe.id,
+        soeId: soe.id,
+        soeName: soe.name,
+        hierarchy,
+        schemeName: sch?.name || '',
+        sectorName: sec?.name || '',
+        activityName: act?.name || '',
+        subActivityName: sa?.name || '',
+        approvedBudget,
+        receivedInTry,
+        allocated,
+        toBeAllocated: receivedInTry - allocated,
+        tryBalance: receivedInTry - allocated,
+        spent,
+        remainingToSpend: allocated - spent,
+        schemeId: soe.schemeId,
+        sectorId: soe.sectorId,
+        activityId: soe.activityId,
+        subActivityId: soe.subActivityId
+      };
+    })
+    .filter(item => !userRangeId || item.allocated > 0)
+    .sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
+  }, [currentSoes, baseAllocations, baseExpenses, schemes, sectors, activities, subActivities, userRangeId]);
+
+  const surrenderBudgetStatus = useMemo(() => {
+    const { rangeId, schemeId, sectorId, activityId, subActivityId, soeId } = surrenderFormSelection;
+    if (!rangeId || !soeId) return null;
+
+    const relevantAllocations = baseAllocations.filter(a => 
+      a.rangeId === rangeId &&
+      a.schemeId === schemeId &&
+      (!sectorId || !a.sectorId || a.sectorId === sectorId) &&
+      (!activityId || !a.activityId || a.activityId === activityId) &&
+      (!subActivityId || !a.subActivityId || a.subActivityId === subActivityId)
+    );
+
+    let totalAllocated = 0;
+    let totalSpent = 0;
+
+    relevantAllocations.forEach(alloc => {
+      const funded = alloc.fundedSOEs?.find(f => f.soeId === soeId);
+      if (funded) {
+        totalAllocated += funded.amount;
+        const spent = baseExpenses.filter(e => 
+          e.allocationId === alloc.id && 
+          e.soeId === soeId &&
+          e.status !== 'rejected'
+        ).reduce((sum, e) => sum + e.amount, 0);
+        totalSpent += spent;
+      }
+    });
+
+    const totalSurrendered = surrenders.filter(s => 
+      s.rangeId === rangeId &&
+      s.schemeId === schemeId &&
+      s.soeId === soeId &&
+      (!sectorId || !s.sectorId || s.sectorId === sectorId) &&
+      (!activityId || !s.activityId || s.activityId === activityId) &&
+      (!subActivityId || !s.subActivityId || s.subActivityId === subActivityId)
+    ).reduce((sum, s) => sum + s.amount, 0);
+
+    return {
+      allocated: totalAllocated,
+      spent: totalSpent,
+      surrendered: totalSurrendered,
+      balance: totalAllocated - totalSpent - totalSurrendered
+    };
+  }, [surrenderFormSelection, baseAllocations, baseExpenses, surrenders]);
+
+  const masterControlData = useMemo(() => {
+    const map: Record<string, any> = {};
+    
+    baseAllocations.forEach(alloc => {
+      const range = ranges.find(r => r.id === alloc.rangeId);
+      const rangeName = range?.name === 'Rajgarh Forest Division' ? 'Division' : (range?.name || 'N/A');
+      const sch = schemes.find(s => s.id === alloc.schemeId);
+      const schName = sch?.name || 'N/A';
+      const sec = sectors.find(s => s.id === alloc.sectorId);
+      const secName = sec?.name || 'N/A';
+      const act = activities.find(a => a.id === alloc.activityId);
+      const actName = act?.name || 'N/A';
+      const sa = subActivities.find(s => s.id === alloc.subActivityId);
+      const saName = sa?.name || 'N/A';
+
+      // Apply filters
+      if (reportFilters.range && rangeName !== reportFilters.range) return;
+      if (reportFilters.scheme && schName !== reportFilters.scheme) return;
+      if (reportFilters.sector && secName !== reportFilters.sector) return;
+      if (reportFilters.activity && actName !== reportFilters.activity) return;
+      if (reportFilters.subActivity && saName !== reportFilters.subActivity) return;
+      
+      alloc.fundedSOEs?.forEach(funded => {
+        const soe = soes.find(s => s.id === funded.soeId);
+        const soeName = soe?.name || 'N/A';
+        if (reportFilters.soe && soeName !== reportFilters.soe) return;
+
+        const key = `${alloc.rangeId}-${alloc.schemeId}-${alloc.sectorId}-${alloc.activityId}-${alloc.subActivityId}-${funded.soeId}`;
+        const spent = baseExpenses.filter(e => 
+          e.allocationId === alloc.id && 
+          e.soeId === funded.soeId &&
+          e.status !== 'rejected'
+        ).reduce((sum, e) => sum + e.amount, 0);
+        
+        if (map[key]) {
+          map[key].allocated += funded.amount;
+          map[key].expenditure += spent;
+          map[key].balance = map[key].allocated - map[key].expenditure;
+        } else {
+          map[key] = {
+            rangeName,
+            schemeName: schName,
+            sectorName: secName,
+            activityName: actName,
+            subActivityName: saName,
+            soeName,
+            allocated: funded.amount,
+            expenditure: spent,
+            balance: funded.amount - spent
+          };
+        }
+      });
+    });
+    
+    let result = Object.values(map);
+    
+    if (reportSearchTerm) {
+      const lower = reportSearchTerm.toLowerCase();
+      result = result.filter((item: any) => 
+        item.rangeName.toLowerCase().includes(lower) ||
+        item.schemeName.toLowerCase().includes(lower) ||
+        item.soeName.toLowerCase().includes(lower) ||
+        item.activityName.toLowerCase().includes(lower)
+      );
+    }
+
+    return result.sort((a: any, b: any) => 
+      a.rangeName.localeCompare(b.rangeName) || 
+      a.schemeName.localeCompare(b.schemeName) || 
+      a.soeName.localeCompare(b.soeName)
+    );
+  }, [ranges, baseAllocations, baseExpenses, schemes, sectors, activities, subActivities, soes, reportFilters, reportSearchTerm]);
+
+  const soeAbstractForAllocations = useMemo(() => {
+    return soeAbstractData.filter(item => {
+      // Apply dynamic filtering based on form selection
+      if (allocationFormFilters.soeId && item.id !== allocationFormFilters.soeId) return false;
+      if (allocationFormFilters.subActivityId && item.subActivityId !== allocationFormFilters.subActivityId) return false;
+      if (allocationFormFilters.activityId && item.activityId !== allocationFormFilters.activityId) return false;
+      if (allocationFormFilters.sectorId && item.sectorId !== allocationFormFilters.sectorId) return false;
+      if (allocationFormFilters.schemeId && item.schemeId !== allocationFormFilters.schemeId) return false;
+      
+      if (soeSearchTerm) {
+        const lowerSearch = soeSearchTerm.toLowerCase();
+        return item.soeName.toLowerCase().includes(lowerSearch) || 
+               item.hierarchy.toLowerCase().includes(lowerSearch);
+      }
+      
+      return true;
+    });
+  }, [soeAbstractData, allocationFormFilters, soeSearchTerm]);
+
+
+  // --- Render Functions for Tabs ---
+  const renderDashboard = () => {
+    const rangeAllocationMap: Record<string, any> = {};
+    baseAllocations.forEach(alloc => {
+      const key = `${alloc.rangeId}-${alloc.schemeId}-${alloc.sectorId}-${alloc.activityId}`;
+      const spent = baseExpenses.filter(e => e.allocationId === alloc.id).reduce((sum, e) => sum + e.amount, 0);
+      
+      if (rangeAllocationMap[key]) {
+        const existing = rangeAllocationMap[key];
+        existing.allocated += alloc.amount;
+        existing.spent += spent;
+        existing.balance = existing.allocated - existing.spent;
+      } else {
+        const r = ranges.find(r => r.id === alloc.rangeId);
+        const sch = currentSchemes.find(s => s.id === alloc.schemeId);
+        const sec = currentSectors.find(s => s.id === alloc.sectorId);
+        const act = currentActivities.find(a => a.id === alloc.activityId);
+        
+        rangeAllocationMap[key] = {
+          range: r?.name || 'N/A',
+          scheme: sch?.name || 'N/A',
+          sector: sec?.name || 'N/A',
+          activity: act?.name || 'N/A',
+          allocated: alloc.amount,
+          spent: spent,
+          balance: alloc.amount - spent
+        };
+      }
+    });
+    
+    const rangeAllocationSummary = Object.values(rangeAllocationMap).sort((a, b) => {
+      return a.range.localeCompare(b.range) || a.scheme.localeCompare(b.scheme) || a.sector.localeCompare(b.sector) || a.activity.localeCompare(b.activity);
+    });
+
+    // Group expenses by date for trend chart
+    const expensesByDate = baseExpenses.reduce((acc, exp) => {
+      acc[exp.date] = (acc[exp.date] || 0) + exp.amount;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    const trendData = Object.keys(expensesByDate).sort().map(date => ({
+      date,
+      amount: expensesByDate[date]
+    }));
+
+    const schemeSummary = currentSchemes.map(sch => {
+      const schAllocations = baseAllocations.filter(a => a.schemeId === sch.id);
+      const totalAllocated = schAllocations.reduce((sum, a) => sum + a.amount, 0);
+      const totalSpent = baseExpenses.filter(e => schAllocations.some(a => a.id === e.allocationId)).reduce((sum, e) => sum + e.amount, 0);
+      
+      const schemeSoes = currentSoes.filter(s => s.schemeId === sch.id);
+      const totalSoeBudget = schemeSoes.reduce((sum, s) => sum + getApprovedBudget(s), 0);
+
+      const displayBudget = userRangeId ? totalAllocated : totalSoeBudget;
+
+      return {
+        name: sch.name,
+        budget: displayBudget,
+        allocated: totalAllocated,
+        spent: totalSpent,
+        balance: totalAllocated - totalSpent
+      };
+    }).filter(s => !userRangeId || s.allocated > 0 || s.spent > 0);
+
+    const sectorSummary = currentSectors.map(sec => {
+      const secAllocations = baseAllocations.filter(a => a.sectorId === sec.id);
+      const totalAllocated = secAllocations.reduce((sum, a) => sum + a.amount, 0);
+      const totalSpent = baseExpenses.filter(e => secAllocations.some(a => a.id === e.allocationId)).reduce((sum, e) => sum + e.amount, 0);
+      
+      return {
+        name: sec.name,
+        allocated: totalAllocated,
+        spent: totalSpent,
+        balance: totalAllocated - totalSpent
+      };
+    }).filter(s => !userRangeId || s.allocated > 0 || s.spent > 0);
+
+    const activitySummary = currentActivities.map(act => {
+      const sec = currentSectors.find(s => s.id === act.sectorId);
+      const sch = currentSchemes.find(s => s.id === (sec ? sec.schemeId : act.schemeId));
+
+      const actAllocations = baseAllocations.filter(a => a.activityId === act.id);
+      const totalAllocated = actAllocations.reduce((sum, a) => sum + a.amount, 0);
+      const totalSpent = baseExpenses.filter(e => actAllocations.some(a => a.id === e.allocationId)).reduce((sum, e) => sum + e.amount, 0);
+      
+      return {
+        scheme: sch?.name || 'N/A',
+        sector: sec?.name || 'N/A',
+        name: act.name,
+        allocated: totalAllocated,
+        spent: totalSpent,
+        balance: totalAllocated - totalSpent
+      };
+    }).filter(a => !userRangeId || a.allocated > 0 || a.spent > 0).sort((a, b) => {
+      const aHasEntry = a.allocated > 0 || a.spent > 0 ? 1 : 0;
+      const bHasEntry = b.allocated > 0 || b.spent > 0 ? 1 : 0;
+      if (aHasEntry !== bHasEntry) return bHasEntry - aHasEntry;
+      return a.scheme.localeCompare(b.scheme) || a.sector.localeCompare(b.sector) || a.name.localeCompare(b.name);
+    });
+
+    const soeDashboardSummary = soeAbstractData.filter(item => {
+      const lowerSearch = (dashboardSearch || searchTerm).toLowerCase();
+      if (lowerSearch) {
+        return item.soeName.toLowerCase().includes(lowerSearch) || 
+               item.hierarchy.toLowerCase().includes(lowerSearch) ||
+               item.schemeName.toLowerCase().includes(lowerSearch) ||
+               item.sectorName.toLowerCase().includes(lowerSearch);
+      }
+      return true;
+    });
+
+    const dashboardStats = {
+      totalBudget: soeDashboardSummary.reduce((sum, item) => sum + item.approvedBudget, 0),
+      totalReceivedInTry: soeDashboardSummary.reduce((sum, item) => sum + item.receivedInTry, 0),
+      totalAllocated: soeDashboardSummary.reduce((sum, item) => sum + item.allocated, 0),
+      totalTryBalance: soeDashboardSummary.reduce((sum, item) => sum + item.toBeAllocated, 0),
+      totalSpent: soeDashboardSummary.reduce((sum, item) => sum + item.spent, 0),
+      remainingBalance: soeDashboardSummary.reduce((sum, item) => sum + item.remainingToSpend, 0)
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 ${userRangeId ? 'lg:grid-cols-3' : 'xl:grid-cols-6 lg:grid-cols-3'} gap-2 sm:gap-3`}>
+          {!userRangeId && <StatCard title="Total Approved Budget" amount={dashboardStats.totalBudget} icon={<Wallet />} color="text-blue-600" />}
+          {!userRangeId && <StatCard title="Total Received (Try)" amount={dashboardStats.totalReceivedInTry} icon={<Landmark />} color="text-indigo-500" />}
+          <StatCard title={userRangeId ? "My Allocated Budget" : "Total Allocated"} amount={dashboardStats.totalAllocated} icon={<Map />} color="text-indigo-600" />
+          {!userRangeId && <StatCard title="To Be Allocated (Received)" amount={dashboardStats.totalTryBalance} icon={<IndianRupee />} color="text-orange-500" />}
+          <StatCard 
+            title={userRangeId ? "My Total Expenditure" : "Total Expenditure"} 
+            amount={dashboardStats.totalSpent} 
+            icon={<TrendingDown />} 
+            color="text-red-600" 
+            subtitle={
+              userRangeId 
+                ? (dashboardStats.totalAllocated > 0 ? `${((dashboardStats.totalSpent / dashboardStats.totalAllocated) * 100).toFixed(1)}% of My Allocation` : undefined)
+                : (dashboardStats.totalBudget > 0 ? `${((dashboardStats.totalSpent / dashboardStats.totalBudget) * 100).toFixed(1)}% of Budget` : undefined)
+            }
+          />
+          <StatCard title={userRangeId ? "My Remaining Balance" : "Remaining Balance (Unspent)"} amount={dashboardStats.remainingBalance} icon={<IndianRupee />} color="text-emerald-600" />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-1">
+            <h3 className="text-lg font-semibold mb-4 border-b pb-2">Budget Overview</h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={chartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                    {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} />
+                  <Legend verticalAlign="bottom" height={36}/>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-2">
+            <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+              <Activity className="h-5 w-5 text-gray-500" /> Scheme-wise Budget
+            </h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={schemeSummary} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                  <YAxis axisLine={false} tickLine={false} tickFormatter={(val) => `₹${val/1000}k`} />
+                  <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} cursor={{fill: '#f3f4f6'}} />
+                  <Legend />
+                  <Bar dataKey="allocated" name="Allocated" fill="#007bff" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="spent" name="Spent" fill="#dc3545" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="balance" name="Balance" fill="#28a745" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {trendData.length > 0 && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-red-600" /> Spending Trend (Expenditure Over Time)
+            </h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} tickFormatter={(val) => val && typeof val === 'string' ? val.split('-').reverse().slice(0, 2).join('/') : ''} />
+                  <YAxis axisLine={false} tickLine={false} tickFormatter={(val) => `₹${val/1000}k`} />
+                  <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} />
+                  <Legend />
+                  <Line type="monotone" dataKey="amount" name="Expenditure" stroke="#dc3545" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-2">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Table className="h-5 w-5 text-gray-500" /> Budget Abstract (Scheme/Sector/Activity)
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm min-w-[600px]">
+              <thead>
+                <tr className="bg-gray-50 text-gray-600 font-semibold">
+                  <th className="p-3 border-b">Scheme</th>
+                  <th className="p-3 border-b">Sector</th>
+                  <th className="p-3 border-b">Activity</th>
+                  <th className="p-3 border-b text-right">Allocated</th>
+                  <th className="p-3 border-b text-right">Spent</th>
+                  <th className="p-3 border-b text-right">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activitySummary
+                  .filter(act => {
+                    const searchStr = (dashboardSearch || searchTerm).toLowerCase();
+                    return (
+                      act.scheme.toLowerCase().includes(searchStr) ||
+                      act.sector.toLowerCase().includes(searchStr) ||
+                      act.name.toLowerCase().includes(searchStr) ||
+                      act.allocated.toString().includes(searchStr) ||
+                      act.spent.toString().includes(searchStr) ||
+                      act.balance.toString().includes(searchStr)
+                    );
+                  })
+                  .slice(0, showAllBudget ? undefined : 5)
+                  .map((act, idx) => (
+                    <tr key={idx} className="border-b hover:bg-gray-50 transition-colors">
+                      <td className="p-3 text-xs text-gray-500">{act.scheme}</td>
+                      <td className="p-3 text-xs text-gray-500">{act.sector}</td>
+                      <td className="p-3 font-medium text-gray-800">{act.name}</td>
+                      <td className="p-3 text-right font-mono text-blue-600">₹{act.allocated.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-red-600">₹{act.spent.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono font-bold text-emerald-600">₹{act.balance.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                {activitySummary.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-gray-400 italic">No budget data found for this Financial Year.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {activitySummary.length > 5 && (
+            <div className="mt-4 text-center">
+              <button 
+                onClick={() => setShowAllBudget(!showAllBudget)}
+                className="text-emerald-600 font-semibold hover:text-emerald-700 transition-colors flex items-center gap-1 mx-auto"
+              >
+                {showAllBudget ? 'Show Less' : 'Read More'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-emerald-600" /> Live SOE Budget Tracker
+          </h3>
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-left border-collapse text-sm min-w-[1000px]">
+              <thead className="sticky top-0 bg-white shadow-sm">
+                <tr className="bg-gray-50 text-gray-600 font-semibold">
+                  <th className="p-3 border-b">Hierarchy (Scheme &gt; Sector &gt; Activity)</th>
+                  <th className="p-3 border-b">SOE Head</th>
+                  {!userRangeId && <th className="p-3 border-b text-right">Approved Budget</th>}
+                  {!userRangeId && <th className="p-3 border-b text-right">Received in Try</th>}
+                  <th className="p-3 border-b text-right">Allocated</th>
+                  {!userRangeId && <th className="p-3 border-b text-right">To Be Allocated</th>}
+                  {!userRangeId && <th className="p-3 border-b text-right">Try Balance</th>}
+                  <th className="p-3 border-b text-right">Spent</th>
+                  <th className="p-3 border-b text-right">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {soeDashboardSummary.map((item, idx) => (
+                  <tr key={idx} className="border-b hover:bg-gray-50 transition-colors">
+                    <td className="p-3 text-xs text-gray-500">{item.hierarchy || 'N/A'}</td>
+                    <td className="p-3 font-medium text-gray-800">{item.soeName}</td>
+                    {!userRangeId && <td className="p-3 text-right text-gray-700">₹{item.approvedBudget.toLocaleString()}</td>}
+                    {!userRangeId && <td className="p-3 text-right text-indigo-600">₹{item.receivedInTry.toLocaleString()}</td>}
+                    <td className="p-3 text-right text-blue-600">₹{item.allocated.toLocaleString()}</td>
+                    {!userRangeId && (
+                      <td className={`p-3 text-right font-bold ${item.toBeAllocated > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                        ₹{item.toBeAllocated.toLocaleString()}
+                      </td>
+                    )}
+                    {!userRangeId && (
+                      <td className={`p-3 text-right font-bold ${item.tryBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        ₹{item.tryBalance.toLocaleString()}
+                      </td>
+                    )}
+                    <td className="p-3 text-right text-red-600">₹{item.spent.toLocaleString()}</td>
+                    <td className={`p-3 text-right font-bold ${item.remainingToSpend > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                      ₹{item.remainingToSpend.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+                {soeDashboardSummary.length === 0 && (
+                  <tr>
+                    <td colSpan={userRangeId ? 5 : 9} className="p-4 text-center text-gray-500">No SOE data matching current selection.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+              <Activity className="h-5 w-5 text-gray-500" /> Sector-wise Budget
+            </h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sectorSummary} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                  <YAxis axisLine={false} tickLine={false} tickFormatter={(val) => `₹${val/1000}k`} />
+                  <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} cursor={{fill: '#f3f4f6'}} />
+                  <Legend />
+                  <Bar dataKey="allocated" name="Allocated" fill="#007bff" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="spent" name="Spent" fill="#dc3545" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="balance" name="Balance" fill="#28a745" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+              <Table className="h-5 w-5 text-gray-500" /> Scheme-wise Budget
+            </h3>
+            <div className="overflow-x-auto h-64">
+              <table className="w-full text-left border-collapse text-sm min-w-[600px]">
+                <thead className="sticky top-0 bg-white shadow-sm">
+                  <tr className="bg-gray-50 text-gray-600 font-semibold">
+                    <th className="p-3 border-b">Scheme</th>
+                    {!userRangeId && <th className="p-3 border-b text-right">SOE Budget</th>}
+                    <th className="p-3 border-b text-right">Allocation</th>
+                    <th className="p-3 border-b text-right">Expenditure</th>
+                    <th className="p-3 border-b text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schemeSummary.map((sch, idx) => (
+                    <tr key={idx} className="border-b hover:bg-gray-50">
+                      <td className="p-3 font-medium text-gray-800">{sch.name}</td>
+                      {!userRangeId && <td className="p-3 text-right">₹{sch.budget.toLocaleString()}</td>}
+                      <td className="p-3 text-right text-blue-600">₹{sch.allocated.toLocaleString()}</td>
+                      <td className="p-3 text-right text-red-600">₹{sch.spent.toLocaleString()}</td>
+                      <td className="p-3 text-right text-emerald-600 font-medium">₹{sch.balance.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {schemeSummary.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-center text-gray-500">No scheme data available</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-2">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-2">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Table className="h-5 w-5 text-gray-500" /> Range-wise Allocation Summary
+              </h3>
+              <div className="relative w-full md:w-64">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input 
+                  type="text" 
+                  placeholder="Search unit..." 
+                  value={rangeSearch}
+                  onChange={(e) => setRangeSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm min-w-[800px]">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 font-semibold">
+                    <th className="p-3 border-b">Range</th>
+                    <th className="p-3 border-b">Scheme</th>
+                    <th className="p-3 border-b">Sector</th>
+                    <th className="p-3 border-b">Activity</th>
+                    <th className="p-3 border-b text-right">Allocated</th>
+                    <th className="p-3 border-b text-right">Spent</th>
+                    <th className="p-3 border-b text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rangeAllocationSummary
+                    .filter(r => 
+                      r.range.toLowerCase().includes(rangeSearch.toLowerCase()) ||
+                      r.scheme.toLowerCase().includes(rangeSearch.toLowerCase()) ||
+                      r.sector.toLowerCase().includes(rangeSearch.toLowerCase()) ||
+                      r.activity.toLowerCase().includes(rangeSearch.toLowerCase())
+                    )
+                    .slice(0, showAllRange ? undefined : 5)
+                    .map((r, idx) => (
+                      <tr key={idx} className="border-b hover:bg-gray-50 transition-colors">
+                        <td className="p-3 font-medium text-gray-800">{r.range}</td>
+                        <td className="p-3 text-xs text-gray-500">{r.scheme}</td>
+                        <td className="p-3 text-xs text-gray-500">{r.sector}</td>
+                        <td className="p-3 text-xs text-gray-500">{r.activity}</td>
+                        <td className="p-3 text-right font-mono text-blue-600">₹{r.allocated.toLocaleString()}</td>
+                        <td className="p-3 text-right font-mono text-red-600">₹{r.spent.toLocaleString()}</td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-600">₹{r.balance.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  {rangeAllocationSummary.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-4 text-center text-gray-500">No allocations found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {rangeAllocationSummary.length > 5 && (
+              <div className="mt-4 text-center">
+                <button 
+                  onClick={() => setShowAllRange(!showAllRange)}
+                  className="text-emerald-600 hover:text-emerald-700 font-medium text-sm"
+                >
+                  {showAllRange ? 'Show Less' : `View All (${rangeAllocationSummary.length})`}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-2">
+            <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+              <FileText className="h-5 w-5 text-gray-500" /> Latest Expenditures
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[700px]">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 text-sm">
+                    <th className="p-3 border-b">Date</th>
+                    <th className="p-3 border-b">Range</th>
+                    <th className="p-3 border-b">SOE</th>
+                    <th className="p-3 border-b text-right">Approval ID</th>
+                    <th className="p-3 border-b text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentExpenses.slice().reverse().slice(0, 5).map((exp) => {
+                    const alloc = allocations.find(a => a.id === exp.allocationId);
+                    const range = ranges.find(r => r.id === alloc?.rangeId);
+                    const soe = soes.find(s => s.id === exp.soeId);
+                    return (
+                      <tr key={exp.id} className="border-b last:border-0 hover:bg-gray-50">
+                        <td className="p-3">{exp.date ? exp.date.split('-').reverse().join('/') : ''}</td>
+                        <td className="p-3 font-medium">{range?.name}</td>
+                        <td className="p-3 text-gray-600">{soe?.name}</td>
+                        <td className="p-3 text-right font-mono text-xs">{exp.approvalId ? `#${exp.approvalId}` : '-'}</td>
+                        <td className="p-3 text-right font-bold text-red-600">₹{exp.amount.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                  {expenses.length === 0 && <tr><td colSpan={4} className="p-4 text-center text-gray-500">No expenditures yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMyRangeSummaryTable = () => {
+    // Group currentAllocations by SOE Head
+    const summaryMap: Record<string, { hierarchy: string, soeName: string, allocated: number, spent: number, remaining: number }> = {};
+    
+    currentAllocations.forEach(alloc => {
+      alloc.fundedSOEs?.forEach(f => {
+        const soe = soes.find(s => s.id === f.soeId);
+        if (!soe) return;
+        
+        let hierarchy = '';
+        if (alloc.subActivityId) {
+          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+          const act = activities.find(a => a.id === sa?.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+        } else if (alloc.activityId) {
+          const act = activities.find(a => a.id === alloc.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
+        }
+
+        const spent = currentExpenses.filter(e => e.allocationId === alloc.id && e.soeId === f.soeId).reduce((sum, e) => sum + e.amount, 0);
+        const key = `${alloc.id}-${f.soeId}`;
+
+        if (summaryMap[key]) {
+          summaryMap[key].allocated += f.amount;
+          summaryMap[key].spent += spent;
+          summaryMap[key].remaining = summaryMap[key].allocated - summaryMap[key].spent;
+        } else {
+          summaryMap[key] = {
+            hierarchy,
+            soeName: soe.name,
+            allocated: f.amount,
+            spent,
+            remaining: f.amount - spent
+          };
+        }
+      });
+    });
+
+    const summaryData = Object.values(summaryMap).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
+
+    return (
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6">
+        <div className="flex justify-between items-center mb-4 border-b pb-2">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Activity className="h-5 w-5 text-emerald-600" /> My Range Summary
+          </h3>
+        </div>
+        <div className="overflow-x-auto max-h-80">
+          <table className="w-full text-left border-collapse text-sm min-w-[800px]">
+            <thead className="sticky top-0 bg-white shadow-sm">
+              <tr className="bg-gray-50 text-gray-600 font-semibold">
+                <th className="p-3 border-b">Hierarchy</th>
+                <th className="p-3 border-b">SOE Head</th>
+                <th className="p-3 border-b text-right">Allocated to Me</th>
+                <th className="p-3 border-b text-right">My Expenditure</th>
+                <th className="p-3 border-b text-right">My Remaining Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summaryData.map((item, idx) => (
+                <tr key={idx} className="border-b hover:bg-gray-50 transition-colors">
+                  <td className="p-3 text-xs text-gray-500">{item.hierarchy || 'N/A'}</td>
+                  <td className="p-3 font-medium text-gray-800">{item.soeName}</td>
+                  <td className="p-3 text-right text-blue-600">₹{item.allocated.toLocaleString()}</td>
+                  <td className="p-3 text-right text-red-600">₹{item.spent.toLocaleString()}</td>
+                  <td className={`p-3 text-right font-bold ${item.remaining > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    ₹{item.remaining.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+              {summaryData.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="p-4 text-center text-gray-500">No allocations found for your unit.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSoeAbstractTable = () => (
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6">
+      <div 
+        className="flex justify-between items-center mb-4 border-b pb-2 cursor-pointer hover:bg-gray-50 -mx-6 px-6"
+        onClick={() => setIsSoeTrackerExpanded(!isSoeTrackerExpanded)}
+      >
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <Activity className="h-5 w-5 text-emerald-600" /> Live SOE Budget Tracker
+        </h3>
+        <div className="flex items-center gap-4">
+          {isSoeTrackerExpanded && (
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Search tracker..."
+                className="pl-9 pr-4 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 w-64"
+                value={soeSearchTerm}
+                onChange={(e) => setSoeSearchTerm(e.target.value)}
+              />
+            </div>
+          )}
+          <button type="button" className="text-gray-500 hover:text-gray-700">
+            {isSoeTrackerExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
+      
+      {isSoeTrackerExpanded && (
+        <div className="overflow-x-auto max-h-80">
+          <table className="w-full text-left border-collapse text-sm min-w-[1000px]">
+            <thead className="sticky top-0 bg-white shadow-sm">
+              <tr className="bg-gray-50 text-gray-600 font-semibold">
+                <th className="p-3 border-b">Hierarchy</th>
+                <th className="p-3 border-b">SOE Head</th>
+                <th className="p-3 border-b text-right">Approved Budget</th>
+                <th className="p-3 border-b text-right">Received in Try</th>
+                <th className="p-3 border-b text-right">Allocated</th>
+                <th className="p-3 border-b text-right">To Be Allocated</th>
+                <th className="p-3 border-b text-right">Try Balance</th>
+                <th className="p-3 border-b text-right">Spent</th>
+                <th className="p-3 border-b text-right">Remaining to Spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {soeAbstractForAllocations.map((item) => (
+                <tr key={item.id} className="border-b hover:bg-gray-50 transition-colors">
+                  <td className="p-3 text-xs text-gray-500">{item.hierarchy || 'N/A'}</td>
+                  <td className="p-3 font-medium text-gray-800">{item.soeName}</td>
+                  <td className="p-3 text-right text-gray-700">₹{item.approvedBudget.toLocaleString()}</td>
+                  <td className="p-3 text-right text-indigo-600">₹{item.receivedInTry.toLocaleString()}</td>
+                  <td className="p-3 text-right text-blue-600">₹{item.allocated.toLocaleString()}</td>
+                  <td className={`p-3 text-right font-bold ${item.toBeAllocated > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    ₹{item.toBeAllocated.toLocaleString()}
+                  </td>
+                  <td className={`p-3 text-right font-bold ${item.tryBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    ₹{item.tryBalance.toLocaleString()}
+                  </td>
+                  <td className="p-3 text-right text-red-600">₹{item.spent.toLocaleString()}</td>
+                  <td className={`p-3 text-right font-bold ${item.remainingToSpend > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    ₹{item.remainingToSpend.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+              {soeAbstractForAllocations.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-4 text-center text-gray-500">No SOE data matching current selection.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  const getHierarchyText = (item: any) => {
+    let hierarchy = '';
+    if (item.subActivityId) {
+      const sa = subActivities.find(sa => sa.id === item.subActivityId);
+      const act = activities.find(a => a.id === sa?.activityId);
+      const sec = sectors.find(sec => sec.id === act?.sectorId);
+      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+      hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+    } else if (item.activityId) {
+      const act = activities.find(a => a.id === item.activityId);
+      const sec = sectors.find(sec => sec.id === act?.sectorId);
+      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+      hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+    } else if (item.sectorId) {
+      const sec = sectors.find(sec => sec.id === item.sectorId);
+      const sch = schemes.find(sc => sc.id === sec?.schemeId);
+      hierarchy = [sch?.name, sec?.name].filter(Boolean).join(' -> ');
+    } else if (item.schemeId) {
+      const sch = schemes.find(sc => sc.id === item.schemeId);
+      hierarchy = sch?.name || '';
+    }
+    return hierarchy || 'Global (No Hierarchy)';
+  };
+
+  const formatHierarchyText = (item: any) => {
+    const sch = schemes.find(sc => sc.id === item.schemeId);
+    const sec = sectors.find(sec => sec.id === item.sectorId);
+    const act = activities.find(a => a.id === item.activityId);
+    const sa = subActivities.find(sa => sa.id === item.subActivityId);
+
+    const parts = [];
+    if (sch) parts.push(`Scheme: ${sch.name}`);
+    if (sec) parts.push(`Sector: ${sec.name}`);
+    if (act) parts.push(`Activity: ${act.name}`);
+    if (sa) parts.push(`Sub-Activity: ${sa.name}`);
+
+    return parts.length > 0 ? parts.join(' | ') : 'Global (No Hierarchy)';
+  };
+
+  const renderHierarchy = (item: any) => {
+    return <span className="text-xs text-gray-500">{formatHierarchyText(item)}</span>;
+  };
+
+
+
+  const handleSaveReconciliation = async (allocationId: string) => {
+    const distribution = reconData[allocationId] || {};
+    const allocation = baseAllocations.find(a => a.id === allocationId);
+    if (!allocation) return;
+
+    const totalDistributed = Object.values(distribution).reduce<number>((sum, val) => sum + (parseFloat(val as string) || 0), 0);
+    
+    if (Math.abs(totalDistributed - allocation.amount) > 0.01) {
+      showAlert("Total distributed amount must match the allocated amount.");
+      return;
+    }
+
+    try {
+      const fundedSOEs = Object.entries(distribution)
+        .filter(([_, amount]) => (parseFloat(amount as string) || 0) > 0)
+        .map(([soeId, amount]) => ({ soeId, amount: parseFloat(amount as string) }));
+
+      await updateDoc(doc(db, 'allocations', allocationId), {
+        fundedSOEs,
+        status: 'Funded'
+      });
+      
+      const newReconData = { ...reconData };
+      delete newReconData[allocationId];
+      setReconData(newReconData);
+      
+      showAlert("Reconciliation saved successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'allocations');
+    }
+  };
+
+  const renderBudgetTracker = () => {
+    // Flatten all SOEs with their hierarchy for the table
+    const flattenedData = currentSoes.map(soe => {
+      const scheme = currentSchemes.find(s => s.id === soe.schemeId);
+      const sector = currentSectors.find(s => s.id === soe.sectorId);
+      
+      const sanctioned = getApprovedBudget(soe);
+      const approved = getReceivedInTry(soe);
+      const allocated = getSoeAllocated(soe.id);
+      const balance = approved - allocated;
+
+      return {
+        id: soe.id,
+        schemeName: scheme?.name || 'Unknown Scheme',
+        sectorName: sector?.name || 'Unknown Sector',
+        soeName: soe.name,
+        sanctioned,
+        approved,
+        allocated,
+        balance
+      };
+    }).filter(item => item.sanctioned > 0 || item.approved > 0 || item.allocated > 0);
+
+    // Apply search filter
+    const filteredData = flattenedData.filter(item => {
+      const searchStr = trackerSearch.toLowerCase() || searchTerm.toLowerCase();
+      return (
+        item.schemeName.toLowerCase().includes(searchStr) ||
+        item.sectorName.toLowerCase().includes(searchStr) ||
+        item.soeName.toLowerCase().includes(searchStr) ||
+        item.sanctioned.toString().includes(searchStr) ||
+        item.approved.toString().includes(searchStr) ||
+        item.allocated.toString().includes(searchStr) ||
+        item.balance.toString().includes(searchStr)
+      );
+    });
+
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden mb-6">
+        <div 
+          className="bg-emerald-50 p-4 flex items-center justify-between cursor-pointer hover:bg-emerald-100 transition-colors"
+          onClick={() => setIsSoeTrackerExpanded(!isSoeTrackerExpanded)}
+        >
+          <div className="flex items-center gap-2">
+            <div className="bg-emerald-600 p-1.5 rounded-lg text-white">
+              <TrendingDown className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-bold text-emerald-900 text-sm">Live Budget Tracker (Abstract Table)</h3>
+              <p className="text-[10px] text-emerald-600 font-medium uppercase tracking-wider">Real-time SOE-wise Allocation Status</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+              <input
+                type="text"
+                placeholder="Search budget details..."
+                value={trackerSearch}
+                onChange={(e) => setTrackerSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-xs border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 w-48 md:w-64 bg-white"
+              />
+            </div>
+            <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+              {filteredData.length} Records
+            </span>
+            {isSoeTrackerExpanded ? <ChevronUp className="w-5 h-5 text-emerald-600" /> : <ChevronDown className="w-5 h-5 text-emerald-600" />}
+          </div>
+        </div>
+
+        {isSoeTrackerExpanded && (
+          <div className="p-0 overflow-x-auto animate-in fade-in slide-in-from-top-2 duration-300">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
+              <thead>
+                <tr className="bg-emerald-600 text-white text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-bold border-r border-emerald-500">Scheme</th>
+                  <th className="px-4 py-3 font-bold border-r border-emerald-500">Sector</th>
+                  <th className="px-4 py-3 font-bold border-r border-emerald-500">SOE Head</th>
+                  <th className="px-4 py-3 font-bold border-r border-emerald-500 text-right">Total Sanction (Approved)</th>
+                  <th className="px-4 py-3 font-bold border-r border-emerald-500 text-right">Received Budget (Try)</th>
+                  <th className="px-4 py-3 font-bold border-r border-emerald-500 text-right">Allocated to Ranges</th>
+                  <th className="px-4 py-3 font-bold text-right">Balance to Allocate</th>
+                </tr>
+              </thead>
+              <tbody className="text-[11px]">
+                {filteredData.length > 0 ? (
+                  filteredData.map((item, idx) => (
+                    <tr key={item.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-emerald-50/30'} hover:bg-emerald-100/50 transition-colors border-b border-emerald-50`}>
+                      <td className="px-4 py-2.5 font-medium text-gray-900 border-r border-emerald-50 min-w-[150px]">{item.schemeName}</td>
+                      <td className="px-4 py-2.5 text-gray-600 border-r border-emerald-50 min-w-[150px]">{item.sectorName}</td>
+                      <td className="px-4 py-2.5 font-bold text-emerald-800 border-r border-emerald-50">{item.soeName}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-500 border-r border-emerald-50">₹{item.sanctioned.toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900 border-r border-emerald-50">₹{item.approved.toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-blue-600 border-r border-emerald-50">₹{item.allocated.toLocaleString()}</td>
+                      <td className={`px-4 py-2.5 text-right font-bold ${item.balance > 0 ? 'text-orange-600' : 'text-emerald-600'}`}>
+                        ₹{item.balance.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400 italic">
+                      No budget records found matching your search.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot className="bg-emerald-50 font-bold text-emerald-900 text-[11px]">
+                <tr>
+                  <td colSpan={3} className="px-4 py-3 text-right uppercase tracking-wider border-r border-emerald-100">Grand Total</td>
+                  <td className="px-4 py-3 text-right border-r border-emerald-100">₹{filteredData.reduce((sum, i) => sum + i.sanctioned, 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right border-r border-emerald-100">₹{filteredData.reduce((sum, i) => sum + i.approved, 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right border-r border-emerald-100">₹{filteredData.reduce((sum, i) => sum + i.allocated, 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right">₹{filteredData.reduce((sum, i) => sum + i.balance, 0).toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const handleSaveAllReconciliation = async () => {
+    const provisionalSchemes = currentSchemes.filter(scheme => 
+      soes.some(soe => soe.schemeId === scheme.id && soe.isProvisional)
+    );
+
+    const allocationsToSave = baseAllocations.filter(a => 
+      (reconSchemeId === 'all' ? provisionalSchemes.some(ps => ps.id === a.schemeId) : a.schemeId === reconSchemeId) && a.status === 'Pending SOE Funds'
+    );
+
+    // Validate all variations are 0
+    const invalid = allocationsToSave.some(alloc => {
+      const distribution = reconData[alloc.id] || {};
+      const totalDistributed = Object.values(distribution).reduce<number>((sum, val) => sum + (parseFloat(val as string) || 0), 0);
+      return Math.abs(alloc.amount - totalDistributed) >= 0.01;
+    });
+
+    if (invalid) {
+      showAlert("All rows must have zero variation before saving.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const promises = allocationsToSave.map(alloc => {
+        const distribution = reconData[alloc.id] || {};
+        const fundedSOEs = Object.entries(distribution)
+          .filter(([_, amount]) => (parseFloat(amount as string) || 0) > 0)
+          .map(([soeId, amount]) => ({ soeId, amount: parseFloat(amount as string) }));
+
+        return updateDoc(doc(db, 'allocations', alloc.id), {
+          fundedSOEs,
+          status: 'Funded'
+        });
+      });
+
+      await Promise.all(promises);
+      setReconData({});
+      showAlert("All reconciliations saved successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'allocations');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderApprovalModal = () => {
+    if (!isApprovalModalOpen || !selectedExpenseForApproval) return null;
+
+    const handleConfirm = () => {
+      showConfirm(`Are you sure you want to ${approvalStatus} this expenditure? This action will lock the entry.`, async () => {
+        await handleUpdateExpenseStatus(selectedExpenseForApproval.id, approvalStatus, true, approvalReason);
+        setIsApprovalModalOpen(false);
+        setSelectedExpenseForApproval(null);
+        setApprovalReason('');
+      });
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
+          <div className="bg-emerald-600 p-4 text-white flex justify-between items-center">
+            <h3 className="font-bold">Expenditure Action</h3>
+            <button onClick={() => setIsApprovalModalOpen(false)}><X className="w-5 h-5" /></button>
+          </div>
+          <div className="p-6 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
+              <select 
+                value={approvalStatus} 
+                onChange={(e) => setApprovalStatus(e.target.value as 'approved' | 'rejected')}
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+              >
+                <option value="approved">Accept / Approve</option>
+                <option value="rejected">Reject</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reason / Remarks</label>
+              <textarea 
+                value={approvalReason}
+                onChange={(e) => setApprovalReason(e.target.value)}
+                placeholder="Enter reason for this action..."
+                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none min-h-[100px]"
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button 
+                onClick={handleConfirm}
+                className={`flex-1 py-2 rounded-lg font-bold text-white transition-colors ${approvalStatus === 'approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+              >
+                Confirm {approvalStatus === 'approved' ? 'Approval' : 'Rejection'}
+              </button>
+              <button 
+                onClick={() => setIsApprovalModalOpen(false)}
+                className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSoeExpModal = () => {
+    if (!viewingSoeExp) return null;
+
+    const relevantExpenses = expenses.filter(e => e.soeId === viewingSoeExp.soeId && e.status !== 'rejected');
+    const total = relevantExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-hidden animate-in zoom-in duration-200">
+          <div className="bg-emerald-600 p-4 text-white flex justify-between items-center">
+            <div>
+              <h3 className="font-bold">Expenditure Details</h3>
+              <div className="text-[10px] opacity-90 font-medium uppercase tracking-wider">{viewingSoeExp.hierarchy} | {viewingSoeExp.soeName}</div>
+            </div>
+            <button onClick={() => setViewingSoeExp(null)} className="hover:bg-emerald-700 p-1 rounded-full transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-6">
+            <div className="overflow-y-auto max-h-[60vh]">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 text-[10px] uppercase font-bold">
+                    <th className="p-2 border-b">Date</th>
+                    <th className="p-2 border-b">Approval ID</th>
+                    <th className="p-2 border-b">Description</th>
+                    <th className="p-2 border-b text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {relevantExpenses.map(exp => (
+                    <tr key={exp.id} className="border-b hover:bg-gray-50 text-xs">
+                      <td className="p-2">{exp.date ? exp.date.split('-').reverse().join('/') : ''}</td>
+                      <td className="p-2 font-mono text-gray-500">{exp.approvalId ? `#${exp.approvalId}` : '-'}</td>
+                      <td className="p-2">{exp.description}</td>
+                      <td className="p-2 text-right font-bold text-red-600">₹{exp.amount.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {relevantExpenses.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="p-8 text-center text-gray-500 italic">No expenditures found for this SOE Head.</td>
+                    </tr>
+                  )}
+                </tbody>
+                {relevantExpenses.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-gray-50 font-bold">
+                      <td colSpan={3} className="p-2 text-right text-gray-700">TOTAL EXPENDITURE:</td>
+                      <td className="p-2 text-right text-red-700">₹{total.toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button 
+                onClick={() => setViewingSoeExp(null)}
+                className="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderFundingModal = () => {
+    if (!fundingAllocation) return null;
+
+    const alreadyFundedTotal = fundingAllocation.fundedSOEs?.reduce((sum, f) => sum + f.amount, 0) || 0;
+    const remainingToFund = fundingAllocation.amount - alreadyFundedTotal;
+
+    // Filter SOEs that are relevant to this allocation's hierarchy
+    const relevantSoes = currentSoes.filter(s => {
+      if (s.schemeId !== fundingAllocation.schemeId) return false;
+      if (fundingAllocation.sectorId && s.sectorId !== fundingAllocation.sectorId) return false;
+      if (fundingAllocation.activityId && s.activityId !== fundingAllocation.activityId) return false;
+      if (fundingAllocation.subActivityId && s.subActivityId !== fundingAllocation.subActivityId) return false;
+      return true;
+    });
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+          <div className="bg-emerald-600 p-4 text-white flex justify-between items-center">
+            <h3 className="font-bold flex items-center gap-2">
+              <Landmark className="w-5 h-5" />
+              Assign SOE Funds
+            </h3>
+            <button onClick={() => setFundingAllocation(null)} className="hover:bg-white/20 rounded-full p-1">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="p-6 space-y-4">
+            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+              <div className="text-xs text-gray-500 uppercase font-bold mb-2">Allocation Details</div>
+              <div className="text-sm font-medium">{renderHierarchy(fundingAllocation)}</div>
+              <div className="text-xs text-gray-400 mt-1">Range: {ranges.find(r => r.id === fundingAllocation.rangeId)?.name}</div>
+              <div className="mt-3 flex justify-between items-end">
+                <div>
+                  <div className="text-[10px] text-gray-400 uppercase">Sanctioned</div>
+                  <div className="font-bold text-gray-900">₹{fundingAllocation.amount.toLocaleString()}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-gray-400 uppercase">Remaining to Fund</div>
+                  <div className="font-bold text-emerald-600">₹{remainingToFund.toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleFundAllocation} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Select SOE Head (Budget Source)</label>
+                <select name="soeId" required className="w-full p-2 border rounded text-sm">
+                  <option value="">Select SOE</option>
+                  {relevantSoes.map(s => {
+                    const totalReceived = getReceivedInTry(s);
+                    const totalFundedFromThisSoe = baseAllocations
+                      .reduce((sum, a) => {
+                        const funded = a.fundedSOEs?.find(f => f.soeId === s.id);
+                        return sum + (funded?.amount || 0);
+                      }, 0);
+                    const available = totalReceived - totalFundedFromThisSoe;
+                    return (
+                      <option key={s.id} value={s.id} disabled={available <= 0}>
+                        {s.name} (Available: ₹{available.toLocaleString()})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Amount to Assign (₹)</label>
+                <input 
+                  name="amount" 
+                  type="number" 
+                  step="0.01"
+                  max={remainingToFund}
+                  required 
+                  placeholder="Enter amount"
+                  className="w-full p-2 border rounded text-sm" 
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setFundingAllocation(null)}
+                  className="flex-1 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  Confirm Funding
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const handleSurrender = async (e: any) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const rangeId = formData.get('rangeId') as string;
+    const schemeId = formData.get('schemeId') as string;
+    const sectorId = formData.get('sectorId') as string;
+    const activityId = formData.get('activityId') as string;
+    const subActivityId = formData.get('subActivityId') as string;
+    const soeId = formData.get('soeId') as string;
+    const amount = Number(formData.get('amount'));
+    const remarks = formData.get('remarks') as string;
+    const date = formData.get('date') as string;
+
+    if (!rangeId || !soeId || amount <= 0) {
+      showAlert("Please fill all required fields and enter a valid amount.");
+      return;
+    }
+
+    const nSchemeId = schemeId || null;
+    const nSectorId = sectorId || null;
+    const nActivityId = activityId || null;
+    const nSubActivityId = subActivityId || null;
+
+    const rangeAllocs = allocations.filter(a => 
+      a.rangeId === rangeId && 
+      a.schemeId === nSchemeId && 
+      (!nSectorId || !a.sectorId || a.sectorId === nSectorId) &&
+      (!nActivityId || !a.activityId || a.activityId === nActivityId) &&
+      (!nSubActivityId || !a.subActivityId || a.subActivityId === nSubActivityId) &&
+      a.fundedSOEs.some(s => s.soeId === soeId)
+    );
+
+    if (rangeAllocs.length === 0) {
+      showAlert("No allocation found for this selection in the source unit.");
+      return;
+    }
+
+    // Find the best allocation to surrender from (one that has enough balance)
+    let rangeAlloc = rangeAllocs.find(a => {
+      const soeFund = a.fundedSOEs.find(s => s.soeId === soeId);
+      if (!soeFund) return false;
+      const spentForSoe = expenses
+        .filter(e => e.allocationId === a.id && e.soeId === soeId && e.status !== 'rejected')
+        .reduce((sum, e) => sum + e.amount, 0);
+      return (soeFund.amount - amount) >= spentForSoe;
+    });
+
+    if (!rangeAlloc) {
+      // If none has enough individually, pick the one with the most balance
+      rangeAlloc = rangeAllocs.sort((a, b) => {
+        const getBal = (alloc: any) => {
+          const soeFund = alloc.fundedSOEs.find((s: any) => s.soeId === soeId);
+          if (!soeFund) return 0;
+          const spent = expenses
+            .filter((e: any) => e.allocationId === alloc.id && e.soeId === soeId && e.status !== 'rejected')
+            .reduce((sum: number, e: any) => sum + e.amount, 0);
+          return soeFund.amount - spent;
+        };
+        return getBal(b) - getBal(a);
+      })[0];
+    }
+
+    const soeFund = rangeAlloc.fundedSOEs.find(s => s.soeId === soeId);
+    if (!soeFund) {
+      showAlert("No funds found for this SOE in the selected allocation.");
+      return;
+    }
+
+    // Validation: Ensure surrender doesn't leave allocation below expenditure for this SOE
+    const spentForSoe = expenses
+      .filter(e => e.allocationId === rangeAlloc.id && e.soeId === soeId && e.status !== 'rejected')
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    if (soeFund.amount - amount < spentForSoe) {
+      showAlert(`Cannot surrender ₹${amount.toLocaleString()}. Remaining SOE budget (₹${(soeFund.amount - amount).toLocaleString()}) would be less than expenditure (₹${spentForSoe.toLocaleString()}) for this SOE.`);
+      return;
+    }
+
+    try {
+      const activeFy = fys.find(f => f.name === selectedFY || f.id === selectedFY);
+      const fyId = activeFy ? activeFy.id : selectedFY;
+
+      // 1. Add Surrender record
+      await addDoc(collection(db, 'surrenders'), {
+        rangeId, 
+        schemeId: nSchemeId, 
+        sectorId: nSectorId, 
+        activityId: nActivityId, 
+        subActivityId: nSubActivityId, 
+        soeId,
+        amount, date, remarks, fyId, financialYear: selectedFY,
+        createdAt: Date.now(), updatedAt: Date.now()
+      });
+
+      // 2. Decrease Source Unit Allocation (Optional: Log only, don't mutate original allocation to maintain audit trail)
+      // We no longer mutate the allocation record directly to avoid double-counting issues.
+      // The budget logic now correctly subtracts surrenders from the gross allocation.
+      
+      showAlert("Amount surrendered successfully. It is now available for reallocation from the Sector-wide budget.");
+      setEditingItem(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'surrenders');
+    }
+  };
+
+  const dataUrlToBlob = (dataUrl: string): Blob | null => {
+    try {
+      const parts = dataUrl.split(',');
+      if (parts.length < 2) return null;
+      const mimeMatch = parts[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+      const bstr = atob(parts[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      return new Blob([u8arr], { type: mime });
+    } catch (e) {
+      console.error("Error converting data URL to blob:", e);
+      return null;
+    }
+  };
+
+  const readFileAsDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleViewFile = async (fileObj: { url?: string; fileData?: string; name?: string; type?: string }) => {
+    const fileSource = fileObj.fileData || fileObj.url;
+    if (!fileSource) {
+      showAlert("File data or link is missing.");
+      return;
+    }
+
+    if (fileSource.startsWith('data:')) {
+      const blob = dataUrlToBlob(fileSource);
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        const newWin = window.open(blobUrl, '_blank');
+        if (!newWin) {
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.target = '_blank';
+          a.click();
+        }
+        return;
+      }
+    }
+
+    if (fileSource.startsWith('http://') || fileSource.startsWith('https://')) {
+      try {
+        const response = await fetch(fileSource);
+        if (!response.ok) {
+          if (response.status === 402) {
+            showAlert("Firebase Storage payment required (Error 402: Storage billing account delinquent). Please delete and re-upload this file so it embeds directly.");
+            return;
+          }
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+      } catch (err) {
+        console.warn("Direct fetch failed, falling back to window.open:", err);
+        window.open(fileSource, '_blank');
+      }
+      return;
+    }
+
+    showAlert("Unable to open file.");
+  };
+
+  const handleDownloadFile = async (fileObj: { url?: string; fileData?: string; name?: string; type?: string }) => {
+    const fileSource = fileObj.fileData || fileObj.url;
+    if (!fileSource) {
+      showAlert("File data or link is missing.");
+      return;
+    }
+
+    const fileName = fileObj.name || 'document.pdf';
+
+    if (fileSource.startsWith('data:')) {
+      const blob = dataUrlToBlob(fileSource);
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+        return;
+      }
+    }
+
+    if (fileSource.startsWith('http://') || fileSource.startsWith('https://')) {
+      try {
+        const response = await fetch(fileSource);
+        if (!response.ok) {
+          if (response.status === 402) {
+            showAlert("Firebase Storage payment required (Error 402: Storage billing account delinquent). Please delete and re-upload this file so it embeds directly.");
+            return;
+          }
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+      } catch (err) {
+        console.warn("Fetch download failed, opening direct link:", err);
+        const a = document.createElement('a');
+        a.href = fileSource;
+        a.download = fileName;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      return;
+    }
+
+    showAlert("Unable to download file.");
+  };
+
+  const handleBudgetFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'approved' | 'distributed') => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !selectedFY) return;
+    
+    const activeFy = fys.find(f => f.name === selectedFY || f.id === selectedFY);
+    if (!activeFy) return;
+
+    if (!budgetFileSelection.schemeId) {
+      showAlert("Please select a scheme first.");
+      return;
+    }
+
+    const fileList = Array.from(files);
+    
+    for (const file of fileList) {
+      setUploadStatus(prev => ({
+        ...prev,
+        [type]: { isUploading: true, progress: 0, fileName: file.name, transferred: 0, total: file.size, error: null }
+      }));
+
+      try {
+        let base64Data = '';
+        if (file.size < 800 * 1024) {
+          try {
+            base64Data = await readFileAsDataUrl(file);
+          } catch (readErr) {
+            console.error("Error reading file as data URL:", readErr);
+          }
+        }
+
+        let downloadURL = '';
+
+        try {
+          const storagePath = `budget_files/${type}/${Date.now()}_${file.name}`;
+          const storageRef = ref(storage, storagePath);
+          const uploadTask = uploadBytesResumable(storageRef, file);
+
+          setUploadTasks(prev => ({ ...prev, [type]: uploadTask }));
+
+          await new Promise<void>((resolve, reject) => {
+            uploadTask.on('state_changed', 
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadStatus(prev => ({
+                  ...prev,
+                  [type]: { 
+                    ...prev[type], 
+                    progress, 
+                    transferred: snapshot.bytesTransferred, 
+                    total: snapshot.totalBytes 
+                  }
+                }));
+              }, 
+              (error) => {
+                console.warn("Storage upload warning:", error);
+                reject(error);
+              }, 
+              async () => {
+                try {
+                  const remoteUrl = await getDownloadURL(uploadTask.snapshot.ref);
+                  downloadURL = remoteUrl;
+                  resolve();
+                } catch (e) {
+                  console.warn("Could not fetch remote URL:", e);
+                  reject(e);
+                }
+              }
+            );
+          });
+        } catch (storageErr) {
+          console.warn("Storage upload error:", storageErr);
+        }
+
+        let savedFileData = '';
+        if (downloadURL && downloadURL.startsWith('http')) {
+          savedFileData = '';
+        } else if (base64Data && base64Data.length < 800000) {
+          downloadURL = base64Data;
+          savedFileData = base64Data;
+        } else {
+          throw new Error(`File upload failed. Storage upload did not complete and file size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds inline document limit.`);
+        }
+
+        const fileRecord: any = {
+          name: file.name,
+          url: downloadURL,
+          fileData: savedFileData,
+          schemeId: budgetFileSelection.schemeId,
+          sectorId: budgetFileSelection.sectorId || '',
+          type,
+          uploadedBy: user?.uid,
+          uploadedAt: Date.now(),
+          fyId: activeFy.id,
+          financialYear: activeFy.name
+        };
+
+        if (type === 'approved') {
+          await addDoc(collection(db, 'approvedBudgetFiles'), fileRecord);
+        } else {
+          fileRecord.rangeId = budgetFileSelection.rangeId || '';
+          await addDoc(collection(db, 'distributedBudgetFiles'), fileRecord);
+        }
+        
+        setUploadStatus(prev => ({
+          ...prev,
+          [type]: { ...prev[type], isUploading: false, progress: 100, error: null }
+        }));
+        
+        setTimeout(() => {
+          setUploadStatus(prev => ({
+            ...prev,
+            [type]: { ...prev[type], progress: 0, fileName: '', transferred: 0, total: 0 }
+          }));
+        }, 3000);
+      } catch (err: any) {
+        console.error("Error saving budget file:", err);
+        const errorMsg = err?.message || "Failed to save file.";
+        showAlert(`${file.name}: ${errorMsg}`);
+        setUploadStatus(prev => ({
+          ...prev,
+          [type]: { ...prev[type], isUploading: false, error: errorMsg }
+        }));
+      } finally {
+        setUploadTasks(prev => {
+          const newTasks = { ...prev };
+          delete newTasks[type];
+          return newTasks;
+        });
+      }
+    }
+    
+    e.target.value = '';
+  };
+
+  const handleBudgetFileDelete = async (file: BudgetFile) => {
+    showConfirm("Are you sure you want to delete this file?", async () => {
+      try {
+        // Delete from storage
+        try {
+          const storageRef = ref(storage, file.url);
+          await deleteObject(storageRef);
+        } catch (storageError) {
+          console.warn("Storage delete error (continuing with firestore delete):", storageError);
+        }
+
+        // Delete from firestore
+        const collectionName = file.type === 'approved' ? 'approvedBudgetFiles' : 'distributedBudgetFiles';
+        await deleteDoc(doc(db, collectionName, file.id));
+        
+        showAlert("File deleted successfully!");
+      } catch (error) {
+        console.error("Delete error:", error);
+        showAlert("Failed to delete file.");
+      }
+    });
+  };
+
+  const renderBudgetFilesTab = (type: 'approved' | 'distributed') => {
+    const files = type === 'approved' ? approvedBudgetFiles : distributedBudgetFiles;
+
+    const filteredFiles = files.filter(f => {
+      if (budgetFileSelection.schemeId && f.schemeId !== budgetFileSelection.schemeId) return false;
+      if (budgetFileSelection.sectorId && f.sectorId !== budgetFileSelection.sectorId) return false;
+      if (type === 'distributed' && budgetFileSelection.rangeId && f.rangeId !== budgetFileSelection.rangeId) return false;
+      
+      const matchesSearch = f.name.toLowerCase().includes(budgetSearchTerm.toLowerCase());
+      return matchesSearch;
+    });
+
+    const paginatedFiles = budgetItemsPerPage === 'All' 
+      ? filteredFiles 
+      : filteredFiles.slice((budgetPage - 1) * budgetItemsPerPage, budgetPage * budgetItemsPerPage);
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex-1">
+              <CascadingDropdowns
+                onSelectionChange={setBudgetFileSelection}
+                schemes={schemes}
+                sectors={sectors}
+                activities={activities}
+                subActivities={subActivities}
+                ranges={ranges}
+                allocations={allocations}
+                expenses={expenses}
+                soes={soes}
+                showRange={type === 'distributed'}
+                showSector={true}
+                showActivity={false}
+                showSubActivity={false}
+                showSoe={false}
+                userRole={userRole}
+                userRangeId={userRangeId}
+                showConfirm={showConfirm}
+                type="BudgetView"
+              />
+            </div>
+            <div className="flex flex-col gap-2 w-full md:w-auto">
+              <div className="flex items-center gap-1">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search files..."
+                    value={budgetSearchTerm}
+                    onChange={(e) => { setBudgetSearchTerm(e.target.value); setBudgetPage(1); }}
+                    className="pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-64"
+                  />
+                </div>
+                <button 
+                  className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+                  title="Search"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            {userRole === 'admin' && (
+              <div className="flex flex-col gap-2">
+                {(uploadStatus[type].isUploading || uploadStatus[type].progress === 100 || uploadStatus[type].error) && (
+                  <div className={`flex flex-col gap-2 min-w-[250px] p-3 rounded-lg border ${uploadStatus[type].error ? 'bg-red-50 border-red-100' : uploadStatus[type].progress === 100 ? 'bg-green-50 border-green-100' : 'bg-blue-50 border-blue-100'}`}>
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="text-[10px] font-bold text-gray-700 truncate">{uploadStatus[type].fileName}</span>
+                        <span className="text-[9px] text-gray-500">
+                          {(uploadStatus[type].transferred / (1024 * 1024)).toFixed(2)} MB / {(uploadStatus[type].total / (1024 * 1024)).toFixed(2)} MB
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className={`text-[10px] font-bold ${uploadStatus[type].error ? 'text-red-600' : 'text-blue-600'}`}>
+                          {uploadStatus[type].error ? 'Error' : `${Math.round(uploadStatus[type].progress)}%`}
+                        </span>
+                        {!uploadStatus[type].isUploading && (
+                          <button
+                            type="button"
+                            onClick={() => setUploadStatus(prev => ({
+                              ...prev,
+                              [type]: { isUploading: false, progress: 0, fileName: '', transferred: 0, total: 0, error: null }
+                            }))}
+                            className="text-gray-400 hover:text-gray-700 p-0.5 rounded cursor-pointer ml-1"
+                            title="Dismiss notification"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ease-out ${uploadStatus[type].error ? 'bg-red-500' : uploadStatus[type].progress === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                        style={{ width: `${uploadStatus[type].progress}%` }}
+                      />
+                    </div>
+
+                    {uploadStatus[type].error && (
+                      <span className="text-[9px] text-red-600 font-medium leading-tight">
+                        {uploadStatus[type].error}
+                      </span>
+                    )}
+                    
+                    {uploadStatus[type].progress === 100 && !uploadStatus[type].error && !uploadStatus[type].isUploading && (
+                      <span className="text-[9px] text-green-600 font-bold flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Upload Complete
+                      </span>
+                    )}
+                  </div>
+                )}
+                
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    multiple
+                    onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+                    onChange={(e) => handleBudgetFileUpload(e, type)}
+                    className="hidden"
+                    id={`file-upload-${type}`}
+                    disabled={uploadStatus[type].isUploading}
+                  />
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor={`file-upload-${type}`}
+                      className={`flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors cursor-pointer shadow-sm ${uploadStatus[type].isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {uploadStatus[type].isUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                      <span>{uploadStatus[type].isUploading ? 'Uploading...' : 'Upload PDF'}</span>
+                    </label>
+                    {uploadStatus[type].isUploading && (
+                      <button
+                        onClick={() => uploadTasks[type]?.cancel()}
+                        className="p-2 bg-red-50 text-red-600 border border-red-100 rounded-lg hover:bg-red-100 transition-colors"
+                        title="Cancel Upload"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
+              <FileText className="w-4 h-4 text-emerald-600" />
+              {type === 'approved' ? 'Approved Budget Files' : 'Distributed Budget Files'}
+            </h3>
+            <span className="text-xs font-medium text-gray-500 bg-gray-200 px-2 py-1 rounded-full">
+              {filteredFiles.length} Files
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50/50">
+                  <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">File Name</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">Uploaded At</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paginatedFiles.length > 0 ? (
+                  paginatedFiles.map(file => (
+                    <tr key={file.id} className="hover:bg-gray-50 transition-colors group">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-red-50 text-red-600 rounded-lg">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{file.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">
+                        {new Date(file.uploadedAt).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleViewFile(file)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="View PDF"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadFile(file)}
+                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Download PDF"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          {userRole === 'admin' && (
+                            <button
+                              type="button"
+                              onClick={() => handleBudgetFileDelete(file)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-12 text-center text-gray-400 italic text-sm">
+                      No files found for the selected criteria.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {filteredFiles.length > 0 && (
+            <div className="p-4 bg-gray-50 border-t border-gray-100">
+              <Pagination
+                totalItems={filteredFiles.length}
+                itemsPerPage={budgetItemsPerPage}
+                currentPage={budgetPage}
+                onPageChange={setBudgetPage}
+                onItemsPerPageChange={setBudgetItemsPerPage}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSurrenderTab = () => {
+    const filteredSurrenders = surrenders.filter(s => {
+      // Filter by user's range if applicable
+      if (userRangeId && s.rangeId !== userRangeId) return false;
+
+      const r = ranges.find(range => range.id === s.rangeId);
+      const sch = schemes.find(scheme => scheme.id === s.schemeId);
+      const soe = soes.find(soe => soe.id === s.soeId);
+
+      const matchesSearch = 
+        (r?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (sch?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (soe?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (s.remarks || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchesFilters = 
+        (!surrenderFilters.rangeId || s.rangeId === surrenderFilters.rangeId) &&
+        (!surrenderFilters.schemeId || s.schemeId === surrenderFilters.schemeId) &&
+        (!surrenderFilters.sectorId || soe?.sectorId === surrenderFilters.sectorId) &&
+        (!surrenderFilters.activityId || soe?.activityId === surrenderFilters.activityId) &&
+        (!surrenderFilters.subActivityId || soe?.subActivityId === surrenderFilters.subActivityId) &&
+        (!surrenderFilters.soeId || s.soeId === surrenderFilters.soeId);
+
+      return matchesSearch && matchesFilters;
+    });
+
+    return renderSimpleManager(
+      'Surrender',
+      filteredSurrenders,
+      [
+        { key: 'date', label: 'Date', render: (val) => val ? val.split('-').reverse().join('/') : '' },
+        { key: 'rangeId', label: 'Hierarchy / Unit', render: (_, item) => {
+          const r = ranges.find(r => r.id === item.rangeId);
+          const hText = getHierarchyText(item);
+          return (
+            <div className="max-w-[200px]">
+              <div className="font-bold text-gray-900 truncate leading-tight">{r?.name === 'Rajgarh Forest Division' ? 'Division' : r?.name}</div>
+              <div className="text-[9px] text-gray-500 truncate" title={hText}>{hText}</div>
+            </div>
+          );
+        }, searchableText: (_, item) => getHierarchyText(item) },
+        { key: 'soeId', label: 'SOE', render: (val) => <span className="font-medium text-gray-700">{soes.find(s => s.id === val)?.name || 'N/A'}</span> },
+        { key: 'amount', label: 'Amount', render: (val) => <span className="font-bold text-red-600">₹{val.toLocaleString()}</span> },
+        { key: 'remarks', label: 'Remarks', render: (val) => <div className="text-[10px] italic text-gray-500 max-w-[150px] whitespace-normal break-words" title={val}>{val || '-'}</div> }
+      ],
+      handleSurrender,
+      (id) => handleDelete('surrenders', id),
+      (
+        <div className="space-y-3">
+          <CascadingDropdowns 
+            schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={currentExpenses}
+            editingItem={editingItem} type="Surrender" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
+            onSelectionChange={setSurrenderFormSelection}
+          >
+            {surrenderBudgetStatus && (
+              <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 mb-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center">
+                    <p className="text-[9px] font-bold text-emerald-800 uppercase">Allocated</p>
+                    <p className="text-xs font-bold text-emerald-700">₹{surrenderBudgetStatus.allocated.toLocaleString()}</p>
+                  </div>
+                  <div className="text-center border-x border-emerald-100">
+                    <p className="text-[9px] font-bold text-red-800 uppercase">Spent</p>
+                    <p className="text-xs font-bold text-red-700">₹{surrenderBudgetStatus.spent.toLocaleString()}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[9px] font-bold text-blue-800 uppercase">Balance</p>
+                    <p className="text-xs font-bold text-blue-700">₹{surrenderBudgetStatus.balance.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Date</label>
+              <input type="date" name="date" required className="w-full p-1.5 border rounded text-sm" defaultValue={editingItem?.type === 'Surrender' ? editingItem.item.date : new Date().toISOString().split('T')[0]} />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Amount to Surrender</label>
+              <input type="number" name="amount" required defaultValue={editingItem?.type === 'Surrender' ? editingItem.item.amount : ''} placeholder="Amount" className="w-full p-1.5 border rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Remarks</label>
+              <textarea name="remarks" defaultValue={editingItem?.type === 'Surrender' ? editingItem.item.remarks : ''} placeholder="Remarks" className="w-full p-1.5 border rounded text-sm" rows={2}></textarea>
+            </div>
+          </CascadingDropdowns>
+        </div>
+      ),
+      (item) => setEditingItem({ type: 'Surrender', item }),
+      undefined,
+      undefined,
+      null,
+      false,
+      undefined,
+      undefined,
+      (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+            <select 
+              value={surrenderFilters.rangeId}
+              onChange={(e) => setSurrenderFilters({ ...surrenderFilters, rangeId: e.target.value })}
+              className="w-full p-1.5 border rounded text-xs bg-white"
+              disabled={!!userRangeId}
+            >
+              {userRangeId ? (
+                <option value={userRangeId}>{ranges.find(r => r.id === userRangeId)?.name}</option>
+              ) : (
+                <>
+                  <option value="">All Ranges</option>
+                  {ranges.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </>
+              )}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+            <select 
+              value={surrenderFilters.schemeId}
+              onChange={(e) => setSurrenderFilters({ ...surrenderFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: '', soeId: '' })}
+              className="w-full p-1.5 border rounded text-xs bg-white"
+            >
+              <option value="">All Schemes</option>
+              {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+            <select 
+              value={surrenderFilters.sectorId}
+              onChange={(e) => setSurrenderFilters({ ...surrenderFilters, sectorId: e.target.value, activityId: '', subActivityId: '', soeId: '' })}
+              className="w-full p-1.5 border rounded text-xs bg-white"
+            >
+              <option value="">All Sectors</option>
+              {sectors.filter(s => !surrenderFilters.schemeId || s.schemeId === surrenderFilters.schemeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+            <select 
+              value={surrenderFilters.activityId}
+              onChange={(e) => setSurrenderFilters({ ...surrenderFilters, activityId: e.target.value, subActivityId: '', soeId: '' })}
+              className="w-full p-1.5 border rounded text-xs bg-white"
+            >
+              <option value="">All Activities</option>
+              {activities.filter(a => {
+                if (surrenderFilters.sectorId) return a.sectorId === surrenderFilters.sectorId;
+                if (surrenderFilters.schemeId) return a.schemeId === surrenderFilters.schemeId;
+                return true;
+              }).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+            <select 
+              value={surrenderFilters.subActivityId}
+              onChange={(e) => setSurrenderFilters({ ...surrenderFilters, subActivityId: e.target.value, soeId: '' })}
+              className="w-full p-1.5 border rounded text-xs bg-white"
+            >
+              <option value="">All Sub-Activities</option>
+              {subActivities.filter(sa => !surrenderFilters.activityId || sa.activityId === surrenderFilters.activityId).map(sa => <option key={sa.id} value={sa.id}>{sa.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
+            <select 
+              value={surrenderFilters.soeId}
+              onChange={(e) => setSurrenderFilters({ ...surrenderFilters, soeId: e.target.value })}
+              className="w-full p-1.5 border rounded text-xs bg-white"
+            >
+              <option value="">All SOEs</option>
+              {soes.filter(s => {
+                if (surrenderFilters.subActivityId) return s.subActivityId === surrenderFilters.subActivityId;
+                if (surrenderFilters.activityId) return s.activityId === surrenderFilters.activityId;
+                if (surrenderFilters.sectorId) return s.sectorId === surrenderFilters.sectorId;
+                if (surrenderFilters.schemeId) return s.schemeId === surrenderFilters.schemeId;
+                return true;
+              }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div className="xl:col-span-6 flex justify-end">
+            <button 
+              onClick={() => setSurrenderFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' })}
+              className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
+            >
+              <X className="w-3 h-3" />
+              Reset Filters
+            </button>
+          </div>
+        </div>
+      )
+    );
+  };
+
+  const renderReconciliation = () => {
+    const provisionalSchemes = currentSchemes.filter(scheme => 
+      soes.some(soe => soe.schemeId === scheme.id && soe.isProvisional)
+    );
+
+    const allocationsToReconcile = baseAllocations.filter(a => 
+      (reconSchemeId === 'all' ? currentSchemes.some(ps => ps.id === a.schemeId) : a.schemeId === reconSchemeId) && a.status === 'Pending SOE Funds'
+    );
+
+    // Define the 4 SOE columns as requested
+    const targetSoeNames = ['20 OC', '36 M&W', '21 Maint', '30MV']; // Mapping 36 M&S to 36 M&W if that's what's in data
+    const displaySoeNames = ['20 OC', '36 M&S', '21 Maint', '30 MV'];
+
+    // Hierarchical grouping
+    const hierarchy: any[] = [];
+    if (reconSchemeId) {
+      const schemesToProcess = reconSchemeId === 'all' 
+        ? currentSchemes 
+        : [currentSchemes.find(s => s.id === reconSchemeId)].filter(Boolean);
+      
+      schemesToProcess.forEach(scheme => {
+        const schemeSectors = currentSectors.filter(s => s.schemeId === scheme.id);
+        const sectorRows: any[] = [];
+        
+        schemeSectors.forEach(sector => {
+          const sectorActivities = currentActivities.filter(a => a.sectorId === sector.id);
+          const activityRows: any[] = [];
+
+          sectorActivities.forEach(activity => {
+            const activitySubActivities = currentSubActivities.filter(sa => sa.activityId === activity.id);
+            const subActivityRows: any[] = [];
+
+            activitySubActivities.forEach(subActivity => {
+              let subActivityAllocations = allocationsToReconcile.filter(a => a.subActivityId === subActivity.id);
+              
+              if (reconSearchTerm) {
+                const lowerSearch = reconSearchTerm.toLowerCase();
+                subActivityAllocations = subActivityAllocations.filter(a => {
+                  const range = ranges.find(r => r.id === a.rangeId);
+                  return (
+                    (a.remarks || '').toLowerCase().includes(lowerSearch) ||
+                    a.amount.toString().includes(lowerSearch) ||
+                    (range?.name || '').toLowerCase().includes(lowerSearch) ||
+                    subActivity.name.toLowerCase().includes(lowerSearch) ||
+                    activity.name.toLowerCase().includes(lowerSearch) ||
+                    sector.name.toLowerCase().includes(lowerSearch) ||
+                    scheme.name.toLowerCase().includes(lowerSearch)
+                  );
+                });
+              }
+
+              if (subActivityAllocations.length > 0) {
+                // Find SOE IDs for this sub-activity
+                const subActivitySoes = currentSoes.filter(s => s.subActivityId === subActivity.id);
+                const soeMap: Record<string, string> = {};
+                targetSoeNames.forEach((name, idx) => {
+                  const found = subActivitySoes.find(s => (s.name || '').includes(name.replace(/\s/g, '')));
+                  if (found) soeMap[displaySoeNames[idx]] = found.id;
+                });
+
+                subActivityRows.push({
+                  type: 'subActivity',
+                  name: subActivity.name,
+                  allocations: subActivityAllocations,
+                  soeMap
+                });
+              }
+            });
+
+            if (subActivityRows.length > 0) {
+              activityRows.push({
+                type: 'activity',
+                name: activity.name,
+                subActivities: subActivityRows
+              });
+            }
+          });
+
+          if (activityRows.length > 0) {
+            sectorRows.push({
+              type: 'sector',
+              name: sector.name,
+              activities: activityRows
+            });
+          }
+        });
+
+        if (sectorRows.length > 0) {
+          hierarchy.push({
+            type: 'scheme',
+            name: scheme.name,
+            sectors: sectorRows
+          });
+        }
+      });
+    }
+
+    const getRowTotals = (allocId: string) => {
+      const distribution = reconData[allocId] || {};
+      const total = Object.values(distribution).reduce<number>((sum, val) => sum + (parseFloat(val as string) || 0), 0);
+      return total;
+    };
+
+    const isSchemeReady = allocationsToReconcile.length > 0 && allocationsToReconcile.every(a => {
+      const total = getRowTotals(a.id);
+      return Math.abs(a.amount - total) < 0.01;
+    });
+
+    const renderReconSummary = () => {
+      if (!reconSchemeId) return null;
+      
+      let schemeSoes: any[] = [];
+      let schemeAllocations: any[] = [];
+      let title = "";
+
+      if (reconSchemeId === 'all') {
+        schemeSoes = currentSoes;
+        schemeAllocations = baseAllocations;
+        title = "All Schemes - SOE-wise Reconciliation Summary";
+      } else {
+        const scheme = currentSchemes.find(s => s.id === reconSchemeId);
+        if (!scheme) return null;
+        schemeSoes = currentSoes.filter(s => s.schemeId === reconSchemeId);
+        schemeAllocations = baseAllocations.filter(a => a.schemeId === reconSchemeId);
+        title = `${scheme.name} - SOE-wise Reconciliation Summary`;
+      }
+
+      if (reconSearchTerm) {
+        const lowerSearch = reconSearchTerm.toLowerCase();
+        schemeSoes = schemeSoes.filter(soe => {
+          const schemeName = currentSchemes.find(s => s.id === soe.schemeId)?.name || '';
+          return soe.name.toLowerCase().includes(lowerSearch) || schemeName.toLowerCase().includes(lowerSearch);
+        });
+      }
+
+      return (
+        <div className="animate-in fade-in duration-500">
+          <div className="bg-emerald-900 text-white p-4 rounded-t-xl flex justify-between items-center">
+            <h3 className="font-bold flex items-center gap-2">
+              <Table className="w-5 h-5" />
+              {title}
+            </h3>
+            <span className="text-xs bg-emerald-800 px-3 py-1 rounded-full border border-emerald-700">TRY Budget vs Allocated</span>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-b-xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
+                <thead>
+                <tr className="bg-gray-50 text-gray-600 border-b">
+                  <th className="p-4 text-left font-bold">SOE Head</th>
+                  {reconSchemeId === 'all' && <th className="p-4 text-left font-bold">Scheme</th>}
+                  <th className="p-4 text-right font-bold">TRY Budget (A)</th>
+                  <th className="p-4 text-right font-bold">Total Reconciled (B)</th>
+                  <th className="p-4 text-right font-bold">Balance (A - B)</th>
+                  <th className="p-4 text-center font-bold">Utilization</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schemeSoes.map(soe => {
+                  const budget = getReceivedInTry(soe);
+                  const reconciled = schemeAllocations.reduce((sum, alloc) => {
+                    const funded = alloc.fundedSOEs?.find(f => f.soeId === soe.id);
+                    return sum + (funded?.amount || 0);
+                  }, 0);
+                  const balance = budget - reconciled;
+                  const percent = budget > 0 ? (reconciled / budget) * 100 : 0;
+                  const schemeName = currentSchemes.find(s => s.id === soe.schemeId)?.name;
+
+                  return (
+                    <tr key={soe.id} className="border-b hover:bg-gray-50 transition-colors">
+                      <td className="p-4 font-medium text-gray-900">{soe.name}</td>
+                      {reconSchemeId === 'all' && <td className="p-4 text-gray-600 text-xs">{schemeName}</td>}
+                      <td className="p-4 text-right font-mono">₹{budget.toLocaleString()}</td>
+                      <td className="p-4 text-right font-mono text-blue-600">₹{reconciled.toLocaleString()}</td>
+                      <td className={`p-4 text-right font-mono font-bold ${balance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                        ₹{balance.toLocaleString()}
+                      </td>
+                      <td className="p-4">
+                        <div className="w-full bg-gray-100 rounded-full h-2 max-w-[120px] mx-auto overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full ${percent > 100 ? 'bg-red-500' : 'bg-emerald-500'}`} 
+                            style={{ width: `${Math.min(percent, 100)}%` }}
+                          />
+                        </div>
+                        <div className="text-[10px] text-center mt-1 font-bold text-gray-500">{percent.toFixed(1)}%</div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {schemeSoes.length === 0 && (
+                  <tr>
+                    <td colSpan={reconSchemeId === 'all' ? 6 : 5} className="p-10 text-center text-gray-400 italic">No SOE Heads found for this scheme.</td>
+                  </tr>
+                )}
+              </tbody>
+              {schemeSoes.length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                    <td className="p-4" colSpan={reconSchemeId === 'all' ? 2 : 1}>GRAND TOTAL</td>
+                    <td className="p-4 text-right">₹{schemeSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0).toLocaleString()}</td>
+                    <td className="p-4 text-right text-blue-600">
+                      ₹{schemeAllocations.reduce((sum, alloc) => {
+                        return sum + (alloc.fundedSOEs?.reduce((s, f) => s + f.amount, 0) || 0);
+                      }, 0).toLocaleString()}
+                    </td>
+                    <td className="p-4 text-right text-emerald-600">
+                      ₹{(schemeSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0) - schemeAllocations.reduce((sum, alloc) => sum + (alloc.fundedSOEs?.reduce((s, f) => s + f.amount, 0) || 0), 0)).toLocaleString()}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      </div>
+      );
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <RefreshCcw className="w-5 h-5 text-emerald-600" />
+              Budget Reconciliation (Provisional to SOE)
+            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                <button 
+                  onClick={() => setShowReconSummary(false)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${!showReconSummary ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Hierarchical Grid
+                </button>
+                <button 
+                  onClick={() => setShowReconSummary(true)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${showReconSummary ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Summary View
+                </button>
+              </div>
+              <div className="relative w-64">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input 
+                  type="text"
+                  placeholder="Search anything..."
+                  value={reconSearchTerm}
+                  onChange={(e) => setReconSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border rounded-lg shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                />
+              </div>
+              <div className="w-64">
+                <select 
+                  value={reconSchemeId} 
+                  onChange={(e) => { setReconSchemeId(e.target.value); setReconData({}); }}
+                  className="w-full p-2 border rounded-lg shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                >
+                  <option value="">-- Select Scheme --</option>
+                  <option value="all">All Schemes</option>
+                  {provisionalSchemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          {!reconSchemeId ? (
+            <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+              <RefreshCcw className="w-12 h-12 text-gray-300 mx-auto mb-4 animate-spin-slow" />
+              <p className="text-gray-500 font-medium">Please select a scheme to start the reconciliation process</p>
+            </div>
+          ) : showReconSummary ? renderReconSummary() : allocationsToReconcile.length === 0 ? (
+            <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+              <Check className="w-12 h-12 text-emerald-300 mx-auto mb-4" />
+              <p className="text-gray-500 font-medium">No pending provisional allocations found for this scheme. Everything is reconciled!</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border rounded-xl shadow-sm">
+              <table className="w-full border-collapse text-xs min-w-[1200px]">
+                <thead>
+                  <tr className="bg-emerald-800 text-white">
+                    <th className="p-3 border border-emerald-700 text-left sticky left-0 bg-emerald-800 z-10" rowSpan={2}>Hierarchy (Sector/Activity/Sub-Activity)</th>
+                    <th className="p-3 border border-emerald-700 text-center" rowSpan={2}>Approved Budget</th>
+                    <th className="p-3 border border-emerald-700 text-left" rowSpan={2}>Range Name</th>
+                    <th className="p-3 border border-emerald-700 text-right" rowSpan={2}>Amount Allocated</th>
+                    <th className="p-3 border border-emerald-700 text-right" rowSpan={2}>Budget to be Allocated</th>
+                    <th className="p-3 border border-emerald-700 text-center" colSpan={4}>SOE Distribution (Editable)</th>
+                    <th className="p-3 border border-emerald-700 text-right" rowSpan={2}>Try SOE Total</th>
+                    <th className="p-3 border border-emerald-700 text-right" rowSpan={2}>Variation</th>
+                  </tr>
+                  <tr className="bg-emerald-700 text-white">
+                    {displaySoeNames.map(name => (
+                      <th key={name} className="p-2 border border-emerald-600 text-center">{name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {hierarchy.map((schemeLevel, idx) => (
+                    <React.Fragment key={schemeLevel.name}>
+                      {/* Scheme Row */}
+                      {reconSchemeId === 'all' && (
+                        <tr className="bg-gray-300 font-bold text-sm">
+                          <td className="p-2 border border-gray-400 sticky left-0 bg-gray-300 z-10" colSpan={11}>SCHEME: {schemeLevel.name}</td>
+                        </tr>
+                      )}
+                      
+                      {schemeLevel.sectors.map((sector: any, sIdx: number) => (
+                        <React.Fragment key={sector.name}>
+                          {/* Sector Row */}
+                          <tr className="bg-gray-200 font-bold">
+                            <td className="p-2 border border-gray-300 sticky left-0 bg-gray-200 z-10" colSpan={11}>SECTOR: {sector.name}</td>
+                          </tr>
+                          {sector.activities.map((activity: any, aIdx: number) => (
+                            <React.Fragment key={activity.name}>
+                              {/* Activity Row */}
+                              <tr className="bg-gray-100 font-semibold italic">
+                                <td className="p-2 border border-gray-300 pl-6 sticky left-0 bg-gray-100 z-10" colSpan={11}>Activity: {activity.name}</td>
+                              </tr>
+                              {activity.subActivities.map((subActivity: any, saIdx: number) => {
+                                const subActivityAllocations = subActivity.allocations;
+                                const approvedBudget = currentSoes.filter(s => s.subActivityId === subActivityAllocations[0].subActivityId).reduce((sum, s) => sum + getReceivedInTry(s), 0);
+                                
+                                return (
+                                  <React.Fragment key={subActivity.name}>
+                                    {subActivityAllocations.map((alloc: any, alIdx: number) => {
+                                      const distribution = reconData[alloc.id] || {};
+                                      const tryTotal = getRowTotals(alloc.id);
+                                      const variation = alloc.amount - tryTotal;
+                                      const range = ranges.find(r => r.id === alloc.rangeId);
+                                      
+                                      return (
+                                        <tr key={alloc.id} className="hover:bg-emerald-50 transition-colors">
+                                          {alIdx === 0 && (
+                                            <td className="p-2 border border-gray-300 pl-10 sticky left-0 bg-white z-10 font-medium" rowSpan={subActivityAllocations.length}>
+                                              {subActivity.name}
+                                            </td>
+                                          )}
+                                          {alIdx === 0 && (
+                                            <td className="p-2 border border-gray-300 text-right font-bold text-emerald-700" rowSpan={subActivityAllocations.length}>
+                                              ₹{approvedBudget.toLocaleString()}
+                                            </td>
+                                          )}
+                                          <td className="p-2 border border-gray-300 italic text-gray-600">{range?.name}</td>
+                                          <td className="p-2 border border-gray-300 text-right font-bold text-blue-600">₹{alloc.amount.toLocaleString()}</td>
+                                          <td className="p-2 border border-gray-300 text-right text-gray-400">₹{(approvedBudget - alloc.amount).toLocaleString()}</td>
+                                          
+                                          {displaySoeNames.map(soeName => {
+                                            const soeId = subActivity.soeMap[soeName];
+                                            return (
+                                              <td key={soeName} className="p-1 border border-gray-300">
+                                                {soeId ? (
+                                                  <input 
+                                                    type="number"
+                                                    value={distribution[soeId] || ''}
+                                                    onChange={(e) => {
+                                                      const val = e.target.value;
+                                                      setReconData((prev: any) => ({
+                                                        ...prev,
+                                                        [alloc.id]: {
+                                                          ...(prev[alloc.id] || {}),
+                                                          [soeId]: val
+                                                        }
+                                                      }));
+                                                    }}
+                                                    placeholder="0"
+                                                    className="w-full p-1 border-none focus:ring-1 focus:ring-emerald-500 text-right bg-transparent"
+                                                  />
+                                                ) : (
+                                                  <div className="text-center text-gray-300">-</div>
+                                                )}
+                                              </td>
+                                            );
+                                          })}
+                                          
+                                          <td className="p-2 border border-gray-300 text-right font-bold text-emerald-600">₹{tryTotal.toLocaleString()}</td>
+                                          <td className={`p-2 border border-gray-300 text-right font-bold ${Math.abs(variation) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+                                            ₹{variation.toLocaleString()}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                    {/* Sub-Activity Total Row */}
+                                    <tr className="bg-gray-50 font-bold text-[10px]">
+                                      <td className="p-2 border border-gray-300 text-right" colSpan={3}>Total for {subActivity.name}</td>
+                                      <td className="p-2 border border-gray-300 text-right">₹{subActivityAllocations.reduce((sum: number, a: any) => sum + a.amount, 0).toLocaleString()}</td>
+                                      <td className="p-2 border border-gray-300" colSpan={5}></td>
+                                      <td className="p-2 border border-gray-300 text-right">₹{subActivityAllocations.reduce((sum: number, a: any) => sum + getRowTotals(a.id), 0).toLocaleString()}</td>
+                                      <td className="p-2 border border-gray-300"></td>
+                                    </tr>
+                                  </React.Fragment>
+                                );
+                              })}
+                              {/* Activity Total Row */}
+                              <tr className="bg-blue-50 font-bold text-[11px]">
+                                <td className="p-2 border border-gray-300 text-right" colSpan={3}>Total Activity: {activity.name}</td>
+                                <td className="p-2 border border-gray-300 text-right">₹{activity.subActivities.reduce((sum: number, sa: any) => sum + sa.allocations.reduce((s: number, a: any) => s + a.amount, 0), 0).toLocaleString()}</td>
+                                <td className="p-2 border border-gray-300" colSpan={7}></td>
+                              </tr>
+                            </React.Fragment>
+                          ))}
+                          {/* Sector Total Row */}
+                          <tr className="bg-emerald-50 font-bold text-xs">
+                            <td className="p-2 border border-gray-300 text-right" colSpan={3}>Total Sector: {sector.name}</td>
+                            <td className="p-2 border border-gray-300 text-right">₹{sector.activities.reduce((sum: number, act: any) => sum + act.subActivities.reduce((s: number, sa: any) => s + sa.allocations.reduce((ss: number, a: any) => ss + a.amount, 0), 0), 0).toLocaleString()}</td>
+                            <td className="p-2 border border-gray-300" colSpan={7}></td>
+                          </tr>
+                        </React.Fragment>
+                      ))}
+                      {/* Scheme Total Row (only if 'all' is selected) */}
+                      {reconSchemeId === 'all' && (
+                        <tr className="bg-emerald-100 font-bold text-sm">
+                          <td className="p-2 border border-gray-300 text-right" colSpan={3}>Total Scheme: {schemeLevel.name}</td>
+                          <td className="p-2 border border-gray-300 text-right">₹{schemeLevel.sectors.reduce((sum: number, sec: any) => sum + sec.activities.reduce((s: number, act: any) => s + act.subActivities.reduce((ss: number, sa: any) => ss + sa.allocations.reduce((sss: number, a: any) => sss + a.amount, 0), 0), 0), 0).toLocaleString()}</td>
+                          <td className="p-2 border border-gray-300" colSpan={7}></td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                  {/* Grand Total Row */}
+                  <tr className="bg-emerald-900 text-white font-bold text-sm">
+                    <td className="p-3 border border-emerald-800 text-right" colSpan={3}>GRAND TOTAL (SCHEME)</td>
+                    <td className="p-3 border border-emerald-800 text-right">₹{allocationsToReconcile.reduce((sum, a) => sum + a.amount, 0).toLocaleString()}</td>
+                    <td className="p-3 border border-emerald-800" colSpan={5}></td>
+                    <td className="p-3 border border-emerald-800 text-right">₹{allocationsToReconcile.reduce((sum, a) => sum + getRowTotals(a.id), 0).toLocaleString()}</td>
+                    <td className="p-3 border border-emerald-800 text-right">
+                      ₹{allocationsToReconcile.reduce((sum, a) => sum + (a.amount - getRowTotals(a.id)), 0).toLocaleString()}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {reconSchemeId && allocationsToReconcile.length > 0 && (
+            <div className="mt-8 flex justify-end items-center gap-6 p-6 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="text-right">
+                <p className="text-xs text-gray-500 uppercase font-bold">Reconciliation Status</p>
+                <p className={`text-sm font-bold ${isSchemeReady ? 'text-green-600' : 'text-orange-600'}`}>
+                  {isSchemeReady ? '✓ All variations are zero. Ready to save.' : '⚠ Please fix variations to zero to enable saving.'}
+                </p>
+              </div>
+              <button
+                disabled={!isSchemeReady || loading}
+                onClick={handleSaveAllReconciliation}
+                className={`px-8 py-3 rounded-lg font-bold shadow-lg transition-all flex items-center gap-2 ${isSchemeReady ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:scale-105 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+              >
+                {loading ? <RefreshCcw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                Save All Reconciliation Data
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSOEHeads = () => {
+    const filteredItems = currentSoes.filter(s => {
+      // Search filter
+      const search = searchTerm.toLowerCase();
+      const nameMatch = (s.name || '').toLowerCase().includes(search);
+      const schemeMatch = s.schemeId && schemes.find(sch => sch.id === s.schemeId)?.name.toLowerCase().includes(search);
+      const sectorMatch = s.sectorId && sectors.find(sec => sec.id === s.sectorId)?.name.toLowerCase().includes(search);
+      const activityMatch = s.activityId && activities.find(act => act.id === s.activityId)?.name.toLowerCase().includes(search);
+      const subActivityMatch = s.subActivityId && subActivities.find(sub => sub.id === s.subActivityId)?.name.toLowerCase().includes(search);
+      const matchesSearch = !searchTerm || nameMatch || schemeMatch || sectorMatch || activityMatch || subActivityMatch;
+
+      // Hierarchy filters
+      const matchesScheme = !soeFilters.schemeId || s.schemeId === soeFilters.schemeId;
+      const matchesSector = !soeFilters.sectorId || s.sectorId === soeFilters.sectorId;
+      const matchesActivity = !soeFilters.activityId || s.activityId === soeFilters.activityId;
+      const matchesSubActivity = !soeFilters.subActivityId || s.subActivityId === soeFilters.subActivityId;
+      const matchesSoeName = !soeFilters.soeName || s.name === soeFilters.soeName;
+      const matchesRange = !soeFilters.rangeId || allocations.some(a => a.rangeId === soeFilters.rangeId && a.fundedSOEs?.some(f => f.soeId === s.id));
+
+      return matchesSearch && matchesScheme && matchesSector && matchesActivity && matchesSubActivity && matchesSoeName && matchesRange;
+    });
+
+    const soeFormSpan = formWidth === 'extra' ? 'lg:col-span-6' : formWidth === 'wide' ? 'lg:col-span-5' : 'lg:col-span-4';
+    const soeTableSpan = formWidth === 'extra' ? 'lg:col-span-6' : formWidth === 'wide' ? 'lg:col-span-7' : 'lg:col-span-8';
+
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className={soeFormSpan}>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 sticky top-6">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold">Add SOE Head</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextWidth = formWidth === 'normal' ? 'wide' : formWidth === 'wide' ? 'extra' : 'normal';
+                    setFormWidth(nextWidth);
+                    localStorage.setItem('fbc_form_width', nextWidth);
+                  }}
+                  className="hidden lg:flex items-center gap-1.5 px-2 py-0.5 hover:bg-gray-100 rounded text-gray-700 text-[11px] font-bold border border-gray-200 bg-gray-50 transition-colors ml-1"
+                  title="Form Size: Click to cycle between Standard (33%), Wide (42%), and Extra Wide (50%)"
+                >
+                  <MoveHorizontal className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="text-[10px] text-gray-700 whitespace-nowrap">
+                    {formWidth === 'wide' ? 'Width: 42%' : formWidth === 'extra' ? 'Width: 50%' : 'Width: 33%'}
+                  </span>
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setIsFormExpanded(!isFormExpanded)} className="lg:hidden">
+                  {isFormExpanded ? <ChevronUp /> : <ChevronDown />}
+                </button>
+              </div>
+            </div>
+            
+            {isFormExpanded && (
+              <form onSubmit={handleAddSoeName} className="space-y-4">
+                <CascadingDropdowns 
+                  schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={currentExpenses}
+                  editingItem={editingItem} type="SOE Name" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
+                >
+                  <select 
+                    name="name" 
+                    defaultValue={editingItem?.type === 'SOE Name' ? editingItem.item.name : ''} 
+                    className="w-full p-2 border rounded" 
+                  >
+                    <option value="">Select SOE Head (Optional - defaults to Provisional)</option>
+                    {ALLOWED_SOES.filter(n => n !== 'Provisional').map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input 
+                      name="approvedBudget" 
+                      type="number" 
+                      defaultValue={editingItem?.type === 'SOE Name' ? (getApprovedBudget(editingItem.item) || '') : ''} 
+                      placeholder="Approved Budget (₹) (Optional)" 
+                      className="w-full p-2 border rounded text-sm" 
+                    />
+                    <input 
+                      name="receivedInTry" 
+                      type="number" 
+                      defaultValue={editingItem?.type === 'SOE Name' ? (getReceivedInTry(editingItem.item) || '') : ''} 
+                      placeholder="Received in TRY (₹) (Optional)" 
+                      className="w-full p-2 border rounded text-sm" 
+                    />
+                  </div>
+                </CascadingDropdowns>
+                <button type="submit" className="w-full bg-emerald-600 text-white py-2 rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2">
+                  <Plus className="w-4 h-4" />
+                  <span>{editingItem?.type === 'SOE Name' ? 'Update SOE Head' : 'Add SOE Head'}</span>
+                </button>
+                {editingItem && (
+                  <button type="button" onClick={() => setEditingItem(null)} className="w-full bg-gray-100 text-gray-600 py-2 rounded-lg hover:bg-gray-200 transition-colors">
+                    Cancel Edit
+                  </button>
+                )}
+              </form>
+            )}
+          </div>
+        </div>
+
+        <div className={`${soeTableSpan} space-y-4`}>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input 
+                  type="text" 
+                  placeholder="Search SOE Heads..." 
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <button 
+                onClick={() => setIsSoeFilterExpanded(!isSoeFilterExpanded)}
+                className={`flex items-center gap-1 px-3 py-2 border rounded-lg text-sm transition-colors ${isSoeFilterExpanded ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white hover:bg-gray-50'}`}
+              >
+                <Filter className="w-4 h-4" />
+                <span>Filters</span>
+                {isSoeFilterExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+            </div>
+
+            {isSoeFilterExpanded && (
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200 animate-in fade-in slide-in-from-top-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+                  <select 
+                    value={soeFilters.schemeId}
+                    onChange={(e) => setSoeFilters({ ...soeFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: '' })}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Schemes</option>
+                    {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+                  <select 
+                    value={soeFilters.sectorId}
+                    onChange={(e) => setSoeFilters({ ...soeFilters, sectorId: e.target.value, activityId: '', subActivityId: '' })}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Sectors</option>
+                    {sectors.filter(s => !soeFilters.schemeId || s.schemeId === soeFilters.schemeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+                  <select 
+                    value={soeFilters.activityId}
+                    onChange={(e) => setSoeFilters({ ...soeFilters, activityId: e.target.value, subActivityId: '' })}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Activities</option>
+                    {activities.filter(a => {
+                      if (soeFilters.sectorId) return a.sectorId === soeFilters.sectorId;
+                      if (soeFilters.schemeId) return a.schemeId === soeFilters.schemeId || sectors.find(s => s.id === a.sectorId)?.schemeId === soeFilters.schemeId;
+                      return true;
+                    }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+                  <select 
+                    value={soeFilters.subActivityId}
+                    onChange={(e) => setSoeFilters({ ...soeFilters, subActivityId: e.target.value })}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Sub-Activities</option>
+                    {subActivities.filter(sa => {
+                      if (soeFilters.activityId) return sa.activityId === soeFilters.activityId;
+                      if (soeFilters.sectorId) {
+                        const act = activities.find(a => a.id === sa.activityId);
+                        return act?.sectorId === soeFilters.sectorId;
+                      }
+                      if (soeFilters.schemeId) {
+                        const act = activities.find(a => a.id === sa.activityId);
+                        return act?.schemeId === soeFilters.schemeId || sectors.find(s => s.id === act?.sectorId)?.schemeId === soeFilters.schemeId;
+                      }
+                      return true;
+                    }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                  <select 
+                    value={soeFilters.rangeId}
+                    onChange={(e) => setSoeFilters({ ...soeFilters, rangeId: e.target.value })}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Ranges</option>
+                    {ranges.map(s => <option key={s.id} value={s.id}>{s.name === 'Rajgarh Forest Division' ? 'Division' : s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE Name</label>
+                  <select 
+                    value={soeFilters.soeName}
+                    onChange={(e) => setSoeFilters({ ...soeFilters, soeName: e.target.value })}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All SOEs</option>
+                    {ALLOWED_SOES.filter(n => {
+                      if (!soeFilters.schemeId && !soeFilters.sectorId && !soeFilters.activityId && !soeFilters.subActivityId) return true;
+                      return currentSoes.some(s => {
+                        const matchesScheme = !soeFilters.schemeId || s.schemeId === soeFilters.schemeId;
+                        const matchesSector = !soeFilters.sectorId || s.sectorId === soeFilters.sectorId;
+                        const matchesActivity = !soeFilters.activityId || s.activityId === soeFilters.activityId;
+                        const matchesSubActivity = !soeFilters.subActivityId || s.subActivityId === soeFilters.subActivityId;
+                        return s.name === n && matchesScheme && matchesSector && matchesActivity && matchesSubActivity;
+                      });
+                    }).map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div className="md:col-span-3 lg:col-span-6 flex justify-end">
+                  <button 
+                    onClick={() => {
+                      setSoeFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeName: '' });
+                      setSearchTerm('');
+                    }}
+                    className="text-[10px] text-red-600 hover:text-red-800 font-bold uppercase flex items-center gap-1"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-gray-50 text-gray-600 font-medium border-b">
+                <tr>
+                  <th className="px-4 py-4">SrNo</th>
+                  <th className="px-4 py-4">Hierarchy</th>
+                  <th className="px-4 py-4">SOE Name</th>
+                  <th className="px-4 py-4 text-right">Approved Budget</th>
+                  <th className="px-4 py-4 text-right">Received in TRY</th>
+                  <th className="px-4 py-4 text-right">Allocated</th>
+                  <th className="px-4 py-4 text-right">To Be Allocated</th>
+                  <th className="px-4 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+            <tbody className="divide-y divide-gray-100">
+                {filteredItems
+                  .sort((a, b) => {
+                    // For SOE Heads, we might want to prioritize those with received budget
+                    const hasBudgetA = (a.receivedInTry || 0) > 0;
+                    const hasBudgetB = (b.receivedInTry || 0) > 0;
+                    if (hasBudgetA && !hasBudgetB) return -1;
+                    if (!hasBudgetA && hasBudgetB) return 1;
+
+                    return (b.updatedAt || 0) - (a.updatedAt || 0);
+                  })
+                  .slice((currentPage - 1) * itemsPerPage, itemsPerPage === -1 ? filteredItems.length : currentPage * itemsPerPage)
+                  .map((s, index) => {
+                  const allocated = allocations.reduce((sum, a) => {
+                    const funded = a.fundedSOEs?.find(f => f.soeId === s.id);
+                    return sum + (funded?.amount || 0);
+                  }, 0);
+                  const toBeAllocated = getReceivedInTry(s) - allocated;
+
+                  return (
+                    <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-4 text-gray-500 font-medium">{(currentPage - 1) * itemsPerPage + index + 1}</td>
+                      <td className="px-4 py-4">{renderHierarchy(s)}</td>
+                      <td className="px-4 py-4 font-medium">{s.name || '-'}</td>
+                      <td className="px-4 py-4 text-right">₹{getApprovedBudget(s).toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right">
+                        <TryUpdateInput 
+                          soeId={s.id} 
+                          initialValue={getReceivedInTry(s)} 
+                          onUpdate={handleUpdateSoeTry} 
+                        />
+                      </td>
+                      <td className="px-4 py-4 text-right font-medium text-emerald-600">₹{allocated.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right font-medium text-orange-600">₹{toBeAllocated.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right space-x-2">
+                        <button onClick={() => {
+                          setEditingItem({ type: 'SOE Name', item: s });
+                          setIsFormExpanded(true);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }} className="text-blue-600 hover:text-blue-800"><Edit2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleDelete('soeHeads', s.id)} className="text-red-600 hover:text-red-800"><Trash2 className="w-4 h-4" /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pagination 
+            totalEntries={filteredItems.length} 
+            currentPage={currentPage} 
+            itemsPerPage={itemsPerPage} 
+            onPageChange={setCurrentPage} 
+            onItemsPerPageChange={(val) => { setItemsPerPage(val === 'All' ? -1 : val); setCurrentPage(1); }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm, expFilters, allocFilters, billExpFilters, selectedFY, expDateRange, expenditureSubTab]);
+
+  const renderSimpleManager = (
+    title: string, 
+    items: any[], 
+    columns: {key: string, label: string, render?: (val: any, item: any) => React.ReactNode, searchableText?: (val: any, item: any) => string}[], 
+    onAdd: (e: React.FormEvent) => void, 
+    onDelete: (id: string) => void,
+    formContent: React.ReactNode,
+    onEdit?: (item: any) => void,
+    canEditDelete?: (item: any) => boolean,
+    extraContent?: React.ReactNode,
+    customActions?: (item: any) => React.ReactNode,
+    isSubmitDisabled: boolean = false,
+    isFilterExpanded?: boolean,
+    setIsFilterExpanded?: (val: boolean) => void,
+    filterContent?: React.ReactNode,
+    onResetFilters?: () => void,
+    isFullScreen?: boolean,
+    setIsFullScreen?: (val: boolean) => void,
+    getRowClassName?: (item: any) => string,
+    customSearchTerm?: string,
+    customSetSearchTerm?: (val: string) => void,
+    canEdit?: (item: any) => boolean,
+    canDelete?: (item: any) => boolean
+  ) => {
+    let filteredItems = items;
+    const currentSearchTerm = customSearchTerm !== undefined ? customSearchTerm : searchTerm;
+    const currentSetSearchTerm = customSetSearchTerm !== undefined ? customSetSearchTerm : setSearchTerm;
+
+    if (currentSearchTerm) {
+      const lowerSearch = currentSearchTerm.toLowerCase();
+      filteredItems = items.filter(item => {
+        return columns.some(c => {
+          if (c.searchableText) {
+            return c.searchableText(item[c.key], item).toLowerCase().includes(lowerSearch);
+          }
+          const val = c.render ? c.render(item[c.key], item) : item[c.key];
+          if (typeof val === 'string' || typeof val === 'number') {
+            return String(val).toLowerCase().includes(lowerSearch);
+          }
+          if (typeof item[c.key] === 'string' || typeof item[c.key] === 'number') {
+            return String(item[c.key]).toLowerCase().includes(lowerSearch);
+          }
+          return false;
+        });
+      });
+    }
+
+    const isFormVisible = (
+      userRole === 'admin' || 
+      userRole === 'deo' || 
+      ((title === 'Expenditure' || title === 'Bill' || title === 'Payee') && userRole !== 'approver' && userRole !== 'DA') || 
+      (editingItem?.type === title && (isAdmin() || isDEO()))
+    );
+
+    const formColSpanClass = isFullScreen
+      ? 'lg:col-span-12 z-50 fixed inset-0 m-4 overflow-y-auto'
+      : formWidth === 'extra'
+        ? 'lg:col-span-6 lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-y-auto'
+        : formWidth === 'wide'
+          ? 'lg:col-span-5 lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-y-auto'
+          : 'lg:col-span-4 lg:sticky lg:top-6 max-h-[calc(100vh-120px)] overflow-y-auto';
+
+    const tableColSpanClass = isTableFullScreen
+      ? 'fixed inset-0 z-[60] bg-white p-6 overflow-y-auto'
+      : isFullScreen
+        ? 'hidden'
+        : !isFormVisible
+          ? 'lg:col-span-12'
+          : formWidth === 'extra'
+            ? 'lg:col-span-6'
+            : formWidth === 'wide'
+              ? 'lg:col-span-7'
+              : 'lg:col-span-8';
+
+    return (
+    <div className={`grid grid-cols-1 ${isFullScreen ? '' : 'lg:grid-cols-12'} gap-6 items-start relative`}>
+      {isFormVisible && !isTableFullScreen && (
+        <div className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-100 ${formColSpanClass} custom-scrollbar transition-all duration-300`}>
+          <div 
+            className="flex justify-between items-center mb-2 border-b pb-1.5 cursor-pointer hover:bg-gray-50 -mx-3 px-3 pt-0.5" 
+            onClick={() => setIsFormExpanded(!isFormExpanded)}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-semibold">
+                {editingItem?.type === title ? `Edit ${title}` : `Add ${title}`}
+              </h3>
+              {editingItem?.type === title && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setEditingItem(null); }}
+                  className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded hover:bg-blue-100 font-bold uppercase"
+                >
+                  New
+                </button>
+              )}
+              {/* Form Width Controls */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextWidth = formWidth === 'normal' ? 'wide' : formWidth === 'wide' ? 'extra' : 'normal';
+                  setFormWidth(nextWidth);
+                  localStorage.setItem('fbc_form_width', nextWidth);
+                }}
+                className="hidden lg:flex items-center gap-1.5 px-2 py-0.5 hover:bg-gray-100 rounded text-gray-700 text-[11px] font-bold border border-gray-200 bg-gray-50 transition-colors"
+                title="Form Size: Click to switch between Standard (33%), Wide (42%), and Extra Wide (50%)"
+              >
+                <MoveHorizontal className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-[10px] text-gray-700 whitespace-nowrap">
+                  {formWidth === 'wide' ? 'Width: 42%' : formWidth === 'extra' ? 'Width: 50%' : 'Width: 33%'}
+                </span>
+              </button>
+              {setIsFullScreen && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setIsFullScreen(!isFullScreen); }}
+                  className="p-1 hover:bg-gray-100 rounded text-gray-500"
+                  title={isFullScreen ? "Exit Full Screen" : "Full Screen Modal"}
+                >
+                  {isFullScreen ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              )}
+            </div>
+            <button type="button" className="text-gray-500 hover:text-gray-700">
+              {isFormExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+          <div className={`${isFormExpanded ? 'block' : 'hidden'} pb-2`}>
+            <form key={editingItem?.item?.id || 'new'} onSubmit={onAdd} className="space-y-2">
+              {formContent}
+              <div className="flex gap-2 pt-2 border-t mt-2 sticky bottom-0 bg-white pb-1">
+                <button 
+                  type="submit" 
+                  disabled={isSubmitDisabled}
+                  className={`flex-1 py-1.5 rounded text-sm font-medium flex items-center justify-center gap-2 transition-colors ${isSubmitDisabled ? 'bg-gray-300 cursor-not-allowed text-gray-500' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
+                >
+                  {editingItem?.type === title ? <Activity className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                  {editingItem?.type === title ? 'Update' : 'Add'}
+                </button>
+                {editingItem?.type === title && (
+                  <button 
+                    type="button" 
+                    onClick={() => setEditingItem(null)}
+                    className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {isFullScreen && setIsFullScreen && (
+                   <button 
+                    type="button" 
+                    onClick={() => setIsFullScreen(false)}
+                    className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      <div className={`space-y-6 ${tableColSpanClass}`}>
+        {extraContent}
+        <div className={`bg-white ${isTableFullScreen ? '' : 'p-4 rounded-2xl shadow-sm border border-gray-100'}`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b pb-3">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-bold text-gray-800">Existing {title}s</h3>
+                <button
+                  type="button"
+                  onClick={() => setIsTableFullScreen(!isTableFullScreen)}
+                  className="p-2 hover:bg-gray-100 rounded-xl text-gray-500 transition-colors border border-gray-100"
+                  title={isTableFullScreen ? "Exit Full Screen" : "Expand to Full Screen"}
+                >
+                  {isTableFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+              </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder={`Search ${title}s...`}
+                    value={currentSearchTerm}
+                    onChange={(e) => currentSetSearchTerm(e.target.value)}
+                    className="pl-9 pr-4 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full sm:w-64"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    // Trigger search logic if needed, but it's already reactive
+                  }}
+                  className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+                  title="Search"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+              </div>
+              {filterContent && setIsFilterExpanded && (
+
+                <button 
+                  onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                  className={`flex items-center gap-1 px-2 py-1.5 border rounded-lg text-xs transition-colors ${isFilterExpanded ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white hover:bg-gray-50'}`}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Filters</span>
+                  {isFilterExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              )}
+              {title === 'Expenditure' && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={downloadExpenditureListPDF}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                    title="Export PDF Document"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Export PDF</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowExpenditurePrintModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                    title="Print Expenditure List Preview"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Print List</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {isFilterExpanded && filterContent && (
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2 p-2 bg-gray-50 rounded-lg border border-gray-200 mb-3 animate-in fade-in slide-in-from-top-2">
+              {filterContent}
+              {onResetFilters && (
+                <div className="md:col-span-3 lg:col-span-5 flex justify-end">
+                  <button 
+                    onClick={onResetFilters}
+                    className="text-[9px] text-red-600 hover:text-red-800 font-bold uppercase flex items-center gap-1"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-xl border border-gray-100">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-gray-50/50 text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th className="p-3 border-b border-gray-100 whitespace-nowrap w-12 text-center">#</th>
+                  {columns.map(c => <th key={c.key} className="p-3 border-b border-gray-100 whitespace-nowrap">{c.label}</th>)}
+                  {(customActions || userRole === 'admin' || userRole === 'deo' || title === 'Expenditure' || (canEditDelete && items.some(canEditDelete)) || (canEdit && items.some(canEdit)) || (canDelete && items.some(canDelete))) && <th className="p-3 border-b border-gray-100 text-right whitespace-nowrap">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filteredItems
+                  .sort((a, b) => {
+                    const statusA = a.status === 'Funded' || a.status === 'approved';
+                    const statusB = b.status === 'Funded' || b.status === 'approved';
+                    if (statusA !== statusB) return statusA ? -1 : 1;
+                    return (b.updatedAt || 0) - (a.updatedAt || 0);
+                  })
+                  .slice((currentPage - 1) * itemsPerPage, itemsPerPage === -1 ? filteredItems.length : currentPage * itemsPerPage)
+                  .map((item, index) => (
+                  <tr key={item.id} className={`hover:bg-emerald-50/30 transition-colors group ${getRowClassName ? getRowClassName(item) : ''}`}>
+                    <td className="p-3 text-gray-400 font-medium text-center text-[11px]">{(currentPage - 1) * itemsPerPage + index + 1}</td>
+                    {columns.map(c => <td key={c.key} className="p-3 text-gray-600 text-[11px] leading-relaxed">{c.render ? c.render(item[c.key], item) : item[c.key]}</td>)}
+                    {(customActions || title === 'Expenditure' || (canEditDelete && canEditDelete(item)) || (canEdit && canEdit(item)) || (canDelete && canDelete(item)) || (userRole === 'admin' || userRole === 'deo')) && (
+                      <td className="p-3 text-right">
+                        <div className="flex justify-end gap-1 transition-opacity">
+                          {customActions && customActions(item)}
+                          {(canEditDelete ? canEditDelete(item) : (canEdit ? canEdit(item) : (userRole === 'admin' || userRole === 'deo' || (title === 'Expenditure' && userRole !== 'approver')))) && (
+                            <button 
+                              onClick={() => {
+                                if (title === 'Allocation' && isFeatureLocked('Allocation')) {
+                                  showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+                                  return;
+                                }
+                                if (title === 'Expenditure' && isFeatureLocked('Expenditure')) {
+                                  showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+                                  return;
+                                }
+                                onEdit?.(item);
+                                setIsFormExpanded(true);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }} 
+                              className={`rounded-lg p-1.5 transition-colors ${((title === 'Allocation' && isFeatureLocked('Allocation')) || (title === 'Expenditure' && isFeatureLocked('Expenditure'))) ? 'text-gray-300 cursor-not-allowed' : 'text-blue-500 hover:bg-blue-100'}`}
+                              title={((title === 'Allocation' && isFeatureLocked('Allocation')) || (title === 'Expenditure' && isFeatureLocked('Expenditure'))) ? "Locked by Admin" : "Edit"}
+                            >
+                              <Pencil className="w-3.5 h-3.5"/>
+                            </button>
+                          )}
+                          {(canEditDelete ? canEditDelete(item) : (canDelete ? canDelete(item) : (userRole === 'admin' || userRole === 'deo' || (title === 'Expenditure' && userRole !== 'approver')))) && (
+                            <button 
+                              onClick={() => {
+                                if (title === 'Allocation' && isFeatureLocked('Allocation')) {
+                                  showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+                                  return;
+                                }
+                                if (title === 'Expenditure' && isFeatureLocked('Expenditure')) {
+                                  showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+                                  return;
+                                }
+                                onDelete(item.id);
+                              }} 
+                              className={`rounded-lg p-1.5 transition-colors ${((title === 'Allocation' && isFeatureLocked('Allocation')) || (title === 'Expenditure' && isFeatureLocked('Expenditure'))) ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-100'}`}
+                              title={((title === 'Allocation' && isFeatureLocked('Allocation')) || (title === 'Expenditure' && isFeatureLocked('Expenditure'))) ? "Locked by Admin" : "Delete"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5"/>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {filteredItems.length === 0 && <tr><td colSpan={columns.length + 2} className="p-8 text-center text-gray-400 text-sm italic">No records found matching your criteria.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        <Pagination 
+          totalEntries={filteredItems.length} 
+          currentPage={currentPage} 
+          itemsPerPage={itemsPerPage} 
+          onPageChange={setCurrentPage} 
+          onItemsPerPageChange={(val) => { setItemsPerPage(val === 'All' ? -1 : val); setCurrentPage(1); }}
+        />
+      </div>
+    </div>
+    </div>
+    );
+  };
+
+  useEffect(() => {
+    if (editingItem?.type === 'Allocation') {
+      setAllocationAmount(editingItem.item.amount.toString());
+    } else if (editingItem?.type === 'Expenditure') {
+      setExpenseAmount(editingItem.item.amount.toString());
+      setSelectedPayeesForExpense([]);
+    } else if (!editingItem) {
+      setAllocationAmount('');
+      setExpenseAmount('');
+      setSelectedPayeesForExpense([]);
+    }
+  }, [editingItem]);
+
+  // --- PWA Install Logic ---
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setIsInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstallable(false);
+      setInstallPrompt(null);
+    }
+  };
+
+  const isFeatureLocked = (feature: 'Allocation' | 'Expenditure') => {
+    if (userRole === 'admin') return false;
+    const roleLock = featureLocks.find(l => l.feature === feature && l.target === userRole);
+    if (roleLock?.isLocked) return true;
+    if (userRangeId) {
+      const rangeLock = featureLocks.find(l => l.feature === feature && l.target === userRangeId);
+      if (rangeLock?.isLocked) return true;
+    }
+    return false;
+  };
+
+  // --- Handlers ---
+  const handleAddFy = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    try {
+      if (editingItem?.type === 'Financial Year') {
+        await updateDoc(doc(db, 'financialYears', editingItem.item.id), { name, updatedAt: Date.now() });
+        logAuditAction('FY Updated', `Financial Year: ${name}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'financialYears'), { name, createdAt: Date.now(), updatedAt: Date.now() });
+        logAuditAction('FY Created', `Financial Year: ${name}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem ? OperationType.UPDATE : OperationType.CREATE, 'financialYears');
+    }
+  };
+
+  const handleAddRange = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    try {
+      if (editingItem?.type === 'Range') {
+        await updateDoc(doc(db, 'ranges', editingItem.item.id), { name, updatedAt: Date.now() });
+        logAuditAction('Range Updated', `Range Name: ${name}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'ranges'), { name, createdAt: Date.now(), updatedAt: Date.now() });
+        logAuditAction('Range Created', `Range Name: ${name}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Range' ? OperationType.UPDATE : OperationType.CREATE, 'ranges');
+    }
+  };
+
+  const handleAddScheme = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    try {
+      if (editingItem?.type === 'Scheme') {
+        await updateDoc(doc(db, 'schemes', editingItem.item.id), { name, updatedAt: Date.now() });
+        logAuditAction('Scheme Updated', `Scheme Name: ${name}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'schemes'), { name, createdAt: Date.now(), updatedAt: Date.now() });
+        logAuditAction('Scheme Created', `Scheme Name: ${name}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Scheme' ? OperationType.UPDATE : OperationType.CREATE, 'schemes');
+    }
+  };
+
+  const handleAddSector = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    const schemeId = e.target.schemeId.value;
+    try {
+      if (editingItem?.type === 'Sector') {
+        await updateDoc(doc(db, 'sectors', editingItem.item.id), { name, schemeId, updatedAt: Date.now() });
+        const schemeName = schemes.find(s => s.id === schemeId)?.name || schemeId;
+        logAuditAction('Sector Updated', `Sector: ${name}, Scheme: ${schemeName}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'sectors'), { name, schemeId, createdAt: Date.now(), updatedAt: Date.now() });
+        const schemeName = schemes.find(s => s.id === schemeId)?.name || schemeId;
+        logAuditAction('Sector Created', `Sector: ${name}, Scheme: ${schemeName}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Sector' ? OperationType.UPDATE : OperationType.CREATE, 'sectors');
+    }
+  };
+
+  const handleAddActivity = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    const sectorId = e.target.sectorId?.value || null;
+    const schemeId = e.target.schemeId?.value || null;
+
+    if (!sectorId && !schemeId) {
+      showAlert("Please select either a Sector or a Scheme");
+      return;
+    }
+
+    try {
+      if (editingItem?.type === 'Activity') {
+        await updateDoc(doc(db, 'activities', editingItem.item.id), { name, sectorId, schemeId, updatedAt: Date.now() });
+        logAuditAction('Activity Updated', `Activity: ${name}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'activities'), { sectorId, schemeId, name, createdAt: Date.now(), updatedAt: Date.now() });
+        logAuditAction('Activity Created', `Activity: ${name}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Activity' ? OperationType.UPDATE : OperationType.CREATE, 'activities');
+    }
+  };
+
+  const handleAddSubActivity = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    const activityId = e.target.activityId.value;
+    
+    if (!activityId) {
+      showAlert("Activity is mandatory for Sub-Activity.");
+      return;
+    }
+
+    try {
+      if (editingItem?.type === 'Sub-Activity') {
+        await updateDoc(doc(db, 'subActivities', editingItem.item.id), { name, activityId, updatedAt: Date.now() });
+        logAuditAction('Sub-Activity Updated', `Sub-Activity: ${name}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'subActivities'), { activityId, name, createdAt: Date.now(), updatedAt: Date.now() });
+        logAuditAction('Sub-Activity Created', `Sub-Activity: ${name}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Sub-Activity' ? OperationType.UPDATE : OperationType.CREATE, 'subActivities');
+    }
+  };
+
+  const handleAddSoeName = async (e: any) => {
+    e.preventDefault();
+    const rawName = e.target.name.value;
+    const name = rawName || 'Provisional';
+    const schemeId = e.target.schemeId?.value || null;
+    const sectorId = e.target.sectorId?.value || null;
+    const activityId = e.target.activityId?.value || null;
+    const subActivityId = e.target.subActivityId?.value || null;
+    const approvedBudget = parseFloat(e.target.approvedBudget?.value) || 0;
+    const receivedInTry = parseFloat(e.target.receivedInTry?.value) || 0;
+
+    if (!schemeId) {
+      showAlert("Scheme is mandatory.");
+      return;
+    }
+
+    try {
+      const data = { 
+        name, 
+        isProvisional: !rawName,
+        schemeId, 
+        sectorId, 
+        activityId, 
+        subActivityId, 
+        approvedBudget, 
+        approvedBudgetAmount: approvedBudget,
+        receivedInTry,
+        receivedInTryAmount: receivedInTry,
+        tryAmount: receivedInTry,
+        financialYear: selectedFY,
+        updatedAt: Date.now()
+      };
+      if (editingItem?.type === 'SOE Name') {
+        await updateDoc(doc(db, 'soeHeads', editingItem.item.id), { ...data, updatedAt: Date.now() });
+        logAuditAction('SOE Head Updated', `SOE: ${name}, Scheme: ${schemes.find(s => s.id === schemeId)?.name || 'N/A'}`);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'soeHeads'), { ...data, createdAt: Date.now(), updatedAt: Date.now() });
+        logAuditAction('SOE Head Created', `SOE: ${name}, Scheme: ${schemes.find(s => s.id === schemeId)?.name || 'N/A'}`);
+      }
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'SOE Name' ? OperationType.UPDATE : OperationType.CREATE, 'soeHeads');
+    }
+  };
+
+  const handleUpdateSoeTry = async (soeId: string, amount: number) => {
+    try {
+      await updateDoc(doc(db, 'soeHeads', soeId), { 
+        receivedInTry: amount,
+        receivedInTryAmount: amount,
+        tryAmount: amount,
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'soeHeads');
+    }
+  };
+
+
+
+  useEffect(() => {
+    setIsSoeTrackerExpanded(false);
+  }, [activeTab]);
+
+  const allocationBudgetStatus = useMemo(() => {
+    if (activeTab !== 'Allocations' || !allocationFormFilters.schemeId) return { isInvalid: false, remaining: 0, availableBudget: 0, currentAllocated: 0 };
+    const amount = parseFloat(allocationAmount);
+    const isEditing = editingItem?.type === 'Allocation';
+
+    const { schemeId, sectorId, activityId, subActivityId, fundingSoeName } = allocationFormFilters;
+
+    // Check against expenditure if editing
+    if (isEditing) {
+      const spent = expenses
+        .filter(e => e.allocationId === editingItem.item.id && e.status !== 'rejected')
+        .reduce((sum, e) => sum + e.amount, 0);
+      if (!isNaN(amount) && amount < spent) return { isInvalid: true, remaining: 0, availableBudget: 0, currentAllocated: 0, error: `Amount cannot be less than expenditure (₹${spent.toLocaleString()})` };
+    }
+
+    // 1. Identify relevant SOEs (the "Pool")
+    // Use path-inclusive logic: if we are at a deep level, we can fund from SOEs at this level or any parent level.
+    const poolSoes = currentSoes.filter((s: any) => {
+      if (s.schemeId !== schemeId) return false;
+      if (fundingSoeName && s.name !== fundingSoeName) return false;
+      if (subActivityId && s.subActivityId && s.subActivityId !== subActivityId) return false;
+      if (activityId && s.activityId && s.activityId !== activityId) return false;
+      if (sectorId && s.sectorId && s.sectorId !== sectorId) return false;
+      return true;
+    });
+
+    // 2. Calculate Available Budget in this Pool
+    const availableBudget = poolSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0);
+
+    // 3. Calculate Already Allocated from this Pool
+    const totalAllocated = currentAllocations.reduce((sum, a) => {
+      const currentAllocId = isEditing ? editingItem.item.id : null;
+      if (a.id === currentAllocId) return sum;
+
+      // Count funded amounts from our pool
+      const fundedFromOurPool = a.fundedSOEs?.filter((f: any) => poolSoes.some(s => s.id === f.soeId)) || [];
+      const fundedAmount = fundedFromOurPool.reduce((s: number, f: any) => s + f.amount, 0);
+      
+      // Count unfunded portion if it belongs to this hierarchy
+      // This ensures that even if an allocation isn't funded yet, it's reserved from the pool.
+      const matchesHierarchy = 
+        a.schemeId === schemeId &&
+        (!sectorId || a.sectorId === sectorId) &&
+        (!activityId || a.activityId === activityId) &&
+        (!subActivityId || a.subActivityId === subActivityId);
+      
+      if (matchesHierarchy) {
+        const totalFunded = a.fundedSOEs?.reduce((s, f) => s + f.amount, 0) || 0;
+        const unfunded = Math.max(0, a.amount - totalFunded);
+        return sum + fundedAmount + unfunded;
+      }
+
+      return sum + fundedAmount;
+    }, 0);
+
+    // 4. Subtract surrenders to get the NET allocated amount
+    const totalSurrendered = surrenders.reduce((sum, s) => {
+      if (poolSoes.some(ps => ps.id === s.soeId)) {
+        return sum + s.amount;
+      }
+      return sum;
+    }, 0);
+
+    const currentNetAllocated = totalAllocated - totalSurrendered;
+    const remaining = availableBudget - currentNetAllocated;
+    const isInvalid = !isNaN(amount) && amount > 0 && amount > remaining;
+
+    return { isInvalid, remaining, availableBudget, currentAllocated: currentNetAllocated };
+  }, [activeTab, allocationAmount, allocationFormFilters, currentSoes, currentAllocations, expenses, surrenders, editingItem]);
+
+  const isAllocationInvalid = allocationBudgetStatus.isInvalid || !allocationFormFilters.rangeId;
+
+  const handleAddAllocation = async (e: any) => {
+    e.preventDefault();
+    if (isFeatureLocked('Allocation')) {
+      showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+      return;
+    }
+    const rangeId = e.target.rangeId.value;
+    const amount = parseFloat(e.target.amount.value);
+    const remarks = e.target.remarks.value || '';
+    const schemeId = e.target.schemeId.value || null;
+    const sectorId = e.target.sectorId.value || null;
+    const activityId = e.target.activityId.value || null;
+    const subActivityId = e.target.subActivityId.value || null;
+    const targetFyId = selectedFY;
+    
+    const fundingSoeName = e.target.fundingSoeName?.value || null;
+    
+    if (isNaN(amount) || amount <= 0) {
+      showAlert("Please enter a valid positive amount.");
+      return;
+    }
+
+    // Validation: Check against expenditure if editing
+    if (editingItem?.type === 'Allocation') {
+      const spent = expenses
+        .filter(e => e.allocationId === editingItem.item.id && e.status !== 'rejected')
+        .reduce((sum, e) => sum + e.amount, 0);
+      if (amount < spent) {
+        showAlert(`Cannot reduce allocation below expenditure. Already spent: ₹${spent.toLocaleString()}`);
+        return;
+      }
+    }
+    
+    // Validation: Check against Available Budget
+    // Use path-inclusive logic to find relevant SOEs (allows pulling from higher levels)
+    const branchSoes = soes.filter((s: any) => {
+      if (s.schemeId !== schemeId) return false;
+      if (subActivityId && s.subActivityId && s.subActivityId !== subActivityId) return false;
+      if (activityId && s.activityId && s.activityId !== activityId) return false;
+      if (sectorId && s.sectorId && s.sectorId !== sectorId) return false;
+      return true;
+    });
+    
+    // If a specific SOE name is selected, validate against that SOE's balance in the branch
+    if (fundingSoeName) {
+      const matchedSoes = branchSoes.filter(s => s.name === fundingSoeName);
+      const received = matchedSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0);
+      const allocated = allocations.reduce((sum, a) => {
+        const currentAllocId = editingItem?.type === 'Allocation' ? editingItem.item.id : null;
+        if (a.id === currentAllocId) return sum;
+        const fundedFromThese = a.fundedSOEs?.filter((f: any) => matchedSoes.some(s => s.id === f.soeId)) || [];
+        return sum + fundedFromThese.reduce((s: number, f: any) => s + f.amount, 0);
+      }, 0);
+      const surrendered = surrenders.reduce((sum, s) => {
+        if (matchedSoes.some(ms => ms.id === s.soeId)) return sum + s.amount;
+        return sum;
+      }, 0);
+      const remaining = received - (allocated - surrendered);
+
+      if (amount > remaining) {
+        showAlert(`Cannot allocate. Amount ₹${amount.toLocaleString()} exceeds the remaining balance of SOE ${fundingSoeName} (₹${remaining.toLocaleString()}).`);
+        return;
+      }
+    } else {
+      // General branch-wide validation
+      const totalReceived = branchSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0);
+      const totalAllocated = allocations.reduce((sum, a) => {
+        const currentAllocId = editingItem?.type === 'Allocation' ? editingItem.item.id : null;
+        if (a.id === currentAllocId) return sum;
+        const fundedFromBranch = a.fundedSOEs?.filter((f: any) => branchSoes.some(s => s.id === f.soeId)) || [];
+        return sum + fundedFromBranch.reduce((s: number, f: any) => s + f.amount, 0);
+      }, 0);
+      const totalSurrendered = surrenders.reduce((sum, s) => {
+        if (branchSoes.some(bs => bs.id === s.soeId)) return sum + s.amount;
+        return sum;
+      }, 0);
+
+      const remaining = totalReceived - (totalAllocated - totalSurrendered);
+
+      if (amount > remaining) {
+        showAlert(`Cannot allocate. Amount ₹${amount.toLocaleString()} exceeds the remaining Available Budget of ₹${remaining.toLocaleString()}.`);
+        return;
+      }
+    }
+
+    try {
+      let fundedSOEs: any[] = [];
+      let status = 'Pending SOE Funds';
+      
+      const rangeName = ranges.find(r => r.id === rangeId)?.name || rangeId;
+
+      if (fundingSoeName) {
+        const matchedSoes = branchSoes.filter(s => s.name === fundingSoeName);
+        let remainingToFund = amount;
+        
+        for (const soe of matchedSoes) {
+          if (remainingToFund <= 0) break;
+          const received = getReceivedInTry(soe);
+          const allocated = allocations.reduce((sum, a) => {
+            const fundedFromThis = a.fundedSOEs?.find((f: any) => f.soeId === soe.id);
+            const currentAllocId = editingItem?.type === 'Allocation' ? editingItem.item.id : null;
+            if (a.id === currentAllocId) return sum;
+            return sum + (fundedFromThis?.amount || 0);
+          }, 0);
+          const surrendered = (surrenders || []).filter(s => s.soeId === soe.id).reduce((sum, s) => sum + s.amount, 0);
+          const available = received - (allocated - surrendered);
+          
+          if (available > 0) {
+            const fundAmount = Math.min(available, remainingToFund);
+            fundedSOEs.push({ soeId: soe.id, amount: fundAmount });
+            remainingToFund -= fundAmount;
+          }
+        }
+        
+        if (remainingToFund <= 0) {
+          status = 'Funded';
+        }
+      }
+
+      if (editingItem?.type === 'Allocation') {
+        await updateDoc(doc(db, 'allocations', editingItem.item.id), { 
+          rangeId, amount, remarks, schemeId, sectorId, activityId, subActivityId, financialYear: targetFyId,
+          status, fundedSOEs,
+          updatedAt: Date.now()
+        });
+        logAuditAction('Allocation Updated', `Range: ${rangeName}, Amount: ₹${amount.toLocaleString()}, SOE: ${fundingSoeName || 'Multiple'}`);
+        setEditingItem(null);
+      } else {
+        // Always create a new entry for every allocation as requested
+        await addDoc(collection(db, 'allocations'), { 
+          rangeId, amount, remarks, schemeId, sectorId, activityId, subActivityId, financialYear: targetFyId,
+          status,
+          fundedSOEs,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        logAuditAction('Allocation Created', `Range: ${rangeName}, Amount: ₹${amount.toLocaleString()}, SOE: ${fundingSoeName || 'Multiple'}`);
+      }
+      e.target.reset();
+      setAllocationAmount('');
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Allocation' ? OperationType.UPDATE : OperationType.CREATE, 'allocations');
+    }
+  };
+
+  const handleFundAllocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fundingAllocation) return;
+
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const soeId = formData.get('soeId') as string;
+    const amount = parseFloat(formData.get('amount') as string);
+
+    if (!soeId || isNaN(amount) || amount <= 0) {
+      showAlert("Please select an SOE and enter a valid amount.");
+      return;
+    }
+
+    // Check treasury availability for this SOE
+    const soe = currentSoes.find(s => s.id === soeId);
+    const totalReceived = soe ? getReceivedInTry(soe) : 0;
+
+    const totalFundedFromThisSoe = baseAllocations
+      .reduce((sum, a) => {
+        const funded = a.fundedSOEs?.find(f => f.soeId === soeId);
+        return sum + (funded?.amount || 0);
+      }, 0);
+
+    const availableInTry = totalReceived - totalFundedFromThisSoe;
+
+    if (amount > availableInTry) {
+      showAlert(`Insufficient funds in Treasury for this SOE. Available: ₹${availableInTry.toLocaleString()}`);
+      return;
+    }
+
+    // Check if this funding exceeds the allocation's remaining amount
+    const alreadyFundedTotal = fundingAllocation.fundedSOEs?.reduce((sum, f) => sum + f.amount, 0) || 0;
+    const remainingToFund = fundingAllocation.amount - alreadyFundedTotal;
+
+    if (amount > remainingToFund) {
+      showAlert(`Funding amount ₹${amount.toLocaleString()} exceeds the remaining allocation requirement of ₹${remainingToFund.toLocaleString()}.`);
+      return;
+    }
+
+    try {
+      const updatedFundedSOEs = [...(fundingAllocation.fundedSOEs || [])];
+      const existingIdx = updatedFundedSOEs.findIndex(f => f.soeId === soeId);
+      if (existingIdx >= 0) {
+        updatedFundedSOEs[existingIdx].amount += amount;
+      } else {
+        updatedFundedSOEs.push({ soeId, amount });
+      }
+
+      const totalFundedNow = updatedFundedSOEs.reduce((sum, f) => sum + f.amount, 0);
+      const newStatus = totalFundedNow >= fundingAllocation.amount ? 'Funded' : 'Pending SOE Funds';
+
+      await updateDoc(doc(db, 'allocations', fundingAllocation.id), {
+        fundedSOEs: updatedFundedSOEs,
+        status: newStatus,
+        updatedAt: Date.now()
+      });
+
+      setFundingAllocation(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'allocations');
+    }
+  };
+
+  const handleUpdateExpenseStatus = async (expenseId: string, status: 'approved' | 'rejected' | 'pending', isLocked: boolean, reason?: string) => {
+    try {
+      if (status === 'approved') {
+        await runTransaction(db, async (transaction) => {
+          const counterDocRef = doc(db, 'appSettings', 'counters');
+          const counterDoc = await transaction.get(counterDocRef);
+          
+          let nextId = 100;
+          if (counterDoc.exists()) {
+            nextId = (counterDoc.data().lastApprovalId || 99) + 1;
+          }
+          
+          transaction.set(counterDocRef, { lastApprovalId: nextId }, { merge: true });
+          transaction.update(doc(db, 'expenditures', expenseId), { 
+            status, 
+            isLocked, 
+            approvalId: nextId,
+            approvalReason: reason || '',
+            updatedAt: Date.now()
+          });
+          logAuditAction('Expenditure Approved', `Status: ${status}, Approval ID: ${nextId}`);
+        });
+      } else {
+        await updateDoc(doc(db, 'expenditures', expenseId), { 
+          status, 
+          isLocked,
+          approvalReason: reason || '',
+          updatedAt: Date.now(),
+          ...(status === 'pending' ? { approvalId: null } : {})
+        });
+        logAuditAction('Expenditure Status Updated', `Status: ${status}, Reason: ${reason || 'N/A'}`);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'expenditures');
+      showAlert(`Error updating status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handleResetUnbilledExpenses = async () => {
+    const unbilledApproved = expenses.filter(e => 
+      e.status === 'approved' && 
+      !bills.some(b => b.expenseIds.includes(e.id))
+    );
+
+    if (unbilledApproved.length === 0) {
+      showAlert("No unbilled approved expenditures found.");
+      return;
+    }
+
+    showConfirm(`Are you sure you want to reset ${unbilledApproved.length} unbilled approved expenditures to pending?`, async () => {
+      try {
+        const batch = writeBatch(db);
+        unbilledApproved.forEach(exp => {
+          batch.update(doc(db, 'expenditures', exp.id), {
+            status: 'pending',
+            isLocked: false,
+            approvalId: null,
+            updatedAt: Date.now()
+          });
+        });
+        await batch.commit();
+        showAlert(`Successfully reset ${unbilledApproved.length} expenditures to pending.`);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, 'expenditures');
+      }
+    });
+  };
+
+  const isExpenseInvalid = useMemo(() => {
+    // Basic validation for required selections
+    if (!expenseFormSelection.schemeId || !expenseFormSelection.rangeId || !expenseFormSelection.soeId || !expenseFormSelection.allocationId) {
+      return true;
+    }
+    
+    if (currentSoeBalance === undefined) {
+      return true;
+    }
+
+    if (!expenseDate) {
+      return true;
+    }
+    
+    let amount = parseFloat(expenseAmount || '0');
+    if (selectedPayeesForExpense.length > 0) {
+      amount = selectedPayeesForExpense.reduce((sum, p) => sum + parseFloat(p.amount || '0'), 0);
+    }
+    
+    if (amount <= 0) return true;
+    return amount > currentSoeBalance;
+  }, [currentSoeBalance, expenseAmount, selectedPayeesForExpense, expenseFormSelection, expenseDate, expenseDescription]);
+
+  useEffect(() => {
+    if (editingItem?.type === 'Expenditure') {
+      setExpenseAmount(String(editingItem.item.amount));
+      setExpenseDate(editingItem.item.date);
+      setExpenseDescription(editingItem.item.description || '');
+      setSelectedPayeesForExpense(editingItem.item.payeeId ? [{ payeeId: editingItem.item.payeeId, amount: String(editingItem.item.amount) }] : []);
+      const deds: ('TDS' | 'TDS_GST')[] = [];
+      if (editingItem.item.tdsAmount || editingItem.item.deductionType === 'TDS' || editingItem.item.deductionType === 'Both') deds.push('TDS');
+      if (editingItem.item.tdsGstAmount || editingItem.item.deductionType === 'TDS_GST' || editingItem.item.deductionType === 'Both') deds.push('TDS_GST');
+      setSelectedDeductions(deds);
+      setPanNumber(editingItem.item.panNumber || '');
+      setGstNumber(editingItem.item.gstNumber || '');
+    } else {
+      setExpenseAmount('');
+      setExpenseDate(new Date().toISOString().split('T')[0]);
+      setExpenseDescription('');
+      setSelectedPayeesForExpense([]);
+      setSelectedDeductions([]);
+      setPanNumber('');
+      setGstNumber('');
+    }
+  }, [editingItem]);
+
+  const handleAddExpense = async (e: any) => {
+    e.preventDefault();
+    if (isFeatureLocked('Expenditure')) {
+      showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+      return;
+    }
+
+    // Safely extract field values even if multiple elements share the same name in DOM
+    const getFieldValue = (fieldName: string) => {
+      const field = e.target[fieldName];
+      if (!field) return '';
+      if (field.value !== undefined && typeof field.value === 'string') return field.value;
+      if (field instanceof HTMLCollection || field instanceof NodeList) {
+        for (let i = 0; i < field.length; i++) {
+          const val = (field[i] as any).value;
+          if (val) return val;
+        }
+      }
+      return '';
+    };
+
+    const allocationId = getFieldValue('allocationId') || expenseFormSelection?.allocationId;
+    const soeId = getFieldValue('soeId') || expenseFormSelection?.soeId;
+    const amount = selectedPayeesForExpense.length > 0 
+      ? selectedPayeesForExpense.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+      : parseFloat(expenseAmount || '0');
+    const date = expenseDate;
+    const description = expenseDescription;
+    const targetFyId = selectedFY;
+
+    const today = new Date().toISOString().split('T')[0];
+    if (date > today) {
+      showAlert("Cannot add expenditure for a future date.");
+      return;
+    }
+
+    if (!allocationId) {
+      showAlert("Please select a valid SOE Head / Allocation before adding expenditure.");
+      return;
+    }
+
+    const alloc = allocations.find(a => a.id === allocationId);
+    if (!alloc) {
+      showAlert("Selected allocation could not be found. Please re-select the SOE Head.");
+      return;
+    }
+
+    const selectedSoe = soes.find(s => s.id === soeId);
+    const selectedName = selectedSoe?.name || 'Unnamed SOE';
+
+    // Aggregate allocation for this hierarchy and SOE Name
+    const totalAllocatedForSoe = allocations.filter(a => 
+      a.rangeId === alloc.rangeId &&
+      a.schemeId === alloc.schemeId &&
+      (a.sectorId || null) === (alloc.sectorId || null) &&
+      (a.activityId || null) === (alloc.activityId || null) &&
+      (a.subActivityId || null) === (alloc.subActivityId || null)
+    ).reduce((sum, a) => {
+      const funded = a.fundedSOEs?.find((f: any) => {
+        const s = soes.find((soe: any) => soe.id === f.soeId);
+        return (s?.name || 'Unnamed SOE') === selectedName;
+      });
+      return sum + (funded?.amount || 0);
+    }, 0);
+
+    // Aggregate expenditure for this hierarchy and SOE Name
+    const totalSpentForSoe = expenses.filter(e => {
+      const eAlloc = allocations.find(a => a.id === e.allocationId);
+      const eSoeName = soes.find(s => s.id === e.soeId)?.name;
+      return (
+        eAlloc &&
+        eAlloc.rangeId === alloc.rangeId &&
+        eAlloc.schemeId === alloc.schemeId &&
+        (eAlloc.sectorId || null) === (alloc.sectorId || null) &&
+        (eAlloc.activityId || null) === (alloc.activityId || null) &&
+        (eAlloc.subActivityId || null) === (alloc.subActivityId || null) &&
+        eSoeName === selectedName &&
+        e.status !== 'rejected' &&
+        (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true)
+      );
+    }).reduce((sum, e) => sum + e.amount, 0);
+
+    const currentBalance = totalAllocatedForSoe - totalSpentForSoe;
+
+    // If we have selected payees, we create multiple expenditures
+    if (selectedPayeesForExpense.length > 0 && editingItem?.type !== 'Expenditure') {
+      const totalAmount = selectedPayeesForExpense.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      
+      if (totalAmount > currentBalance) {
+        showAlert(`Insufficient funds in SOE ${selectedName}. Remaining: ₹${currentBalance.toLocaleString()}`);
+        return;
+      }
+
+      try {
+        const batch = writeBatch(db);
+        for (const p of selectedPayeesForExpense) {
+          const pAmt = Math.round(parseFloat(p.amount) || 0);
+          const pPayeeObj = payees.find(payee => payee.id === p.payeeId);
+          const pGst = pPayeeObj?.gstNumber || gstNumber;
+          const pPan = pPayeeObj?.panNumber || panNumber;
+          let pTdsAmt = 0;
+          let pTdsGstAmt = 0;
+          
+          if (selectedDeductions.includes('TDS') && pAmt > 30000) {
+            pTdsAmt = Math.round(pAmt * 0.01);
+          }
+          if (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) {
+            pTdsGstAmt = Math.round(pAmt * 0.02);
+          }
+          
+          const pTotalDeducted = pTdsAmt + pTdsGstAmt;
+          const pNetAmt = pAmt - pTotalDeducted;
+
+          const docRef = doc(collection(db, 'expenditures'));
+          batch.set(docRef, {
+            allocationId, soeId, amount: pAmt, date, description, financialYear: targetFyId,
+            rangeId: alloc.rangeId,
+            createdBy: user.uid,
+            createdByRole: userRole,
+            status: 'pending',
+            isLocked: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            payeeId: p.payeeId,
+            deductionType: selectedDeductions.length > 0 ? (selectedDeductions.length > 1 ? 'Both' : selectedDeductions[0]) : 'None',
+            deductions: selectedDeductions.map(type => ({ type, amount: type === 'TDS' ? pTdsAmt : pTdsGstAmt })),
+            deductedAmount: pTotalDeducted || null,
+            tdsAmount: pTdsAmt || null,
+            tdsGstAmount: pTdsGstAmt || null,
+            netAmount: pNetAmt,
+            panNumber: pPan || null,
+            gstNumber: pGst || null,
+            syncedMemoId: selectedSyncedMemo?.memoId || null,
+            syncedMemoNo: selectedSyncedMemo?.memoNo || null
+          });
+        }
+        await batch.commit();
+        logAuditAction('Expenditure Batch Created', `${selectedPayeesForExpense.length} payees added, Total: ₹${totalAmount.toLocaleString()}`);
+        setSelectedPayeesForExpense([]);
+        setCurrentSoeBalance(undefined);
+        setExpenseAmount('');
+        setExpenseDescription('');
+        setSelectedDeductions([]);
+        setPanNumber('');
+        setGstNumber('');
+        setSelectedSyncedMemo(null);
+        showAlert(`${selectedPayeesForExpense.length} expenditures added successfully.`);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'expenditures');
+      }
+      return;
+    }
+
+    if (!amount || amount <= 0) {
+      showAlert("Please provide a valid amount.");
+      return;
+    }
+
+    if (amount > currentBalance) {
+      showAlert(`Insufficient funds in SOE ${selectedName}. Remaining: ₹${currentBalance.toLocaleString()}`);
+      return;
+    }
+
+    // Calculate deductions
+    const amt = Math.round(amount);
+    let tdsAmt = 0;
+    let tdsGstAmt = 0;
+    const hasGst = Boolean(gstNumber && gstNumber.trim());
+    
+    if (selectedDeductions.includes('TDS') && amt > 30000) {
+      tdsAmt = Math.round(amt * 0.01);
+    }
+    if (selectedDeductions.includes('TDS_GST') && amt > 250000 && hasGst) {
+      tdsGstAmt = Math.round(amt * 0.02);
+    }
+    
+    const finalDeductedAmount = tdsAmt + tdsGstAmt;
+    const netAmount = amt - finalDeductedAmount;
+
+    try {
+      if (editingItem?.type === 'Expenditure') {
+        const payeeId = e.target.payeeId?.value;
+        const payeeName = e.target.payeeName?.value;
+        await updateDoc(doc(db, 'expenditures', editingItem.item.id), { 
+          allocationId, soeId, amount, date, description, financialYear: targetFyId, rangeId: alloc.rangeId,
+          payeeId: payeeId || null,
+          payeeName: payeeName || null,
+          deductionType: selectedDeductions.length > 0 ? (selectedDeductions.length > 1 ? 'Both' : selectedDeductions[0]) : 'None',
+          deductions: selectedDeductions.map(type => ({ type, amount: type === 'TDS' ? tdsAmt : tdsGstAmt })),
+          deductedAmount: finalDeductedAmount || null,
+          tdsAmount: tdsAmt || null,
+          tdsGstAmount: tdsGstAmt || null,
+          netAmount: netAmount,
+          panNumber: panNumber || null,
+          gstNumber: gstNumber || null,
+          updatedBy: user.uid,
+          updatedByRole: userRole,
+          updatedAt: Date.now()
+        });
+        logAuditAction('Expenditure Updated', `Amount: ₹${amount.toLocaleString()}, SOE: ${selectedName}`);
+        setEditingItem(null);
+        setExpenseAmount('');
+        setExpenseDescription('');
+        setSelectedDeductions([]);
+        setPanNumber('');
+        setGstNumber('');
+        setCurrentSoeBalance(undefined);
+      } else {
+        const payeeName = e.target.payeeName?.value;
+        const payeeId = e.target.payeeId?.value;
+        await addDoc(collection(db, 'expenditures'), { 
+          allocationId, soeId, amount, date, description, financialYear: targetFyId,
+          rangeId: alloc.rangeId,
+          createdBy: user.uid,
+          createdByRole: userRole,
+          status: 'pending',
+          isLocked: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          payeeName: payeeName || null,
+          payeeId: payeeId || null,
+          deductionType: selectedDeductions.length > 0 ? (selectedDeductions.length > 1 ? 'Both' : selectedDeductions[0]) : 'None',
+          deductions: selectedDeductions.map(type => ({ type, amount: type === 'TDS' ? tdsAmt : tdsGstAmt })),
+          deductedAmount: finalDeductedAmount || null,
+          tdsAmount: tdsAmt || null,
+          tdsGstAmount: tdsGstAmt || null,
+          netAmount: netAmount,
+          panNumber: panNumber || null,
+          gstNumber: gstNumber || null,
+          syncedMemoId: selectedSyncedMemo?.memoId || null,
+          syncedMemoNo: selectedSyncedMemo?.memoNo || null
+        });
+        logAuditAction('Expenditure Created', `Amount: ₹${amount.toLocaleString()}, SOE: ${selectedName}`);
+        setCurrentSoeBalance(undefined);
+        setExpenseAmount('');
+        setExpenseDescription('');
+        setSelectedDeductions([]);
+        setPanNumber('');
+        setGstNumber('');
+        setSelectedSyncedMemo(null);
+      }
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Expenditure' ? OperationType.UPDATE : OperationType.CREATE, 'expenditures');
+    }
+  };
+
+  const handleAddPayee = async (e: any) => {
+    e.preventDefault();
+    const name = e.target.name.value;
+    const address = e.target.address.value;
+    const accountNumber = e.target.accountNumber.value;
+    const ifscCode = e.target.ifscCode?.value || '';
+    const panNumber = e.target.panNumber?.value || '';
+    const gstNumber = e.target.gstNumber?.value || '';
+    const treasuryCode = (isAdmin() || isDEO()) ? (e.target.treasuryCode?.value || '') : (editingItem?.type === 'Payee' ? (editingItem.item.treasuryCode || '') : '');
+    const rangeId = e.target.rangeId?.value || null;
+
+    try {
+      if (editingItem?.type === 'Payee') {
+        await updateDoc(doc(db, 'payees', editingItem.item.id), {
+          name, address, accountNumber, ifscCode, panNumber, gstNumber, treasuryCode: treasuryCode ? treasuryCode.trim() : null, rangeId: rangeId || null,
+          updatedAt: Date.now()
+        });
+        logAuditAction('Payee Updated', `Payee: ${name}, Treasury Code: ${treasuryCode || 'N/A'}`);
+        setEditingItem(null);
+        e.target.reset();
+      } else {
+        await addDoc(collection(db, 'payees'), {
+          name, address, accountNumber, ifscCode, panNumber, gstNumber, treasuryCode: treasuryCode ? treasuryCode.trim() : null, rangeId: rangeId || null,
+          createdBy: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        logAuditAction('Payee Created', `Payee: ${name}, Treasury Code: ${treasuryCode || 'N/A'}`);
+        e.target.reset();
+      }
+      showAlert(`Payee ${editingItem?.type === 'Payee' ? 'updated' : 'added'} successfully.`);
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Payee' ? OperationType.UPDATE : OperationType.CREATE, 'payees');
+    }
+  };
+
+  const downloadPayeesPDF = () => {
+    try {
+      const doc = new jsPDF('landscape');
+      doc.setFontSize(16);
+      doc.text('Forest Budget Control System - Payee Details', 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Role / Range: ${userRangeName || userRole || 'All'} | Date: ${new Date().toLocaleDateString('en-IN')}`, 14, 22);
+
+      const tableData = filteredPayeesList.map((p, index) => [
+        index + 1,
+        p.name || '',
+        p.address || '',
+        p.treasuryCode || 'N/A',
+        `${p.accountNumber || ''}\n${p.ifscCode || ''}`,
+        p.panNumber || 'N/A',
+        p.gstNumber || 'N/A',
+        ranges.find(r => r.id === p.rangeId)?.name || 'N/A'
+      ]);
+
+      autoTable(doc, {
+        startY: 28,
+        head: [['S.No', 'Payee Name', 'Address', 'Try Code', 'Bank Account Details', 'PAN No', 'GST No', 'Range']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [0, 77, 64] },
+        styles: { fontSize: 8 }
+      });
+
+      doc.save(`Payees_List_${userRole || 'All'}_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("PDF export error:", err);
+      showAlert("Failed to export PDF.");
+    }
+  };
+
+  const downloadMemoPDF = (memo: MemoForFund) => {
+    try {
+      const doc = new jsPDF('landscape', 'mm', 'a4');
+      const rangeTitle = memo.rangeName ? memo.rangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '') : (userRangeName || 'Sarahan');
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.text("H.P. FOREST DEPARTMENT", 148.5, 12, { align: "center" });
+      doc.setFontSize(13);
+      doc.text(`OFFICE OF THE RANGE FOREST OFFICER, ${rangeTitle.toUpperCase()}`, 148.5, 18, { align: "center" });
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text("Forest Division Rajgarh, District Sirmaur (H.P.)", 148.5, 23, { align: "center" });
+
+      doc.setLineWidth(0.4);
+      doc.line(12, 26, 285, 26);
+
+      doc.setFontSize(9.5);
+      doc.setFont("helvetica", "bold");
+      doc.text(`No. ${memo.memoNo || ''}`, 12, 31);
+      const dateFormatted = memo.date ? memo.date.split('-').reverse().join('.') : '';
+      doc.text(`Dated: ${dateFormatted}`, 285, 31, { align: "right" });
+
+      doc.setLineWidth(0.2);
+      doc.line(12, 33, 285, 33);
+
+      // Single-line From & To Header
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text("From:", 12, 38);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Range Forest Officer, ${memo.rangeName || rangeTitle}.`, 24, 38);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("To:", 155, 38);
+      doc.setFont("helvetica", "normal");
+      doc.text("The Divisional Forest Officer, Rajgarh Forest Division (H.P.).", 162, 38);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("Subject:", 12, 44);
+      const schemeText = memo.schemeName || 'All Schemes';
+      const sectorText = memo.sectorName ? ` (${memo.sectorName})` : '';
+      const subjStr = `Memo for Fund for the month of ${memo.monthYear} under scheme ${schemeText}${sectorText}.`;
+      doc.text(subjStr, 28, 44, { maxWidth: 255 });
+
+      doc.text("Sir,", 12, 50);
+      const totalGrossAmt = Math.round(Number(memo.totalAmount) || 0);
+      const totalITaxAmt = Math.round(Number(memo.totalITax) || 0);
+      const totalGstAmt = Math.round(Number(memo.totalGst) || 0);
+      const totalNetRtgsAmt = Math.round(Number(memo.totalNetRtgs) || totalGrossAmt);
+
+      const bodyText = `It is submitted that this Range wishes to make payment to the payee(s) for the execution of departmental forestry works / liabilities for the month of ${memo.monthYear} as per the details tabulated below. You are kindly requested to sanction and release the total expenditure amount of Rs. ${totalGrossAmt.toLocaleString('en-IN')} (Total Net RTGS Amount: Rs. ${totalNetRtgsAmt.toLocaleString('en-IN')}) and arrange payment through RTGS / Treasury e-Transfer mode to the respective payees at the earliest.`;
+      const splitBody = doc.splitTextToSize(bodyText, 273);
+      doc.text(splitBody, 12, 55);
+
+      const nextY = 55 + (splitBody.length * 4.2) + 2;
+
+      // Table columns requested:
+      // 1. Name & Address
+      // 2. Try Code
+      // 3. Bank Account Details
+      // 4. Total Amount
+      // 5. Sub-voucher amount with description
+      // 6. Combined Deduction (I/Tax + GST)
+      // 7. Net Amount
+      // 8. PAN & GST Number
+      const tableHead = [['Sr.', 'Name & Address', 'Try Code', 'Bank Account Details', 'Total (Rs)', 'Sub Voucher Details', 'Deductions\n(I.Tax + GST)', 'Net RTGS (Rs)', 'PAN & GSTIN']];
+      const tableData = (memo.payeeEntries || []).map((e, idx) => {
+        const subVouchersText = e.subVouchers && e.subVouchers.length > 0
+          ? e.subVouchers.map((sv, svIdx) => `${svIdx + 1}. Rs. ${Math.round(Number(sv.amount) || 0).toLocaleString('en-IN')}${sv.voucherNo ? ' [' + sv.voucherNo + ']' : ''}${sv.description ? ' (' + sv.description + ')' : ''}`).join('\n')
+          : `Single Bill: Rs. ${Math.round(Number(e.totalAmount) || 0).toLocaleString('en-IN')}`;
+
+        const iTax = Math.round(Number(e.iTaxAmount) || 0);
+        const gst = Math.round(Number(e.gstAmount) || 0);
+        const totDed = iTax + gst;
+        const dedText = totDed > 0
+          ? `Rs. ${totDed.toLocaleString('en-IN')}${iTax > 0 ? `\n(IT: Rs. ${iTax.toLocaleString('en-IN')})` : ''}${gst > 0 ? `\n(GST: Rs. ${gst.toLocaleString('en-IN')})` : ''}`
+          : 'Nil (Rs. 0)';
+
+        return [
+          idx + 1,
+          `${e.name || ''}${e.address ? '\n' + e.address : ''}`,
+          e.treasuryCode || '-',
+          `${e.accountNumber || ''}\n${e.ifscCode || ''}`,
+          Math.round(Number(e.totalAmount) || 0).toLocaleString('en-IN'),
+          subVouchersText,
+          dedText,
+          Math.round(Number(e.netRtgsAmount) || 0).toLocaleString('en-IN'),
+          `PAN: ${e.panNumber || 'N/A'}${e.gstNumber ? '\nGST: ' + e.gstNumber : ''}`
+        ];
+      });
+
+      const footRow = [
+        '',
+        'TOTAL: -',
+        '',
+        '',
+        totalGrossAmt.toLocaleString('en-IN'),
+        '',
+        (totalITaxAmt + totalGstAmt).toLocaleString('en-IN'),
+        totalNetRtgsAmt.toLocaleString('en-IN'),
+        ''
+      ];
+
+      autoTable(doc, {
+        startY: nextY,
+        head: tableHead,
+        body: tableData,
+        foot: [footRow],
+        theme: 'grid',
+        showHead: 'everyPage',
+        pageBreak: 'auto',
+        styles: { fontSize: 7, cellPadding: 1.2, overflow: 'linebreak' },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center' },
+        footStyles: { fillColor: [245, 245, 245], textColor: [0, 0, 0], fontStyle: 'bold' },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 8 },
+          1: { cellWidth: 44 },
+          2: { halign: 'center', cellWidth: 24 },
+          3: { cellWidth: 34 },
+          4: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
+          5: { cellWidth: 46 },
+          6: { halign: 'right', cellWidth: 28 },
+          7: { halign: 'right', cellWidth: 30, fontStyle: 'bold' },
+          8: { cellWidth: 30 }
+        }
+      });
+
+      let finalY = (doc as any).lastAutoTable?.finalY || nextY + 40;
+      if (finalY > 175) {
+        doc.addPage();
+        finalY = 20;
+      } else {
+        finalY += 5;
+      }
+
+      const words = convertNumberToWords(totalNetRtgsAmt);
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Total Net Amount Payable (in words): Rupees ${words} Only`, 12, finalY);
+
+      finalY += 15;
+      if (finalY > 185) {
+        doc.addPage();
+        finalY = 25;
+      }
+      doc.text("Range Forest Officer", 245, finalY, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.text(memo.rangeName || rangeTitle, 245, finalY + 4, { align: "center" });
+      doc.text("Rajgarh Forest Division", 245, finalY + 8, { align: "center" });
+
+      doc.save(`Memo_For_Fund_${(memo.memoNo || 'Memo').replace(/[/\\?%*:|"<>]/g, '_')}_${memo.monthYear || ''}.pdf`);
+    } catch (err) {
+      console.error("Error generating Memo PDF:", err);
+      showAlert("Failed to download Memo PDF.");
+    }
+  };
+
+  const handlePrintMemo = (targetMemo?: MemoForFund) => {
+    const memoToPrint = targetMemo || viewingMemo;
+    if (!memoToPrint) return;
+    try {
+      const rangeTitle = memoToPrint.rangeName ? memoToPrint.rangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '') : (userRangeName || 'Sarahan');
+      const dateFormatted = memoToPrint.date ? memoToPrint.date.split('-').reverse().join('.') : '';
+      const totalGrossAmt = Math.round(Number(memoToPrint.totalAmount) || 0);
+      const totalITaxAmt = Math.round(Number(memoToPrint.totalITax) || 0);
+      const totalGstAmt = Math.round(Number(memoToPrint.totalGst) || 0);
+      const totalNetRtgsAmt = Math.round(Number(memoToPrint.totalNetRtgs) || totalGrossAmt);
+      const words = convertNumberToWords(totalNetRtgsAmt);
+
+      const tableRowsHtml = (memoToPrint.payeeEntries || []).map((e, idx) => {
+        const subVouchersHtml = e.subVouchers && e.subVouchers.length > 0
+          ? e.subVouchers.map((sv, svIdx) => `<div style="font-size:10px; color:#047857; line-height:1.3;">${svIdx + 1}. ${sv.voucherNo ? '<strong>' + sv.voucherNo + '</strong>: ' : ''}₹${Math.round(Number(sv.amount) || 0).toLocaleString('en-IN')}${sv.description ? ' <em>(' + sv.description + ')</em>' : ''}</div>`).join('')
+          : `<div style="font-size:10px; color:#666;">Single Bill: ₹${Math.round(Number(e.totalAmount) || 0).toLocaleString('en-IN')}</div>`;
+
+        const iTax = Math.round(Number(e.iTaxAmount) || 0);
+        const gst = Math.round(Number(e.gstAmount) || 0);
+        const totDed = iTax + gst;
+        const dedHtml = totDed > 0
+          ? `<strong>₹${totDed.toLocaleString('en-IN')}</strong>${iTax > 0 ? `<div style="font-size:9.5px; color:#b91c1c;">(IT: ₹${iTax.toLocaleString('en-IN')})</div>` : ''}${gst > 0 ? `<div style="font-size:9.5px; color:#6b21a8;">(GST: ₹${gst.toLocaleString('en-IN')})</div>` : ''}`
+          : `<span style="color:#666; font-size:10px;">Nil (₹0)</span>`;
+
+        return `
+          <tr>
+            <td style="text-align:center; padding:5px 3px; border:1px solid #444; font-size:11px;">${idx + 1}</td>
+            <td style="padding:5px 6px; border:1px solid #444; font-size:11px;">
+              <strong>${e.name || ''}</strong>
+              ${e.address ? `<div style="font-size:10px; color:#555; margin-top:2px;">${e.address}</div>` : ''}
+            </td>
+            <td style="padding:5px; border:1px solid #444; font-family:monospace; font-size:10.5px; font-weight:600;">${e.accountNumber || ''}</td>
+            <td style="padding:5px; border:1px solid #444; font-family:monospace; font-size:10.5px;">${e.ifscCode || ''}</td>
+            <td style="text-align:right; padding:5px; border:1px solid #444; font-weight:bold; font-size:11px;">₹${Math.round(Number(e.totalAmount) || 0).toLocaleString('en-IN')}</td>
+            <td style="padding:5px; border:1px solid #444; font-size:10.5px;">${subVouchersHtml}</td>
+            <td style="text-align:right; padding:5px; border:1px solid #444; font-size:10.5px;">${dedHtml}</td>
+            <td style="text-align:right; padding:5px; border:1px solid #444; font-weight:bold; color:#064e3b; font-size:11px;">₹${Math.round(Number(e.netRtgsAmount) || 0).toLocaleString('en-IN')}</td>
+            <td style="padding:5px; border:1px solid #444; font-size:10px;">PAN: ${e.panNumber || 'N/A'}${e.gstNumber ? `<br/>GST: ${e.gstNumber}` : ''}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Memo No. ${memoToPrint.memoNo}</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm 12mm 12mm 12mm;
+            }
+            body {
+              font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+              color: #111;
+              margin: 0;
+              padding: 0;
+              font-size: 11.5px;
+              line-height: 1.4;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #222;
+              padding-bottom: 6px;
+              margin-bottom: 6px;
+            }
+            .header h2 {
+              margin: 0;
+              font-size: 11px;
+              letter-spacing: 2px;
+              text-transform: uppercase;
+              color: #333;
+            }
+            .header h1 {
+              margin: 3px 0 2px 0;
+              font-size: 14px;
+              font-weight: bold;
+              text-transform: uppercase;
+              color: #000;
+            }
+            .header p {
+              margin: 0;
+              font-size: 10.5px;
+              color: #444;
+            }
+            .ref-date {
+              display: flex;
+              justify-content: space-between;
+              border-bottom: 1px solid #666;
+              padding-bottom: 4px;
+              margin-bottom: 6px;
+              font-size: 11px;
+            }
+            .from-to-row {
+              display: flex;
+              justify-content: space-between;
+              border-bottom: 1px solid #eee;
+              padding-bottom: 4px;
+              margin-bottom: 6px;
+              font-size: 11px;
+            }
+            .subject-box {
+              background: #f8fafc;
+              border: 1px solid #cbd5e1;
+              padding: 6px 10px;
+              margin-bottom: 8px;
+              border-radius: 4px;
+              font-weight: bold;
+              font-size: 11px;
+            }
+            .letter-text {
+              margin-bottom: 6px;
+              text-align: justify;
+              font-size: 11px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 6px;
+              margin-bottom: 8px;
+              page-break-inside: auto;
+            }
+            thead {
+              display: table-header-group;
+            }
+            tfoot {
+              display: table-footer-group;
+            }
+            tr {
+              page-break-inside: avoid;
+            }
+            th {
+              background-color: #f1f5f9;
+              font-weight: bold;
+              text-align: center;
+              border: 1px solid #444;
+              padding: 5px 3px;
+              font-size: 10px;
+            }
+            tfoot td {
+              font-weight: bold;
+              background-color: #f8fafc;
+              border: 1px solid #444;
+              padding: 5px;
+              font-size: 11px;
+            }
+            .words-box {
+              background: #f8fafc;
+              border: 1px solid #cbd5e1;
+              padding: 6px 10px;
+              margin-top: 6px;
+              border-radius: 4px;
+              font-weight: bold;
+              font-size: 11px;
+            }
+            .signature {
+              margin-top: 25px;
+              float: right;
+              width: 240px;
+              text-align: center;
+              page-break-inside: avoid;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>H.P. FOREST DEPARTMENT</h2>
+            <h1>OFFICE OF THE RANGE FOREST OFFICER, ${rangeTitle.toUpperCase()}</h1>
+            <p>Forest Division Rajgarh, District Sirmaur (H.P.)</p>
+          </div>
+
+          <div class="ref-date">
+            <div>No. <strong>${memoToPrint.memoNo}</strong></div>
+            <div>Dated: <strong>${dateFormatted}</strong></div>
+          </div>
+
+          <div class="from-to-row">
+            <div><strong>From:</strong> Range Forest Officer, ${memoToPrint.rangeName || rangeTitle}.</div>
+            <div><strong>To:</strong> The Divisional Forest Officer, Rajgarh Forest Division (H.P.).</div>
+          </div>
+
+          <div class="subject-box">
+            Subject: - <u>Memo for Fund for the month of ${memoToPrint.monthYear} under scheme ${memoToPrint.schemeName || 'All Schemes'}${memoToPrint.sectorName ? ` (${memoToPrint.sectorName})` : ''}.</u>
+          </div>
+
+          <div class="letter-text">
+            <p style="margin: 0 0 3px 0;"><strong>Sir,</strong></p>
+            <p style="margin: 0 0 3px 0;">
+              It is submitted that this Range wishes to make payment to the payee(s) for the execution of departmental forestry works / liabilities for the month of <strong>${memoToPrint.monthYear}</strong> as per the details tabulated below.
+            </p>
+            <p style="margin: 0;">
+              You are kindly requested to sanction and release the total expenditure amount of <strong>₹${totalGrossAmt.toLocaleString('en-IN')}</strong> (Total Net RTGS Amount: <strong>₹${totalNetRtgsAmt.toLocaleString('en-IN')}</strong>) and arrange payment through RTGS / Treasury e-Transfer mode to the respective payees at the earliest.
+            </p>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 24px;">Sr.</th>
+                <th>Name & Address</th>
+                <th style="width: 105px;">Account No.</th>
+                <th style="width: 80px;">IFSC Code</th>
+                <th style="width: 85px;">Total Amount</th>
+                <th>Sub Voucher Details</th>
+                <th style="width: 90px;">Deductions<br/>(I.Tax / GST)</th>
+                <th style="width: 95px;">Net RTGS</th>
+                <th style="width: 95px;">PAN & GSTIN</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRowsHtml}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="4" style="text-align: right; font-weight: bold;">TOTAL: -</td>
+                <td style="text-align: right; font-weight: bold;">₹${totalGrossAmt.toLocaleString('en-IN')}</td>
+                <td style="text-align: center;">-</td>
+                <td style="text-align: right; color:#b91c1c; font-weight: bold;">₹${(totalITaxAmt + totalGstAmt).toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color:#064e3b; font-weight: bold;">₹${totalNetRtgsAmt.toLocaleString('en-IN')}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="words-box">
+            Total Net Amount Payable (in words): <em>Rupees ${words} Only</em>
+          </div>
+
+          <div class="signature">
+            <br/><br/>
+            <p style="margin:2px 0; font-weight:bold;">Range Forest Officer</p>
+            <p style="margin:2px 0;">${memoToPrint.rangeName || rangeTitle}</p>
+            <p style="margin:2px 0; font-size:10px; color:#555;">Rajgarh Forest Division</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      // Create a hidden print iframe
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = '0';
+      document.body.appendChild(printFrame);
+
+      const frameDoc = printFrame.contentWindow?.document || printFrame.contentDocument;
+      if (frameDoc) {
+        frameDoc.open();
+        frameDoc.write(htmlContent);
+        frameDoc.close();
+
+        setTimeout(() => {
+          try {
+            printFrame.contentWindow?.focus();
+            printFrame.contentWindow?.print();
+          } catch (err) {
+            console.warn("Iframe print fallback to window.print", err);
+            window.print();
+          } finally {
+            setTimeout(() => {
+              if (document.body.contains(printFrame)) {
+                document.body.removeChild(printFrame);
+              }
+            }, 1500);
+          }
+        }, 300);
+      } else {
+        window.print();
+      }
+    } catch (e) {
+      console.error("Print error:", e);
+      window.print();
+    }
+  };
+
+  const generateExpenditurePDFDoc = () => {
+    const doc = new jsPDF('landscape');
+    const fyName = fys.find(f => f.id === selectedFY)?.name || selectedFY;
+    const rangeNameDisplay = ranges.find(r => r.id === userRangeId)?.name || userRangeName || 'Rajgarh Forest Division';
+
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Department of Forests, Himachal Pradesh", 14, 12);
+    
+    doc.setFontSize(11);
+    doc.text(`Rajgarh Forest Division — Expenditure Report List (FY ${fyName})`, 14, 18);
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Range/Unit: ${rangeNameDisplay} | Generated On: ${new Date().toLocaleDateString('en-GB')} | Total Entries: ${currentExpenses.length}`, 14, 24);
+
+    const tableData = currentExpenses.map((exp, idx) => {
+      const p = payees.find(p => p.id === exp.payeeId);
+      const payeeName = p?.name || exp.payeeName || 'N/A';
+      const payeeAcc = p?.accountNumber ? `A/C: ${p.accountNumber}` : '';
+      const payeeInfo = payeeAcc ? `${payeeName}\n${payeeAcc}` : payeeName;
+      
+      const al = allocations.find(a => a.id === exp.allocationId);
+      const r = ranges.find(r => r.id === al?.rangeId);
+      const s = soes.find(s => s.id === exp.soeId);
+      const locationInfo = `${r?.name || 'N/A'} / ${s?.name || 'N/A'}`;
+
+      return [
+        (idx + 1).toString(),
+        exp.date ? exp.date.split('-').reverse().join('/') : '',
+        payeeInfo,
+        locationInfo,
+        exp.description || '-',
+        `Rs. ${(Number(exp.amount) || 0).toLocaleString('en-IN')}`,
+        exp.status || 'pending'
+      ];
+    });
+
+    const totalAmt = currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+    autoTable(doc, {
+      startY: 28,
+      head: [['#', 'Date', 'Payee Name & Account', 'Unit / Range / SOE', 'Description / Particulars', 'Amount (Rs.)', 'Status']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [5, 150, 105], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 50 },
+        3: { cellWidth: 40 },
+        4: { cellWidth: 80 },
+        5: { cellWidth: 35, halign: 'right', fontStyle: 'bold' },
+        6: { cellWidth: 25, halign: 'center' }
+      },
+      foot: [[
+        { content: 'Total Expenditure Amount:', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
+        { content: `Rs. ${totalAmt.toLocaleString('en-IN')}`, styles: { halign: 'right', fontStyle: 'bold', textColor: [5, 150, 105] } },
+        ''
+      ]]
+    });
+
+    const finalY = (doc as any).lastAutoTable?.finalY || 150;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text("Prepared By: Dealing Assistant / Data Entry Operator", 14, finalY + 15);
+    doc.text("Verified & Authorised By: Range Forest Officer / DFO", 200, finalY + 15);
+
+    return { doc, fyName };
+  };
+
+  const downloadExpenditureListPDF = () => {
+    try {
+      const { doc, fyName } = generateExpenditurePDFDoc();
+      doc.save(`Expenditure_List_FY_${fyName}_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("PDF Export Error:", err);
+      showAlert("Failed to export Expenditure PDF.");
+    }
+  };
+
+  const printHtmlViaIframe = (htmlContent: string) => {
+    try {
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = '0';
+      document.body.appendChild(printFrame);
+
+      const frameDoc = printFrame.contentWindow?.document || printFrame.contentDocument;
+      if (frameDoc) {
+        frameDoc.open();
+        frameDoc.write(htmlContent);
+        frameDoc.close();
+
+        setTimeout(() => {
+          try {
+            printFrame.contentWindow?.focus();
+            printFrame.contentWindow?.print();
+          } catch (err) {
+            console.warn("Iframe print fallback to window.print", err);
+            window.print();
+          } finally {
+            setTimeout(() => {
+              if (document.body.contains(printFrame)) {
+                document.body.removeChild(printFrame);
+              }
+            }, 1500);
+          }
+        }, 300);
+      } else {
+        window.print();
+      }
+    } catch (e) {
+      console.error("Print error:", e);
+      window.print();
+    }
+  };
+
+  const handlePrintExpenditureReport = () => {
+    try {
+      const fyName = fys.find(f => f.id === selectedFY)?.name || selectedFY;
+      const rangeNameDisplay = ranges.find(r => r.id === userRangeId)?.name || userRangeName || 'Rajgarh Forest Division';
+      const totalGrossAmt = currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const totalTdsAmt = currentExpenses.reduce((sum, e) => sum + Math.round(e.tdsAmount || 0), 0);
+      const totalGstTdsAmt = currentExpenses.reduce((sum, e) => sum + Math.round(e.tdsGstAmount || 0), 0);
+      const totalDeductedAmt = totalTdsAmt + totalGstTdsAmt;
+      const totalNetPayableAmt = currentExpenses.reduce((sum, e) => {
+        const gross = Number(e.amount) || 0;
+        const ded = Math.round(e.deductedAmount || ((e.tdsAmount || 0) + (e.tdsGstAmount || 0)));
+        return sum + Math.round(e.netAmount ?? (gross - ded));
+      }, 0);
+
+      const rowsHtml = currentExpenses.map((exp, idx) => {
+        const p = payees.find(p => p.id === exp.payeeId);
+        const payeeName = p?.name || exp.payeeName || 'N/A';
+        const payeeAcc = p?.accountNumber ? `A/C: ${p.accountNumber}` : '';
+        const payeeTryCode = p?.treasuryCode ? `<br/><span style="font-size:9px; color:#065f46; font-weight:bold; font-family:monospace;">TRY: ${p.treasuryCode}</span>` : '';
+        const al = allocations.find(a => a.id === exp.allocationId);
+        const r = ranges.find(r => r.id === al?.rangeId);
+        const s = soes.find(s => s.id === exp.soeId);
+
+        const gross = Number(exp.amount) || 0;
+        const tds = Math.round(exp.tdsAmount || 0);
+        const gstTds = Math.round(exp.tdsGstAmount || 0);
+        const totalDed = Math.round(exp.deductedAmount || (tds + gstTds));
+        const netPay = Math.round(exp.netAmount ?? (gross - totalDed));
+
+        let deductionDisplay = '-';
+        if (totalDed > 0) {
+          const parts = [];
+          if (tds > 0) parts.push(`TDS: ₹${tds.toLocaleString('en-IN')}`);
+          if (gstTds > 0) parts.push(`GST: ₹${gstTds.toLocaleString('en-IN')}`);
+          deductionDisplay = parts.join('<br/>') || `₹${totalDed.toLocaleString('en-IN')}`;
+        }
+
+        return `
+          <tr>
+            <td style="text-align: center;">${idx + 1}</td>
+            <td style="white-space: nowrap;">${exp.date ? exp.date.split('-').reverse().join('/') : '-'}</td>
+            <td>
+              <strong>${payeeName}</strong>
+              ${payeeAcc ? `<br/><span style="font-size:9px; color:#555; font-family:monospace;">${payeeAcc}</span>` : ''}
+              ${payeeTryCode}
+            </td>
+            <td><strong>${r?.name || 'N/A'}</strong><br/><span style="font-size:9px; color:#555;">SOE: ${s?.name || 'N/A'}</span></td>
+            <td style="font-style: italic;">${exp.description || '-'}</td>
+            <td style="text-align: right; font-weight: bold;">₹${gross.toLocaleString('en-IN')}</td>
+            <td style="text-align: right; color: #b91c1c; font-size: 9.5px;">${deductionDisplay}</td>
+            <td style="text-align: right; font-weight: bold; color: #064e3b;">₹${netPay.toLocaleString('en-IN')}</td>
+            <td style="text-align: center; text-transform: uppercase; font-size: 9px; font-weight: bold;">${exp.status || 'pending'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Expenditure Report List - Rajgarh Forest Division</title>
+          <meta charset="utf-8" />
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm 12mm 12mm 12mm;
+            }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              thead { display: table-header-group; }
+              tfoot { display: table-footer-group; }
+              tr { page-break-inside: avoid; }
+            }
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 10px;
+              color: #111;
+              line-height: 1.35;
+              padding: 0;
+              margin: 0;
+            }
+            .header-block {
+              text-align: center;
+              margin-bottom: 12px;
+              border-bottom: 2px solid #047857;
+              padding-bottom: 8px;
+            }
+            .header-block h1 {
+              font-size: 15px;
+              margin: 0 0 3px 0;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #064e3b;
+            }
+            .header-block h2 {
+              font-size: 12px;
+              margin: 0 0 3px 0;
+              color: #1f2937;
+            }
+            .meta-bar {
+              display: flex;
+              justify-content: space-between;
+              font-size: 9.5px;
+              color: #374151;
+              margin-top: 4px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 8px;
+            }
+            th, td {
+              border: 1px solid #9ca3af;
+              padding: 5px 6px;
+              vertical-align: middle;
+            }
+            th {
+              background-color: #f3f4f6;
+              color: #111827;
+              font-weight: bold;
+              text-align: left;
+              font-size: 9.5px;
+            }
+            tfoot tr td {
+              background-color: #f9fafb;
+              font-weight: bold;
+              border-top: 2px solid #374151;
+            }
+            .signature-block {
+              margin-top: 35px;
+              display: flex;
+              justify-content: space-between;
+              font-size: 10px;
+              page-break-inside: avoid;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-block">
+            <h1>Department of Forests, Himachal Pradesh</h1>
+            <h2>Rajgarh Forest Division — Expenditure Report List</h2>
+            <div class="meta-bar">
+              <span><strong>Financial Year:</strong> ${fyName}</span>
+              <span><strong>Range / Unit:</strong> ${rangeNameDisplay}</span>
+              <span><strong>Total Entries:</strong> ${currentExpenses.length}</span>
+              <span><strong>Date Generated:</strong> ${new Date().toLocaleDateString('en-GB')}</span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 24px; text-align: center;">#</th>
+                <th style="width: 70px;">Date</th>
+                <th>Payee Name & Account</th>
+                <th style="width: 130px;">Unit / SOE</th>
+                <th>Description / Particulars</th>
+                <th style="width: 80px; text-align: right;">Gross (₹)</th>
+                <th style="width: 85px; text-align: right;">Deductions</th>
+                <th style="width: 85px; text-align: right;">Net RTGS (₹)</th>
+                <th style="width: 60px; text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="5" style="text-align: right; text-transform: uppercase;">Total Expenditure Summary:</td>
+                <td style="text-align: right; color: #111827;">₹${totalGrossAmt.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: #b91c1c;">₹${totalDeductedAmt.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: #064e3b; font-size: 11px;">₹${totalNetPayableAmt.toLocaleString('en-IN')}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="signature-block">
+            <div>
+              <p style="margin: 0; font-weight: bold;">Prepared By:</p>
+              <p style="margin: 30px 0 0 0; color: #4b5563;">Dealing Assistant / Data Entry Operator</p>
+            </div>
+            <div style="text-align: right;">
+              <p style="margin: 0; font-weight: bold;">Verified & Authorised By:</p>
+              <p style="margin: 30px 0 0 0; color: #4b5563;">Range Forest Officer / Divisional Forest Officer</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      printHtmlViaIframe(htmlContent);
+    } catch (e) {
+      console.error("Print error:", e);
+      window.print();
+    }
+  };
+
+  const handlePrintPayees = () => {
+    try {
+      const rangeNameDisplay = userRangeName || (userRole === 'admin' ? 'Division Headquarter' : userRole) || 'All Ranges';
+      const rowsHtml = filteredPayeesList.map((p, index) => {
+        const rName = ranges.find(r => r.id === p.rangeId)?.name || 'Not Specified';
+        return `
+          <tr>
+            <td style="text-align: center;">${index + 1}</td>
+            <td><strong>${p.name || ''}</strong></td>
+            <td>${p.address || ''}</td>
+            <td style="font-family: monospace; font-weight: bold;">${p.accountNumber || ''}</td>
+            <td style="font-family: monospace; color: #065f46; font-weight: bold;">${p.treasuryCode || '<span style="color:#9ca3af; font-weight:normal;">-</span>'}</td>
+            <td style="font-family: monospace;">${p.ifscCode || '<span style="color:#9ca3af;">-</span>'}</td>
+            <td style="font-family: monospace;">${p.panNumber || '<span style="color:#9ca3af;">-</span>'}</td>
+            <td style="font-family: monospace;">${p.gstNumber || '<span style="color:#9ca3af;">-</span>'}</td>
+            <td>${rName}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Payee Directory - Rajgarh Forest Division</title>
+          <meta charset="utf-8" />
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm 12mm 12mm 12mm;
+            }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              thead { display: table-header-group; }
+              tfoot { display: table-footer-group; }
+              tr { page-break-inside: avoid; }
+            }
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 10px;
+              color: #111;
+              line-height: 1.35;
+              padding: 0;
+              margin: 0;
+            }
+            .header-block {
+              text-align: center;
+              margin-bottom: 12px;
+              border-bottom: 2px solid #047857;
+              padding-bottom: 8px;
+            }
+            .header-block h1 {
+              font-size: 15px;
+              margin: 0 0 3px 0;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #064e3b;
+            }
+            .header-block h2 {
+              font-size: 12px;
+              margin: 0 0 3px 0;
+              color: #1f2937;
+            }
+            .meta-bar {
+              display: flex;
+              justify-content: space-between;
+              font-size: 9.5px;
+              color: #374151;
+              margin-top: 4px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 8px;
+            }
+            th, td {
+              border: 1px solid #9ca3af;
+              padding: 5px 6px;
+              vertical-align: middle;
+            }
+            th {
+              background-color: #f3f4f6;
+              color: #111827;
+              font-weight: bold;
+              text-align: left;
+              font-size: 9.5px;
+            }
+            tfoot tr td {
+              background-color: #f9fafb;
+              font-weight: bold;
+              border-top: 2px solid #374151;
+            }
+            .signature-block {
+              margin-top: 35px;
+              display: flex;
+              justify-content: space-between;
+              font-size: 10px;
+              page-break-inside: avoid;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-block">
+            <h1>Department of Forests, Himachal Pradesh</h1>
+            <h2>Rajgarh Forest Division — Payee Directory Details</h2>
+            <div class="meta-bar">
+              <span><strong>Scope:</strong> ${rangeNameDisplay}</span>
+              <span><strong>Total Registered Payees:</strong> ${filteredPayeesList.length}</span>
+              <span><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 24px; text-align: center;">#</th>
+                <th style="width: 130px;">Payee Name</th>
+                <th>Address</th>
+                <th style="width: 110px;">Account Number</th>
+                <th style="width: 100px;">Treasury Code</th>
+                <th style="width: 85px;">IFSC Code</th>
+                <th style="width: 85px;">PAN Number</th>
+                <th style="width: 95px;">GST Number</th>
+                <th style="width: 90px;">Range</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="9" style="text-align: right; font-size: 9px; color: #4b5563;">
+                  Total Records: ${filteredPayeesList.length} Payee(s)
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="signature-block">
+            <div>
+              <p style="margin: 0; font-weight: bold;">Verified By:</p>
+              <p style="margin: 30px 0 0 0; color: #4b5563;">Data Entry Operator / Dealing Assistant</p>
+            </div>
+            <div style="text-align: right;">
+              <p style="margin: 0; font-weight: bold;">Divisional Forest Officer / Range Officer</p>
+              <p style="margin: 30px 0 0 0; color: #4b5563;">Rajgarh Forest Division, H.P.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      printHtmlViaIframe(htmlContent);
+    } catch (e) {
+      console.error("Print error:", e);
+      window.print();
+    }
+  };
+
+  const handleSaveTreasuryCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!treasuryCodeModalPayee) return;
+    if (!isAdmin() && !isDEO()) {
+      showAlert("Only Admin or DEO can add or update the Treasury Code.");
+      return;
+    }
+    try {
+      const code = treasuryCodeInput.trim();
+      await updateDoc(doc(db, 'payees', treasuryCodeModalPayee.id), {
+        treasuryCode: code || null,
+        updatedAt: Date.now()
+      });
+      logAuditAction('Payee Treasury Code Updated', `Payee: ${treasuryCodeModalPayee.name}, Treasury Code: ${code || 'Cleared'}`);
+      showAlert(`Treasury Code for "${treasuryCodeModalPayee.name}" saved successfully.`);
+      setTreasuryCodeModalPayee(null);
+      setTreasuryCodeInput('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `payees/${treasuryCodeModalPayee.id}`);
+    }
+  };
+
+  const downloadPayeesWord = () => {
+    try {
+      const payeeData = filteredPayeesList;
+      let html = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head><title>Payee List</title>
+        <style>
+          body { font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; font-size: 10pt; }
+          th { background-color: #004d40; color: #ffffff; }
+          h2 { color: #004d40; }
+        </style>
+        </head>
+        <body>
+          <h2>Forest Budget Control System - Payee Details</h2>
+          <p><b>Role / Range:</b> ${userRangeName || userRole || 'All'} | <b>Date:</b> ${new Date().toLocaleDateString('en-IN')}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th>
+                <th>Payee Name</th>
+                <th>Address</th>
+                <th>Try Code</th>
+                <th>Bank Account Details</th>
+                <th>PAN Number</th>
+                <th>GST Number</th>
+                <th>Range</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${payeeData.map((p, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td>${p.name || ''}</td>
+                  <td>${p.address || ''}</td>
+                  <td>${p.treasuryCode || 'N/A'}</td>
+                  <td style="font-family: monospace;"><b>${p.accountNumber || ''}</b><br/><small>${p.ifscCode || ''}</small></td>
+                  <td>${p.panNumber || 'N/A'}</td>
+                  <td>${p.gstNumber || 'N/A'}</td>
+                  <td>${ranges.find(r => r.id === p.rangeId)?.name || 'N/A'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `;
+      const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Payees_List_${userRole || 'All'}_${new Date().toISOString().split('T')[0]}.doc`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Word export error:", err);
+      showAlert("Failed to export Word document.");
+    }
+  };
+
+  // --- Derived default From authority and auto-generated Memo Number ---
+  const defaultFromAuthority = useMemo(() => {
+    if (userRole && ['Sarahan', 'Narag', 'Habban', 'Rajgarh', 'Division'].some(r => r.toLowerCase() === userRole.toLowerCase())) {
+      const match = ['Sarahan', 'Narag', 'Habban', 'Rajgarh', 'Division'].find(r => r.toLowerCase() === userRole.toLowerCase());
+      return `RFO ${match || userRole}`;
+    }
+    if (userRangeName) {
+      return `RFO ${userRangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '')}`;
+    }
+    return 'RFO Sarahan';
+  }, [userRole, userRangeName]);
+
+  const autoMemoNo = useMemo(() => {
+    if (editingMemo) return editingMemo.memoNo;
+
+    const rangeKey = userRole && ['Sarahan', 'Narag', 'Habban', 'Rajgarh', 'Division'].find(r => r.toLowerCase() === (userRole || '').toLowerCase())
+      || (userRangeName ? userRangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '') : 'Sarahan');
+
+    const codeMap: Record<string, string> = {
+      Sarahan: 'SRH',
+      Narag: 'NRG',
+      Habban: 'HBN',
+      Rajgarh: 'RJG',
+      Division: 'DIV',
+    };
+    const code = codeMap[rangeKey] || 'RNG';
+
+    // Count existing memos for this range
+    const rangeCount = memos.filter(m => {
+      if (m.createdByRole && m.createdByRole.toLowerCase() === rangeKey.toLowerCase()) return true;
+      if (m.rangeName && m.rangeName.toLowerCase().includes(rangeKey.toLowerCase())) return true;
+      if (m.memoNo && m.memoNo.toUpperCase().includes(`/${code}/`)) return true;
+      return false;
+    }).length;
+
+    const nextNum = 100 + rangeCount;
+    return `RFO/${code}/Memo/${nextNum}`;
+  }, [memos, editingMemo, userRole, userRangeName]);
+
+  useEffect(() => {
+    if (!editingMemo) {
+      setMemoFromInput(defaultFromAuthority);
+      setMemoToInput('DCF Rajgarh');
+      setMemoNoInput(autoMemoNo);
+    }
+  }, [defaultFromAuthority, autoMemoNo, editingMemo]);
+
+  // --- Memo for Fund Handlers ---
+  const handleSelectPayeeForMemoEntry = (payeeId: string) => {
+    setEntryPayeeId(payeeId);
+    if (!payeeId) return;
+    const p = payees.find(item => item.id === payeeId);
+    if (p) {
+      setEntryName(p.name || '');
+      setEntryAddress(p.address || '');
+      setEntryAccountNo(p.accountNumber || '');
+      setEntryIfsc(p.ifscCode || '');
+      setEntryTreasuryCode(p.treasuryCode || '');
+      setEntryPan(p.panNumber || '');
+      setEntryGst(p.gstNumber || '');
+    }
+  };
+
+  const handleTotalAmountInputChange = (val: string) => {
+    setEntryTotalAmount(val);
+    const tot = parseFloat(val);
+    if (!isNaN(tot) && tot > 0) {
+      if (tot > 30000) {
+        setEntryDeductITax(true);
+      } else {
+        setEntryDeductITax(false);
+      }
+      if (tot > 250000 && Boolean(entryGst && entryGst.trim())) {
+        setEntryDeductGst(true);
+      } else {
+        setEntryDeductGst(false);
+      }
+    } else {
+      setEntryDeductITax(false);
+      setEntryDeductGst(false);
+    }
+  };
+
+  const handleAddSubVoucher = () => {
+    const amt = parseFloat(subVoucherAmountInput);
+    if (isNaN(amt) || amt <= 0) {
+      showAlert('Please enter a valid Sub-voucher Amount.');
+      return;
+    }
+    const newSubVoucher: MemoSubVoucher = {
+      id: Math.random().toString(36).substring(2, 9),
+      voucherNo: subVoucherNoInput.trim() || undefined,
+      description: subVoucherDescInput.trim() || undefined,
+      amount: Math.round(amt)
+    };
+
+    const updatedSubVouchers = [...entrySubVouchers, newSubVoucher];
+    setEntrySubVouchers(updatedSubVouchers);
+
+    // Automatically recalculate sum and update entryTotalAmount
+    const totalSum = updatedSubVouchers.reduce((s, v) => s + v.amount, 0);
+    handleTotalAmountInputChange(String(totalSum));
+
+    // Clear sub-voucher inputs
+    setSubVoucherNoInput('');
+    setSubVoucherDescInput('');
+    setSubVoucherAmountInput('');
+  };
+
+  const handleRemoveSubVoucher = (id: string) => {
+    const updated = entrySubVouchers.filter(v => v.id !== id);
+    setEntrySubVouchers(updated);
+    if (updated.length > 0) {
+      const totalSum = updated.reduce((s, v) => s + v.amount, 0);
+      handleTotalAmountInputChange(String(totalSum));
+    }
+  };
+
+  const handleAddOrUpdatePayeeEntry = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!entryName.trim()) {
+      showAlert('Please enter Payee Name.');
+      return;
+    }
+    const tot = parseFloat(entryTotalAmount);
+    if (isNaN(tot) || tot <= 0) {
+      showAlert('Please enter a valid Total Amount.');
+      return;
+    }
+
+    const isITaxApplicable = entryDeductITax && tot > 30000;
+    const isGstApplicable = entryDeductGst && tot > 250000 && Boolean(entryGst && entryGst.trim());
+
+    const iTaxP = isITaxApplicable ? (parseFloat(entryITaxPercent) || 0) : 0;
+    const gstP = isGstApplicable ? (parseFloat(entryGstPercent) || 0) : 0;
+
+    const iTaxAmt = isITaxApplicable ? Math.round((tot * iTaxP) / 100) : 0;
+    const gstAmt = isGstApplicable ? Math.round((tot * gstP) / 100) : 0;
+    const netRtgs = Math.round(tot) - iTaxAmt - gstAmt;
+
+    const newEntry: MemoPayeeEntry = {
+      payeeId: entryPayeeId || undefined,
+      name: entryName.trim(),
+      address: entryAddress.trim(),
+      accountNumber: entryAccountNo.trim(),
+      ifscCode: entryIfsc.trim(),
+      treasuryCode: entryTreasuryCode.trim(),
+      panNumber: entryPan.trim(),
+      gstNumber: entryGst.trim(),
+      totalAmount: Math.round(tot),
+      deductITax: isITaxApplicable,
+      iTaxPercent: parseFloat(entryITaxPercent) || 0,
+      iTaxAmount: iTaxAmt,
+      deductGst: isGstApplicable,
+      gstPercent: parseFloat(entryGstPercent) || 0,
+      gstAmount: gstAmt,
+      netRtgsAmount: netRtgs,
+      subVouchers: entrySubVouchers.length > 0 ? entrySubVouchers : undefined,
+    };
+
+    if (editingEntryIndex !== null) {
+      const updated = [...memoPayeeEntries];
+      updated[editingEntryIndex] = newEntry;
+      setMemoPayeeEntries(updated);
+      setEditingEntryIndex(null);
+    } else {
+      setMemoPayeeEntries(prev => [...prev, newEntry]);
+    }
+
+    // Reset entry input fields
+    setEntryPayeeId('');
+    setEntryName('');
+    setEntryAddress('');
+    setEntryAccountNo('');
+    setEntryIfsc('');
+    setEntryTreasuryCode('');
+    setEntryPan('');
+    setEntryGst('');
+    setEntryTotalAmount('');
+    setEntryDeductITax(true);
+    setEntryITaxPercent('1');
+    setEntryDeductGst(false);
+    setEntryGstPercent('2');
+    setEntrySubVouchers([]);
+    setShowSubVoucherSection(false);
+    setSubVoucherNoInput('');
+    setSubVoucherDescInput('');
+    setSubVoucherAmountInput('');
+  };
+
+  const handleEditPayeeEntryInForm = (index: number) => {
+    const entry = memoPayeeEntries[index];
+    if (!entry) return;
+    setEditingEntryIndex(index);
+    setEntryPayeeId(entry.payeeId || '');
+    setEntryName(entry.name || '');
+    setEntryAddress(entry.address || '');
+    setEntryAccountNo(entry.accountNumber || '');
+    setEntryIfsc(entry.ifscCode || '');
+    setEntryTreasuryCode(entry.treasuryCode || '');
+    setEntryPan(entry.panNumber || '');
+    setEntryGst(entry.gstNumber || '');
+    setEntryTotalAmount(entry.totalAmount ? String(entry.totalAmount) : '');
+    setEntryDeductITax(entry.deductITax !== undefined ? entry.deductITax : (entry.iTaxAmount > 0));
+    setEntryITaxPercent(entry.iTaxPercent !== undefined ? String(entry.iTaxPercent) : '1');
+    setEntryDeductGst(entry.deductGst !== undefined ? entry.deductGst : ((entry.gstAmount || 0) > 0));
+    setEntryGstPercent(entry.gstPercent !== undefined ? String(entry.gstPercent) : '2');
+    setEntrySubVouchers(entry.subVouchers || []);
+    setShowSubVoucherSection(Boolean(entry.subVouchers && entry.subVouchers.length > 0));
+    setSubVoucherNoInput('');
+    setSubVoucherDescInput('');
+    setSubVoucherAmountInput('');
+  };
+
+  const handleRemovePayeeEntryFromForm = (index: number) => {
+    setMemoPayeeEntries(prev => prev.filter((_, i) => i !== index));
+    if (editingEntryIndex === index) {
+      setEditingEntryIndex(null);
+      setEntryPayeeId('');
+      setEntryName('');
+      setEntryAddress('');
+      setEntryAccountNo('');
+      setEntryIfsc('');
+      setEntryPan('');
+      setEntryGst('');
+      setEntryTotalAmount('');
+      setEntryDeductITax(true);
+      setEntryITaxPercent('1');
+      setEntryDeductGst(false);
+      setEntryGstPercent('2');
+      setEntrySubVouchers([]);
+      setShowSubVoucherSection(false);
+      setSubVoucherNoInput('');
+      setSubVoucherDescInput('');
+      setSubVoucherAmountInput('');
+    }
+  };
+
+  const handleSaveMemo = async (status: 'draft' | 'submitted') => {
+    if (memoPayeeEntries.length === 0) {
+      showAlert('Please add at least one Payee to the Memo before saving.');
+      return;
+    }
+    if (!memoNoInput.trim()) {
+      showAlert('Please enter Memo Reference Number.');
+      return;
+    }
+    if (!memoMonthYearInput.trim()) {
+      showAlert('Please enter Month / Period.');
+      return;
+    }
+
+    const schemeObj = currentSchemes.find(s => s.id === memoSchemeIdInput);
+    const sectorObj = currentSectors.find(s => s.id === memoSectorIdInput);
+
+    const totalGross = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.totalAmount)) || 0), 0);
+    const totalITax = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.iTaxAmount)) || 0), 0);
+    const totalGst = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.gstAmount)) || 0), 0);
+    const totalNetRtgs = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.netRtgsAmount)) || 0), 0);
+
+    const memoData = {
+      memoNo: memoNoInput.trim(),
+      date: memoDateInput,
+      monthYear: memoMonthYearInput.trim(),
+      schemeId: memoSchemeIdInput || '',
+      schemeName: schemeObj ? schemeObj.name : 'All Schemes',
+      sectorId: memoSectorIdInput || '',
+      sectorName: sectorObj ? sectorObj.name : '',
+      rangeId: userRangeId || '',
+      rangeName: memoFromInput || defaultFromAuthority,
+      toAuthority: memoToInput || 'DCF Rajgarh',
+      financialYear: selectedFY,
+      status,
+      totalAmount: totalGross,
+      totalITax: totalITax,
+      totalGst: totalGst,
+      totalNetRtgs: totalNetRtgs,
+      payeeEntries: memoPayeeEntries,
+      createdBy: user?.uid || '',
+      createdByRole: userRole || '',
+      createdByName: user?.email || '',
+      updatedAt: Date.now()
+    };
+
+    try {
+      if (editingMemo) {
+        await updateDoc(doc(db, 'memos', editingMemo.id), memoData);
+        logAuditAction('Memo Updated', `Memo No: ${memoNoInput.trim()}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: ₹${totalGross}`);
+        showAlert(`Memo for Fund ${status === 'submitted' ? 'submitted and locked' : 'updated as draft'} successfully.`);
+      } else {
+        await addDoc(collection(db, 'memos'), {
+          ...memoData,
+          createdAt: Date.now()
+        });
+        logAuditAction('Memo Created', `Memo No: ${memoNoInput.trim()}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: ₹${totalGross}`);
+        showAlert(`Memo for Fund ${status === 'submitted' ? 'submitted and locked' : 'saved as draft'} successfully.`);
+      }
+      handleResetMemoForm();
+    } catch (error) {
+      handleFirestoreError(error, editingMemo ? OperationType.UPDATE : OperationType.CREATE, 'memos');
+    }
+  };
+
+  const handleEditMemo = (memo: MemoForFund) => {
+    setEditingMemo(memo);
+    setMemoNoInput(memo.memoNo || '');
+    setMemoDateInput(memo.date || new Date().toISOString().split('T')[0]);
+    setMemoMonthYearInput(memo.monthYear || '');
+    setMemoSchemeIdInput(memo.schemeId || '');
+    setMemoSectorIdInput(memo.sectorId || '');
+    setMemoFromInput(memo.rangeName || defaultFromAuthority);
+    setMemoToInput(memo.toAuthority || 'DCF Rajgarh');
+    setMemoPayeeEntries(memo.payeeEntries || []);
+    setEditingEntryIndex(null);
+  };
+
+  const handleDeleteMemo = (memo: MemoForFund) => {
+    showConfirm(`Are you sure you want to delete Memo No. ${memo.memoNo}?`, async () => {
+      try {
+        await deleteDoc(doc(db, 'memos', memo.id));
+        logAuditAction('Memo Deleted', `Memo No: ${memo.memoNo}`);
+        showAlert('Memo deleted successfully.');
+        if (editingMemo?.id === memo.id) {
+          handleResetMemoForm();
+        }
+        if (viewingMemo?.id === memo.id) {
+          setViewingMemo(null);
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `memos/${memo.id}`);
+      }
+    });
+  };
+
+  const handleSendBackForCorrection = (memo: MemoForFund) => {
+    if (userRole !== 'admin' && userRole !== 'deo') {
+      showAlert('Only Admin or Data Entry Operator can send back memo for correction.');
+      return;
+    }
+    showConfirm(`Send Memo No. ${memo.memoNo} back to user for correction?`, async () => {
+      try {
+        await updateDoc(doc(db, 'memos', memo.id), {
+          status: 'correction',
+          updatedAt: Date.now()
+        });
+        showAlert('Memo sent back for correction successfully.');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
+      }
+    });
+  };
+
+  const handleResetMemoForm = () => {
+    setEditingMemo(null);
+    setMemoNoInput(autoMemoNo);
+    setMemoDateInput(new Date().toISOString().split('T')[0]);
+    setMemoMonthYearInput('08/2026');
+    setMemoSchemeIdInput('');
+    setMemoSectorIdInput('');
+    setMemoFromInput(defaultFromAuthority);
+    setMemoToInput('DCF Rajgarh');
+    setMemoPayeeEntries([]);
+    setEditingEntryIndex(null);
+    setEntryPayeeId('');
+    setEntryName('');
+    setEntryAddress('');
+    setEntryAccountNo('');
+    setEntryIfsc('');
+    setEntryTreasuryCode('');
+    setEntryPan('');
+    setEntryGst('');
+    setEntryTotalAmount('');
+    setEntryDeductITax(true);
+    setEntryITaxPercent('1');
+    setEntryDeductGst(false);
+    setEntryGstPercent('2');
+    setEntrySubVouchers([]);
+    setShowSubVoucherSection(false);
+    setSubVoucherNoInput('');
+    setSubVoucherDescInput('');
+    setSubVoucherAmountInput('');
+  };
+
+  const handleNotificationUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileList = Array.from(files);
+    for (const file of fileList) {
+      const type = 'notification';
+      setUploadStatus(prev => ({
+        ...prev,
+        [type]: { isUploading: true, progress: 0, fileName: file.name, transferred: 0, total: file.size, error: null }
+      }));
+
+      try {
+        let base64Data = '';
+        if (file.size < 800 * 1024) {
+          try {
+            base64Data = await readFileAsDataUrl(file);
+          } catch (readErr) {
+            console.error("Error reading file:", readErr);
+          }
+        }
+
+        let downloadURL = '';
+
+        try {
+          const storagePath = `notifications/${Date.now()}_${file.name}`;
+          const storageRef = ref(storage, storagePath);
+          const uploadTask = uploadBytesResumable(storageRef, file);
+
+          setUploadTasks(prev => ({ ...prev, [type]: uploadTask }));
+
+          await new Promise<void>((resolve, reject) => {
+            uploadTask.on('state_changed',
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadStatus(prev => ({
+                  ...prev,
+                  [type]: { ...prev[type], progress, transferred: snapshot.bytesTransferred, total: snapshot.totalBytes }
+                }));
+              },
+              (error) => {
+                console.warn("Storage upload warning:", error);
+                reject(error);
+              },
+              async () => {
+                try {
+                  const remoteUrl = await getDownloadURL(uploadTask.snapshot.ref);
+                  downloadURL = remoteUrl;
+                  resolve();
+                } catch (err) {
+                  console.warn("Could not get remote download URL:", err);
+                  reject(err);
+                }
+              }
+            );
+          });
+        } catch (storageErr) {
+          console.warn("Storage upload error:", storageErr);
+        }
+
+        let savedFileData = '';
+        if (downloadURL && downloadURL.startsWith('http')) {
+          savedFileData = '';
+        } else if (base64Data && base64Data.length < 800000) {
+          downloadURL = base64Data;
+          savedFileData = base64Data;
+        } else {
+          throw new Error(`Notification upload failed. Storage upload did not complete and file size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds inline document limit.`);
+        }
+
+        await addDoc(collection(db, 'notifications'), {
+          name: file.name,
+          url: downloadURL,
+          fileData: savedFileData,
+          type: file.type,
+          createdAt: Date.now(),
+          uploadedBy: user?.uid
+        });
+
+        setUploadStatus(prev => ({ ...prev, [type]: { ...prev[type], isUploading: false, progress: 100, error: null } }));
+      } catch (error) {
+        console.error("Notification upload error:", error);
+        showAlert("Failed to upload notification file.");
+      } finally {
+        setUploadTasks(prev => {
+          const newTasks = { ...prev };
+          delete newTasks[type];
+          return newTasks;
+        });
+      }
+    }
+    e.target.value = '';
+  };
+
+  const handleDeleteNotification = async (notif: Notification) => {
+    if (!isAdmin()) return;
+    showConfirm(`Are you sure you want to delete "${notif.name}"?`, async () => {
+      try {
+        await deleteDoc(doc(db, 'notifications', notif.id));
+        // Optionally delete from storage too
+        try {
+          const fileRef = ref(storage, notif.url);
+          await deleteObject(fileRef);
+        } catch (e) {
+          console.warn("Could not delete file from storage:", e);
+        }
+        showAlert("Notification deleted successfully.");
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, 'notifications');
+      }
+    });
+  };
+
+  const renderNotificationsTab = () => {
+    const filteredNotifications = notifications.filter(n => {
+      // Visibility Check for non-admins
+      if (userRole !== 'admin' && userRole !== 'deo' && userRole !== 'approver' && userRole !== 'DA') {
+        if (n.targetRanges && n.targetRanges.length > 0 && !n.targetRanges.includes('All')) {
+          const userRangeObj = ranges.find(r => r.id === userRangeId);
+          const matches = n.targetRanges.includes(userRole || '') ||
+                          (userRangeId && n.targetRanges.includes(userRangeId)) ||
+                          (userRangeObj && n.targetRanges.includes(userRangeObj.name));
+          if (!matches) return false;
+        }
+      }
+      return n.name.toLowerCase().includes(notifSearchTerm.toLowerCase()) ||
+             (n.description || '').toLowerCase().includes(notifSearchTerm.toLowerCase());
+    });
+
+    const paginatedNotifications = notifItemsPerPage === 'All' 
+      ? filteredNotifications 
+      : filteredNotifications.slice((notifPage - 1) * notifItemsPerPage, notifPage * notifItemsPerPage);
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Notifications</h2>
+              <p className="text-sm text-gray-500">View and manage official notifications and documents.</p>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
+              <div className="flex items-center gap-1 w-full sm:w-auto">
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search notifications..."
+                    value={notifSearchTerm}
+                    onChange={(e) => { setNotifSearchTerm(e.target.value); setNotifPage(1); }}
+                    className="pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                  />
+                </div>
+                <button 
+                  className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+                  title="Search"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+              </div>
+              {isAdmin() && (
+                <div className="flex items-center gap-4 w-full sm:w-auto">
+                  {uploadStatus['notification']?.isUploading && (
+                    <div className="flex items-center gap-3 bg-emerald-50 px-4 py-2 rounded-lg border border-emerald-100">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-emerald-700 uppercase">Uploading...</span>
+                        <span className="text-xs font-medium text-emerald-600 truncate max-w-[150px]">{uploadStatus['notification'].fileName}</span>
+                      </div>
+                      <div className="w-24 h-1.5 bg-emerald-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-600 transition-all duration-300" style={{ width: `${uploadStatus['notification'].progress}%` }}></div>
+                      </div>
+                      <button 
+                        onClick={() => uploadTasks['notification']?.cancel()}
+                        className="p-1 hover:bg-emerald-100 rounded-full text-emerald-600"
+                        title="Cancel Upload"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  <label className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-all cursor-pointer shadow-sm w-full sm:w-auto">
+                    <Plus className="w-4 h-4" />
+                    Upload
+                    <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleNotificationUpload} />
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50/50">
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">File Name</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">Upload Date</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">Visible To (Ranges)</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {paginatedNotifications.length > 0 ? (
+                    paginatedNotifications.map((notif) => (
+                      <tr key={notif.id} className="hover:bg-gray-50 transition-colors group">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                              {notif.type?.includes('pdf') ? <FileText className="w-4 h-4" /> : <PieChartIcon className="w-4 h-4" />}
+                            </div>
+                            <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{notif.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500">
+                          {new Date(notif.createdAt).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          {isAdmin() ? (
+                            <div className="flex flex-wrap gap-1 max-w-xs">
+                              {['All', 'Narag', 'Sarahan', 'Rajgarh', 'Habban', 'Division'].map(rangeName => {
+                                const currentRanges = notif.targetRanges || ['All'];
+                                const isChecked = currentRanges.includes(rangeName);
+                                return (
+                                  <button
+                                    key={rangeName}
+                                    type="button"
+                                    onClick={async () => {
+                                      let updated: string[];
+                                      if (rangeName === 'All') {
+                                        updated = isChecked ? [] : ['All'];
+                                      } else {
+                                        let filtered = currentRanges.filter(r => r !== 'All');
+                                        if (isChecked) {
+                                          updated = filtered.filter(r => r !== rangeName);
+                                        } else {
+                                          updated = [...filtered, rangeName];
+                                        }
+                                        if (updated.length === 0) updated = ['All'];
+                                      }
+                                      try {
+                                        await updateDoc(doc(db, 'notifications', notif.id), { targetRanges: updated });
+                                      } catch (e) {
+                                        console.error("Error updating notification target ranges:", e);
+                                      }
+                                    }}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border ${
+                                      isChecked 
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                                        : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200'
+                                    }`}
+                                    title={`Click to toggle visibility for ${rangeName}`}
+                                  >
+                                    {rangeName}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-xs font-semibold text-emerald-700">
+                              {(notif.targetRanges && notif.targetRanges.length > 0) ? notif.targetRanges.join(', ') : 'All Ranges'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button 
+                              type="button"
+                              onClick={() => handleViewFile(notif)}
+                              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                              title="View"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleDownloadFile(notif)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              title="Download"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            {isAdmin() && (
+                              <button 
+                                onClick={() => handleDeleteNotification(notif)}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-12 text-center text-gray-400 italic text-sm">
+                        No notifications found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {filteredNotifications.length > 0 && (
+              <div className="p-4 bg-gray-50 border-t border-gray-100">
+                <Pagination
+                  totalItems={filteredNotifications.length}
+                  itemsPerPage={notifItemsPerPage}
+                  currentPage={notifPage}
+                  onPageChange={setNotifPage}
+                  onItemsPerPageChange={setNotifItemsPerPage}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const handleDelete = async (collectionName: string, id: string) => {
+    if (collectionName === 'allocations' && isFeatureLocked('Allocation')) {
+      showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+      return;
+    }
+    if (collectionName === 'expenditures' && isFeatureLocked('Expenditure')) {
+      showAlert("This feature is currently locked by Admin. Please contact Admin for permission.");
+      return;
+    }
+    showConfirm(`Are you sure you want to delete this ${collectionName.slice(0, -1)}?`, async () => {
+      try {
+        await deleteDoc(doc(db, collectionName, id));
+        logAuditAction('Item Deleted', `Collection: ${collectionName}, ID: ${id}`);
+        showAlert("Deleted successfully.");
+        if (editingItem?.item?.id === id) {
+          setEditingItem(null);
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, collectionName);
+      }
+    });
+  };
+
+  const handleCreateBill = async (e: any) => {
+    e.preventDefault();
+    const billNo = e.target.billNo.value;
+    const billDate = e.target.billDate.value;
+    const remarks = e.target.remarks.value;
+    const isFinalizing = e.nativeEvent.submitter?.name === 'finalize';
+
+    if (!billNo || !billDate || selectedExpensesForBill.length === 0) {
+      showAlert('Please provide Bill No, Date and select at least one expenditure.');
+      return;
+    }
+
+    const selectedExpObjects = expenses.filter(ex => selectedExpensesForBill.includes(ex.id));
+    
+    // Validate same SOE
+    const soeIds = new Set(selectedExpObjects.map(ex => ex.soeId));
+    if (soeIds.size > 1) {
+      showAlert('A bill can only contain expenditures from a single SOE head.');
+      return;
+    }
+
+    const totalAmount = selectedExpObjects.reduce((sum, ex) => sum + ex.amount, 0);
+    const activeFy = fys.find(f => f.name === selectedFY || f.id === selectedFY);
+    const currentFyId = activeFy?.id || selectedFY;
+
+    // Check for duplicate bill number
+    const isDuplicate = bills.some(b => 
+      b.billNo === billNo && 
+      b.fyId === currentFyId && 
+      (editingItem?.type === 'Bill' ? b.id !== editingItem.item.id : true)
+    );
+
+    if (isDuplicate) {
+      showAlert(`A bill with number "${billNo}" already exists for the selected financial year.`);
+      return;
+    }
+
+    try {
+      const billData = {
+        billNo,
+        billDate,
+        expenseIds: selectedExpensesForBill,
+        fyId: currentFyId,
+        financialYear: activeFy?.name || selectedFY,
+        totalAmount,
+        status: isFinalizing ? 'finalized' : (editingItem?.type === 'Bill' ? editingItem.item.status : 'draft'),
+        remarks: remarks || '',
+        updatedAt: Date.now(),
+        createdBy: editingItem?.type === 'Bill' ? editingItem.item.createdBy : user.uid
+      };
+
+      if (editingItem?.type === 'Bill') {
+        await updateDoc(doc(db, 'bills', editingItem.item.id), billData);
+        setEditingItem(null);
+      } else {
+        await addDoc(collection(db, 'bills'), { ...billData, createdAt: Date.now() });
+      }
+      setSelectedExpensesForBill([]);
+      setBillExpFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+      e.target.reset();
+    } catch (error) {
+      handleFirestoreError(error, editingItem?.type === 'Bill' ? OperationType.UPDATE : OperationType.CREATE, 'bills');
+    }
+  };
+
+  const handleRemoveExpenseFromBill = async (billId: string, expenseId: string) => {
+    const bill = bills.find(b => b.id === billId);
+    if (!bill) return;
+
+    const newExpenseIds = bill.expenseIds.filter(id => id !== expenseId);
+    if (newExpenseIds.length === 0) {
+      showAlert('A bill must have at least one expenditure. Delete the bill instead.');
+      return;
+    }
+
+    const newTotalAmount = expenses
+      .filter(e => newExpenseIds.includes(e.id))
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    try {
+      await updateDoc(doc(db, 'bills', billId), {
+        expenseIds: newExpenseIds,
+        totalAmount: newTotalAmount,
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'bills');
+    }
+  };
+
+  const generateBillPdf = (bill: Bill) => {
+    const doc = new jsPDF();
+    const activeFy = fys.find(f => f.id === bill.fyId || f.name === bill.financialYear);
+    
+    // Header
+    doc.setFontSize(16);
+    doc.text('TREASURY BILL', 105, 15, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text(`Financial Year: ${activeFy?.name || bill.financialYear}`, 105, 22, { align: 'center' });
+    
+    doc.setFontSize(11);
+    doc.text(`Bill No: ${bill.billNo}`, 15, 35);
+    doc.text(`Bill Date: ${bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}`, 15, 42);
+    if (bill.remarks) {
+      doc.text(`Remarks: ${bill.remarks}`, 15, 49);
+    }
+
+    const billExpenses = expenses.filter(e => bill.expenseIds.includes(e.id));
+    
+    const tableData = billExpenses.map((exp, index) => {
+      const s = soes.find(s => s.id === exp.soeId);
+      const al = allocations.find(a => a.id === exp.allocationId);
+      const r = ranges.find(r => r.id === al?.rangeId);
+      
+      let hierarchy = '';
+      if (al?.subActivityId) {
+        const sa = subActivities.find(sa => sa.id === al.subActivityId);
+        const act = activities.find(a => a.id === sa?.activityId);
+        const sec = sectors.find(sec => sec.id === act?.sectorId);
+        const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+        hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+      } else if (al?.activityId) {
+        const act = activities.find(a => a.id === al.activityId);
+        const sec = sectors.find(sec => sec.id === act?.sectorId);
+        const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+        hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+      }
+
+      return [
+        index + 1,
+        exp.date ? exp.date.split('-').reverse().join('/') : 'N/A',
+        r?.name || 'N/A',
+        s?.name || 'N/A',
+        hierarchy,
+        exp.description,
+        `Rs. ${exp.amount.toLocaleString()}`
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 55,
+      head: [['SrNo', 'Date', 'Range', 'SOE', 'Hierarchy', 'Description', 'Amount']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [16, 185, 129] },
+      styles: { fontSize: 8 },
+      columnStyles: {
+        6: { halign: 'right', fontStyle: 'bold' }
+      }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY || 70;
+    doc.setFontSize(12);
+    doc.text(`Total Amount: Rs. ${bill.totalAmount.toLocaleString()}`, 195, finalY + 10, { align: 'right' });
+
+    return doc;
+  };
+
+  const handleDownloadBill = async (bill: Bill) => {
+    const doc = generateBillPdf(bill);
+    doc.save(`bill_${bill.billNo}.pdf`);
+  };
+
+  const handleViewBill = (bill: Bill) => {
+    const doc = generateBillPdf(bill);
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    setViewingBillPdf({ url, bill });
+  };
+
+  const handleUserRoleChange = async (userId: string, newRole: 'admin' | 'deo' | 'approver' | 'Sarahan' | 'Narag' | 'Habban' | 'Division' | 'Rajgarh') => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { role: newRole, updatedAt: Date.now() });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    showConfirm('Delete this user access?', async () => {
+      try {
+        await deleteDoc(doc(db, 'users', userId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, 'users');
+      }
+    });
+  };
+
+  const handleCreateNewUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserEmail || !newUserPassword) return;
+    
+    let emailToUse = newUserEmail.trim();
+    // If user enters an 8-digit number or any ID without @, append the default domain
+    if (!emailToUse.includes('@')) {
+      emailToUse = `${emailToUse}@rajgarhforest.app`;
+    }
+
+    try {
+      // Initialize a secondary app to create user without logging out the admin
+      const secondaryApp = getApps().find(app => app.name === "Secondary") || initializeApp(firebaseConfig, "Secondary");
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, emailToUse, newUserPassword);
+      
+      // Add user to firestore
+      try {
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          email: emailToUse,
+          role: newUserRole,
+          password: newUserPassword
+        });
+      } catch (firestoreError) {
+        handleFirestoreError(firestoreError, OperationType.CREATE, 'users');
+      }
+      
+      // Sign out the secondary app
+      await secondaryAuth.signOut();
+      
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserRole('deo');
+      showAlert('User created successfully!');
+    } catch (error: any) {
+      if (error.code === 'auth/email-already-in-use') {
+        showAlert(`Error: This User ID / Email already exists in the system. If you deleted them previously, they still exist in the authentication database. You cannot recreate them with the same ID.`);
+      } else {
+        showAlert(`Error creating user: ${error.message}`);
+      }
+    }
+  };
+
+  const handleUpdatePassword = async (userId: string) => {
+    if (!newPasswordInput) return;
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        password: newPasswordInput,
+        updatedAt: Date.now()
+      });
+      setEditingPasswordId(null);
+      setNewPasswordInput('');
+      showAlert('Password updated in system records. Note: This does not change the actual login password in Firebase Auth. The user should use the forgot password link if they cannot log in.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleResetPassword = (email: string) => {
+    showConfirm(`Send password reset email to ${email}?`, async () => {
+      try {
+        await sendPasswordResetEmail(auth, email);
+        showAlert('Password reset email sent!');
+      } catch (error: any) {
+        showAlert(`Error sending reset email: ${error.message}`);
+      }
+    });
+  };
+
+  const handleUpdateMaxSessions = async (userId: string, maxSessions: number) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { maxSessions, updatedAt: Date.now() });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleClearSessions = async (userId: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { activeSessions: [], updatedAt: Date.now() });
+      showAlert('All active sessions cleared for this user.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleUnsyncExpense = async (expenseId: string) => {
+    showConfirm('Remove memo sync link from this expenditure entry?', async () => {
+      try {
+        await updateDoc(doc(db, 'expenditures', expenseId), {
+          syncedMemoId: null,
+          syncedMemoNo: null,
+          updatedAt: Date.now()
+        });
+        showAlert('Memo sync link removed successfully.');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `expenditures/${expenseId}`);
+      }
+    });
+  };
+
+  const handleClearAllMemoSyncs = async () => {
+    showConfirm('Are you sure you want to delete/clear all memo sync references across all expenditure entries?', async () => {
+      try {
+        const syncedExpSnap = await getDocs(query(collection(db, 'expenditures'), where('syncedMemoId', '!=', null)));
+        if (syncedExpSnap.empty) {
+          showAlert('No synced expenditure entries found.');
+          return;
+        }
+        const batch = writeBatch(db);
+        syncedExpSnap.docs.forEach(d => {
+          batch.update(doc(db, 'expenditures', d.id), {
+            syncedMemoId: null,
+            syncedMemoNo: null,
+            updatedAt: Date.now()
+          });
+        });
+        await batch.commit();
+        showAlert(`Cleared sync references from ${syncedExpSnap.size} expenditure entries.`);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, 'expenditures');
+      }
+    });
+  };
+
+  const handleToggleFeatureLock = async (feature: 'Allocation' | 'Expenditure' | 'Access' | 'Memo' | 'MemoSync', target: string) => {
+    const existingLock = featureLocks.find(l => l.feature === feature && l.target === target);
+    try {
+      if (existingLock) {
+        await updateDoc(doc(db, 'featureLocks', existingLock.id), {
+          isLocked: !existingLock.isLocked,
+          updatedBy: user?.email || 'Admin',
+          updatedAt: Date.now()
+        });
+      } else {
+        await addDoc(collection(db, 'featureLocks'), {
+          feature,
+          target,
+          isLocked: true,
+          updatedBy: user?.email || 'Admin',
+          updatedAt: Date.now()
+        });
+      }
+      logAuditAction('Feature Lock Toggled', `Feature: ${feature}, Target: ${target}, State: ${existingLock ? (!existingLock.isLocked ? 'Locked' : 'Unlocked') : 'Locked'}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'featureLocks');
+    }
+  };
+
+  const handleToggleUserStatus = async (userId: string, isDisabled: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isDisabled: !isDisabled,
+        updatedAt: Date.now()
+      });
+      logAuditAction('User Status Changed', `User ID: ${userId}, Status: ${!isDisabled ? 'Disabled' : 'Enabled'}`);
+      showAlert(`User ${!isDisabled ? 'disabled' : 'enabled'} successfully.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const renderAuditLogTab = () => {
+    const filteredLogs = auditLogs.filter(log => {
+      if (!auditSearchTerm.trim()) return true;
+      const q = auditSearchTerm.toLowerCase();
+      return (
+        (log.action && log.action.toLowerCase().includes(q)) ||
+        (log.userName && log.userName.toLowerCase().includes(q)) ||
+        (log.userEmail && log.userEmail.toLowerCase().includes(q)) ||
+        (log.userRole && log.userRole.toLowerCase().includes(q)) ||
+        (log.details && log.details.toLowerCase().includes(q))
+      );
+    });
+
+    return (
+      <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b pb-4">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <History className="h-5 w-5 text-emerald-600" /> System Audit Log
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Real-time activity monitor displaying the last 50 actions performed by users.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full border border-emerald-200">
+              {filteredLogs.length} Records
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search audit logs (user, action, details)..."
+              value={auditSearchTerm}
+              onChange={(e) => setAuditSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-gray-100 text-gray-700 font-bold border-b border-gray-200">
+                <th className="p-3 w-12 text-center">#</th>
+                <th className="p-3 w-40">Date & Time</th>
+                <th className="p-3 w-48">User & Role</th>
+                <th className="p-3 w-48">Action</th>
+                <th className="p-3">Details</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-gray-400">
+                    <p className="font-medium text-sm">No audit log entries found.</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredLogs.map((log, index) => {
+                  const dateStr = log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', {
+                    dateStyle: 'short',
+                    timeStyle: 'medium'
+                  }) : 'N/A';
+
+                  let badgeColor = 'bg-gray-100 text-gray-800 border-gray-200';
+                  const actLower = (log.action || '').toLowerCase();
+                  if (actLower.includes('add') || actLower.includes('create')) {
+                    badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                  } else if (actLower.includes('status') || actLower.includes('update') || actLower.includes('edit')) {
+                    badgeColor = 'bg-blue-50 text-blue-800 border-blue-200';
+                  } else if (actLower.includes('delete') || actLower.includes('remove') || actLower.includes('lock')) {
+                    badgeColor = 'bg-red-50 text-red-800 border-red-200';
+                  } else if (actLower.includes('sync') || actLower.includes('memo')) {
+                    badgeColor = 'bg-purple-50 text-purple-800 border-purple-200';
+                  }
+
+                  return (
+                    <tr key={log.id || index} className="hover:bg-gray-50 transition-colors">
+                      <td className="p-3 text-center text-gray-400 font-mono text-[11px]">{index + 1}</td>
+                      <td className="p-3 text-gray-600 font-mono text-[11px] whitespace-nowrap">{dateStr}</td>
+                      <td className="p-3">
+                        <div className="font-bold text-gray-900">{log.userName || 'User'}</div>
+                        <div className="text-[10px] text-gray-500 font-medium">
+                          {log.userRole || 'User'} {log.userEmail ? `• ${log.userEmail}` : ''}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold border ${badgeColor}`}>
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="p-3 text-gray-700 font-sans">{log.details || '-'}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderUserManagement = () => (
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+      <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+        <Shield className="h-5 w-5 text-emerald-600" /> User Access Management
+      </h3>
+
+      {/* Memo Module & Sync Feature Controls */}
+      <div className="mb-8 p-5 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200 space-y-4">
+        <div className="flex items-center justify-between border-b border-emerald-200 pb-3">
+          <div>
+            <h4 className="text-base font-bold text-emerald-950 flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-emerald-700" />
+              Memo Module & Expenditure Sync Admin Controls
+            </h4>
+            <p className="text-xs text-emerald-800 mt-0.5">
+              Control Memo for Fund sync options and manage lock permissions for individual or all ranges.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Option 1: Sync Option Toggle */}
+          <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-sm text-gray-800">Memo Sync to Expenditure Option</span>
+              <button
+                type="button"
+                onClick={() => handleToggleFeatureLock('MemoSync', 'global')}
+                className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase transition-all ${
+                  isMemoSyncEnabled ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-red-100 text-red-800 border border-red-300'
+                }`}
+              >
+                {isMemoSyncEnabled ? '✓ Enabled' : '✕ Disabled'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              When enabled, users can import payee, amount, and scheme details from Memo for Fund directly into Expenditure entries.
+            </p>
+            <div className="pt-2 border-t">
+              <button
+                type="button"
+                onClick={handleClearAllMemoSyncs}
+                className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Clear All Synced Memo References
+              </button>
+            </div>
+          </div>
+
+          {/* Option 2: Lock Memo Module for Ranges */}
+          <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-sm text-gray-800">Lock Memo Module for Ranges</span>
+              <button
+                type="button"
+                onClick={() => handleToggleFeatureLock('Memo', 'all')}
+                className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase transition-all ${
+                  featureLocks.some(l => l.feature === 'Memo' && l.target === 'all' && l.isLocked)
+                    ? 'bg-red-100 text-red-800 border border-red-300'
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                }`}
+              >
+                {featureLocks.some(l => l.feature === 'Memo' && l.target === 'all' && l.isLocked) ? '🔒 Locked for All' : '🔓 Allowed for All'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Toggle Memo creation and editing lock by specific range name:
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {['Sarahan', 'Narag', 'Habban', 'Rajgarh', 'Division'].map(rangeName => {
+                const isRangeLocked = featureLocks.some(l => l.feature === 'Memo' && l.target === rangeName && l.isLocked);
+                return (
+                  <button
+                    key={rangeName}
+                    type="button"
+                    onClick={() => handleToggleFeatureLock('Memo', rangeName)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all flex items-center gap-1 ${
+                      isRangeLocked
+                        ? 'bg-red-50 text-red-700 border-red-300'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {isRangeLocked ? <Lock className="w-3 h-3 text-red-600" /> : <Unlock className="w-3 h-3 text-emerald-600" />}
+                    <span>{rangeName}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="mb-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <h4 className="text-md font-medium mb-3">Create New User</h4>
+        <form onSubmit={handleCreateNewUser} className="flex flex-col md:flex-row gap-3">
+          <input 
+            type="text" 
+            placeholder="User ID (e.g. 12345678) or Email" 
+            value={newUserEmail}
+            onChange={(e) => setNewUserEmail(e.target.value)}
+            className="p-2 border rounded flex-1"
+            required
+          />
+          <input 
+            type="password" 
+            placeholder="Password" 
+            value={newUserPassword}
+            onChange={(e) => setNewUserPassword(e.target.value)}
+            className="p-2 border rounded flex-1"
+            required
+            minLength={6}
+          />
+          <select 
+            value={newUserRole}
+            onChange={(e) => setNewUserRole(e.target.value as any)}
+            className="p-2 border rounded"
+          >
+            <option value="admin">Admin</option>
+            <option value="deo">DEO</option>
+            <option value="approver">DA</option>
+            <option value="Sarahan">Sarahan</option>
+            <option value="Narag">Narag</option>
+            <option value="Habban">Habban</option>
+            <option value="Division">Division</option>
+            <option value="Rajgarh">Rajgarh</option>
+          </select>
+          <button type="submit" className="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">
+            Create User
+          </button>
+        </form>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-gray-50 text-gray-600 text-sm">
+              <th className="p-3 border-b">User ID</th>
+              <th className="p-3 border-b">Email</th>
+              <th className="p-3 border-b">Password</th>
+              <th className="p-3 border-b">Role</th>
+              <th className="p-3 border-b">Max Sessions</th>
+              <th className="p-3 border-b">Active</th>
+              <th className="p-3 border-b text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id} className="border-b hover:bg-gray-50">
+                <td className="p-3 font-mono text-xs text-gray-500">{u.id}</td>
+                <td className="p-3">{u.email}</td>
+                <td className="p-3">
+                  <div className="flex items-center gap-2">
+                    {editingPasswordId === u.id ? (
+                      <div className="flex items-center gap-1">
+                        <input 
+                          type="text" 
+                          value={newPasswordInput} 
+                          onChange={(e) => setNewPasswordInput(e.target.value)}
+                          className="p-1 border rounded text-xs w-24"
+                          placeholder="New Pwd"
+                        />
+                        <button 
+                          onClick={() => handleUpdatePassword(u.id)}
+                          className="bg-emerald-600 text-white px-2 py-1 rounded text-[10px]"
+                        >
+                          Update
+                        </button>
+                        <button 
+                          onClick={() => setEditingPasswordId(null)}
+                          className="bg-gray-200 text-gray-600 px-2 py-1 rounded text-[10px]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="font-mono text-sm">
+                          {visiblePasswords[u.id] ? (u.password || 'Not Set') : '********'}
+                        </span>
+                        {(userRole === 'admin' || user?.email?.toLowerCase() === 'admin@rajgarhforest.app' || user?.email?.toLowerCase() === 'sharmaanuj860@gmail.com') && (
+                          <button 
+                            onClick={() => setVisiblePasswords(prev => ({ ...prev, [u.id]: !prev[u.id] }))}
+                            className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
+                            title={visiblePasswords[u.id] ? "Hide Password" : "Show Password"}
+                          >
+                            {visiblePasswords[u.id] ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </td>
+                <td className="p-3">
+                  <select 
+                    value={u.role} 
+                    onChange={(e) => handleUserRoleChange(u.id, e.target.value as 'admin' | 'deo' | 'approver' | 'Sarahan' | 'Narag' | 'Habban' | 'Division' | 'Rajgarh')}
+                    className="p-1 border rounded text-sm"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="deo">DEO</option>
+                    <option value="approver">DA</option>
+                    <option value="Sarahan">Sarahan</option>
+                    <option value="Narag">Narag</option>
+                    <option value="Habban">Habban</option>
+                    <option value="Division">Division</option>
+                    <option value="Rajgarh">Rajgarh</option>
+                  </select>
+                </td>
+                <td className="p-3">
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="999999"
+                    value={u.maxSessions || 999999}
+                    onChange={(e) => handleUpdateMaxSessions(u.id, parseInt(e.target.value))}
+                    className="w-16 p-1 border rounded text-xs"
+                  />
+                </td>
+                <td className="p-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${u.activeSessions?.length ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {u.activeSessions?.length || 0} Active
+                    </span>
+                    {u.activeSessions?.length ? (
+                      <button 
+                        onClick={() => handleClearSessions(u.id)}
+                        className="text-red-500 hover:text-red-700 p-1"
+                        title="Clear all sessions"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
+                <td className="p-3 text-right flex justify-end gap-2">
+                  <button 
+                    onClick={() => {
+                      setEditingPasswordId(u.id);
+                      setNewPasswordInput(u.password || '');
+                    }} 
+                    className="text-blue-500 hover:text-blue-700 text-sm border border-blue-200 px-2 py-1 rounded"
+                  >
+                    Set New Password
+                  </button>
+                  <button onClick={() => handleResetPassword(u.email)} className="text-gray-500 hover:text-gray-700 text-sm border border-gray-200 px-2 py-1 rounded">
+                    Send Reset Email
+                  </button>
+                  <button 
+                    onClick={() => handleToggleUserStatus(u.id, u.isDisabled || false)}
+                    className={`text-sm border px-2 py-1 rounded transition-colors ${u.isDisabled ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'}`}
+                  >
+                    {u.isDisabled ? 'Disabled' : 'Enabled'}
+                  </button>
+                  <button onClick={() => handleDeleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-12 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
+          <Lock className="h-5 w-5 text-red-600" /> Feature Locking Control
+        </h3>
+        <p className="text-xs text-gray-500 mb-6">Lock specific features for specific roles or ranges. When locked, users cannot add, edit, or delete records for that feature.</p>
+
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row gap-4 items-end bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Select Range, Role or User</label>
+              <select 
+                value={selectedLockTarget}
+                onChange={(e) => setSelectedLockTarget(e.target.value)}
+                className="w-full p-2 border rounded bg-white text-sm"
+              >
+                <option value="">-- Select Target --</option>
+                <optgroup label="Roles">
+                  <option value="deo">DEO</option>
+                  <option value="approver">DA</option>
+                  <option value="Sarahan">Sarahan</option>
+                  <option value="Narag">Narag</option>
+                  <option value="Habban">Habban</option>
+                  <option value="Division">Division</option>
+                  <option value="Rajgarh">Rajgarh</option>
+                </optgroup>
+                <optgroup label="Ranges">
+                  {ranges.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Users">
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.email} ({u.role})</option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+            
+            <div className="flex gap-2 flex-wrap">
+              <button 
+                disabled={!selectedLockTarget}
+                onClick={() => handleToggleFeatureLock('Allocation', selectedLockTarget)}
+                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'Allocation' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+              >
+                {featureLocks.find(l => l.feature === 'Allocation' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                {featureLocks.find(l => l.feature === 'Allocation' && l.target === selectedLockTarget)?.isLocked ? 'Allocation Locked' : 'Lock Allocation'}
+              </button>
+              
+              <button 
+                disabled={!selectedLockTarget}
+                onClick={() => handleToggleFeatureLock('Expenditure', selectedLockTarget)}
+                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'Expenditure' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+              >
+                {featureLocks.find(l => l.feature === 'Expenditure' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                {featureLocks.find(l => l.feature === 'Expenditure' && l.target === selectedLockTarget)?.isLocked ? 'Expenditure Locked' : 'Lock Expenditure'}
+              </button>
+
+              <button 
+                disabled={!selectedLockTarget}
+                onClick={() => handleToggleFeatureLock('Memo', selectedLockTarget)}
+                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'Memo' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
+              >
+                {featureLocks.find(l => l.feature === 'Memo' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                {featureLocks.find(l => l.feature === 'Memo' && l.target === selectedLockTarget)?.isLocked ? 'Memo for Fund Locked' : 'Lock Memo for Fund'}
+              </button>
+
+              <button 
+                disabled={!selectedLockTarget}
+                onClick={() => handleToggleFeatureLock('MemoSync', selectedLockTarget)}
+                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'MemoSync' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-teal-600 text-white hover:bg-teal-700'}`}
+              >
+                {featureLocks.find(l => l.feature === 'MemoSync' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                {featureLocks.find(l => l.feature === 'MemoSync' && l.target === selectedLockTarget)?.isLocked ? 'Sync Memo Locked' : 'Lock Sync Memo'}
+              </button>
+
+              <button 
+                disabled={!selectedLockTarget}
+                onClick={() => {
+                  const targetUser = users.find(u => u.id === selectedLockTarget);
+                  if (targetUser) {
+                    handleToggleUserStatus(selectedLockTarget, targetUser.isDisabled || false);
+                  } else {
+                    handleToggleFeatureLock('Access', selectedLockTarget);
+                  }
+                }}
+                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : (users.find(u => u.id === selectedLockTarget)?.isDisabled || featureLocks.find(l => l.feature === 'Access' && l.target === selectedLockTarget)?.isLocked) ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+              >
+                {(users.find(u => u.id === selectedLockTarget)?.isDisabled || featureLocks.find(l => l.feature === 'Access' && l.target === selectedLockTarget)?.isLocked) ? <Shield className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                {(users.find(u => u.id === selectedLockTarget)?.isDisabled || featureLocks.find(l => l.feature === 'Access' && l.target === selectedLockTarget)?.isLocked) ? 'Disabled' : 'Enabled'}
+              </button>
+            </div>
+          </div>
+
+          {(featureLocks.filter(l => l.isLocked).length > 0 || users.filter(u => u.isDisabled).length > 0) && (
+            <div className="mt-4">
+              <h4 className="text-sm font-bold mb-2 text-gray-600">Active Restrictions</h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-600 text-xs">
+                      <th className="p-2 border-b">Target</th>
+                      <th className="p-2 border-b">Feature</th>
+                      <th className="p-2 border-b">Status</th>
+                      <th className="p-2 border-b">Updated By</th>
+                      <th className="p-2 border-b">Updated At</th>
+                      <th className="p-2 border-b text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {featureLocks.filter(l => l.isLocked).map(l => (
+                      <tr key={l.id} className="border-b hover:bg-gray-50 text-xs">
+                        <td className="p-2 font-medium uppercase">
+                          {ranges.find(r => r.id === l.target)?.name || (l.target === 'approver' ? 'DA' : l.target)}
+                        </td>
+                        <td className="p-2">{l.feature === 'Access' ? 'Full Access' : l.feature}</td>
+                        <td className="p-2">
+                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
+                            {l.feature === 'Access' ? 'DISABLED' : 'LOCKED'}
+                          </span>
+                        </td>
+                        <td className="p-2 text-gray-500">{l.updatedBy}</td>
+                        <td className="p-2 text-gray-500">{new Date(l.updatedAt).toLocaleString()}</td>
+                        <td className="p-2 text-right">
+                          <button 
+                            onClick={() => handleToggleFeatureLock(l.feature as any, l.target)}
+                            className="text-emerald-600 hover:text-emerald-700 font-bold"
+                          >
+                            {l.feature === 'Access' ? 'Enable' : 'Unlock'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {users.filter(u => u.isDisabled).map(u => (
+                      <tr key={u.id} className="border-b hover:bg-gray-50 text-xs">
+                        <td className="p-2 font-medium">
+                          {u.email} ({u.role})
+                        </td>
+                        <td className="p-2">User Access</td>
+                        <td className="p-2">
+                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">DISABLED</span>
+                        </td>
+                        <td className="p-2 text-gray-500">Admin</td>
+                        <td className="p-2 text-gray-500">{u.updatedAt ? new Date(u.updatedAt).toLocaleString() : 'N/A'}</td>
+                        <td className="p-2 text-right">
+                          <button 
+                            onClick={() => handleToggleUserStatus(u.id, true)}
+                            className="text-emerald-600 hover:text-emerald-700 font-bold"
+                          >
+                            Enable
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderReports = () => {
+    const downloadPDF = (title: string, abstractData: any[], abstractHeaders: string[], detailedData: any[], detailedHeaders: string[]) => {
+      const doc = new jsPDF('landscape');
+      const fyName = fys.find(f => f.id === selectedFY)?.name || selectedFY;
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${title} - FY ${fyName}`, 14, 14);
+      
+      let finalY = 16;
+
+      if (abstractData.length > 0) {
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text("SOE Abstract Summary", 14, finalY + 8);
+        autoTable(doc, {
+          head: [abstractHeaders],
+          body: abstractData,
+          startY: finalY + 12,
+          theme: 'grid',
+          showHead: 'everyPage',
+          pageBreak: 'auto',
+          styles: { fontSize: 7, cellPadding: 1.5 },
+          headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold' }
+        });
+        finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 8 : 35;
+      }
+
+      if (detailedData.length > 0) {
+        if (finalY > 175) {
+          doc.addPage();
+          finalY = 14;
+        }
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text("Detailed Range-wise Report", 14, finalY + 6);
+        autoTable(doc, {
+          head: [detailedHeaders],
+          body: detailedData,
+          startY: finalY + 10,
+          theme: 'grid',
+          showHead: 'everyPage',
+          pageBreak: 'auto',
+          styles: { fontSize: 7, cellPadding: 1.5 },
+          headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold' }
+        });
+      }
+      doc.save(`${title.toLowerCase().replace(/\s+/g, '_')}.pdf`);
+    };
+
+    const downloadLedgerPDF = () => {
+      const doc = new jsPDF('landscape');
+      const fyName = fys.find(f => f.id === selectedFY)?.name || selectedFY;
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Scheme Wise Allocation & Expenditure Ledger - FY ${fyName}`, 14, 14);
+
+      // Build groups
+      const ledgerGroups: Record<string, { hierarchy: string, soeName: string, totalAllocation: number, items: any[] }> = {};
+      const filteredAllocations = currentAllocations.filter(alloc => {
+        const sch = schemes.find(s => s.id === alloc.schemeId);
+        const sec = sectors.find(s => s.id === alloc.sectorId);
+        const act = activities.find(a => a.id === alloc.activityId);
+        const sa = subActivities.find(s => s.id === alloc.subActivityId);
+        const r = ranges.find(r => r.id === alloc.rangeId);
+        const rangeName = r?.name === 'Rajgarh Forest Division' ? 'Division' : (r?.name || '');
+        
+        const matchesFilters = (
+          (!reportFilters.scheme || sch?.name === reportFilters.scheme) &&
+          (!reportFilters.sector || sec?.name === reportFilters.sector) &&
+          (!reportFilters.activity || act?.name === reportFilters.activity) &&
+          (!reportFilters.subActivity || sa?.name === reportFilters.subActivity) &&
+          (!reportFilters.range || rangeName === reportFilters.range)
+        );
+        if (!matchesFilters) return false;
+        if (ledgerSearchTerm) {
+          const searchLower = ledgerSearchTerm.toLowerCase();
+          const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(' ') || '';
+          const hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+          return (
+            hierarchy.toLowerCase().includes(searchLower) ||
+            soeNames.toLowerCase().includes(searchLower) ||
+            rangeName.toLowerCase().includes(searchLower) ||
+            alloc.remarks?.toLowerCase().includes(searchLower)
+          );
+        }
+        return true;
+      });
+
+      filteredAllocations.forEach(alloc => {
+        alloc.fundedSOEs?.forEach(f => {
+          const soe = soes.find(s => s.id === f.soeId);
+          if (!soe) return;
+          let hierarchy = '';
+          if (alloc.subActivityId) {
+            const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+            const act = activities.find(a => a.id === sa?.activityId);
+            const sec = sectors.find(sec => sec.id === act?.sectorId);
+            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+            hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+          } else if (alloc.activityId) {
+            const act = activities.find(a => a.id === alloc.activityId);
+            const sec = sectors.find(sec => sec.id === act?.sectorId);
+            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+            hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
+          }
+          const key = `${hierarchy}-${soe.name}`;
+          if (!ledgerGroups[key]) {
+            ledgerGroups[key] = { hierarchy, soeName: soe.name, totalAllocation: 0, items: [] };
+          }
+          ledgerGroups[key].totalAllocation += f.amount;
+        });
+      });
+
+      currentExpenses.forEach(exp => {
+        const alloc = filteredAllocations.find(a => a.id === exp.allocationId);
+        if (!alloc) return;
+        const soe = soes.find(s => s.id === exp.soeId);
+        if (!soe) return;
+        let hierarchy = '';
+        if (alloc.subActivityId) {
+          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+          const act = activities.find(a => a.id === sa?.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+        } else if (alloc.activityId) {
+          const act = activities.find(a => a.id === alloc.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
+        }
+        const key = `${hierarchy}-${soe.name}`;
+        if (ledgerGroups[key]) {
+          ledgerGroups[key].items.push({
+            date: exp.date,
+            expenditure: exp.amount,
+            status: exp.status || 'pending'
+          });
+        }
+      });
+
+      const sortedGroups = Object.values(ledgerGroups).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
+
+      let currentY = 22;
+      sortedGroups.forEach((group, idx) => {
+        if (currentY > 160) {
+          doc.addPage();
+          currentY = 16;
+        }
+
+        doc.setFontSize(9.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(5, 150, 105);
+        doc.text(`${idx + 1}. ${group.soeName} [${group.hierarchy}]`, 14, currentY);
+        doc.setTextColor(30, 64, 175);
+        doc.text(`Total Allocation: Rs. ${Math.round(group.totalAllocation).toLocaleString('en-IN')}`, 280, currentY, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+
+        currentY += 4;
+
+        const head = [['S.No', 'Date', 'Allocation (Rs)', 'Expenditure (Rs)', 'Status', 'Balance (Rs)']];
+        const sortedItems = [...group.items].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        let runningBalance = group.totalAllocation;
+        let totalExp = 0;
+
+        const body = [
+          ['1', 'Allocation Date', Math.round(group.totalAllocation).toLocaleString('en-IN'), '-', '-', Math.round(runningBalance).toLocaleString('en-IN')]
+        ];
+
+        sortedItems.forEach((item, itemIdx) => {
+          const isRejected = item.status === 'rejected';
+          if (!isRejected) {
+            runningBalance -= item.expenditure;
+            totalExp += item.expenditure;
+          }
+          body.push([
+            String(itemIdx + 2),
+            item.date ? item.date.split('-').reverse().join('/') : '-',
+            '-',
+            Math.round(item.expenditure).toLocaleString('en-IN'),
+            item.status ? item.status.toUpperCase() : 'PENDING',
+            Math.round(runningBalance).toLocaleString('en-IN')
+          ]);
+        });
+
+        const foot = [
+          ['', 'TOTAL', Math.round(group.totalAllocation).toLocaleString('en-IN'), Math.round(totalExp).toLocaleString('en-IN'), '-', Math.round(runningBalance).toLocaleString('en-IN')]
+        ];
+
+        autoTable(doc, {
+          startY: currentY,
+          head,
+          body,
+          foot,
+          theme: 'grid',
+          showHead: 'everyPage',
+          pageBreak: 'auto',
+          styles: { fontSize: 7.5, cellPadding: 1.5 },
+          headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+          footStyles: { fillColor: [245, 245, 245], textColor: [0, 0, 0], fontStyle: 'bold' },
+          columnStyles: {
+            0: { halign: 'center', cellWidth: 14 },
+            1: { cellWidth: 35 },
+            2: { halign: 'right', cellWidth: 48 },
+            3: { halign: 'right', cellWidth: 48 },
+            4: { halign: 'center', cellWidth: 32 },
+            5: { halign: 'right', cellWidth: 48, fontStyle: 'bold' }
+          }
+        });
+
+        currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 10 : currentY + 30;
+      });
+
+      doc.save(`Scheme_Wise_Ledger_FY_${fyName.replace(/[/\\?%*:|"<>]/g, '_')}.pdf`);
+    };
+
+    const downloadExcel = async (title: string, abstractData: any[], abstractHeaders: string[], detailedData: any[], detailedHeaders: string[]) => {
+      const workbook = new ExcelJS.Workbook();
+      
+      if (abstractData.length > 0) {
+        const abstractSheet = workbook.addWorksheet("Abstract Summary");
+        
+        // Add Title
+        const titleRow = abstractSheet.addRow(["SOE Abstract Summary"]);
+        titleRow.font = { bold: true, size: 14 };
+        abstractSheet.mergeCells(1, 1, 1, abstractHeaders.length);
+        titleRow.alignment = { horizontal: 'center' };
+
+        // Add Headers
+        const headerRow = abstractSheet.addRow(abstractHeaders);
+        headerRow.eachCell((cell) => {
+          cell.font = { bold: true };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+          };
+        });
+
+        // Add Data
+        abstractData.forEach(row => {
+          const dataRow = abstractSheet.addRow(row);
+          dataRow.eachCell((cell) => {
+            cell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+          });
+        });
+
+        // Auto-width columns
+        abstractSheet.columns.forEach(column => {
+          let maxLength = 0;
+          column.eachCell({ includeEmpty: true }, cell => {
+            const columnLength = cell.value ? cell.value.toString().length : 10;
+            if (columnLength > maxLength) {
+              maxLength = columnLength;
+            }
+          });
+          column.width = maxLength < 12 ? 12 : maxLength + 2;
+        });
+      }
+
+      const detailedSheet = workbook.addWorksheet("Detailed Report");
+      
+      // Add Title
+      const dTitleRow = detailedSheet.addRow(["Detailed Range-wise Report"]);
+      dTitleRow.font = { bold: true, size: 14 };
+      detailedSheet.mergeCells(1, 1, 1, detailedHeaders.length);
+      dTitleRow.alignment = { horizontal: 'center' };
+
+      // Add Headers
+      const dHeaderRow = detailedSheet.addRow(detailedHeaders);
+      dHeaderRow.eachCell((cell) => {
+        cell.font = { bold: true };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE0E0E0' }
+        };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      });
+
+      // Add Data
+      detailedData.forEach(row => {
+        const dataRow = detailedSheet.addRow(row);
+        dataRow.eachCell((cell) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+          };
+        });
+      });
+
+      // Auto-width columns
+      detailedSheet.columns.forEach(column => {
+        let maxLength = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const columnLength = cell.value ? cell.value.toString().length : 10;
+          if (columnLength > maxLength) {
+            maxLength = columnLength;
+          }
+        });
+        column.width = maxLength < 12 ? 12 : maxLength + 2;
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `${title.toLowerCase().replace(/\s+/g, '_')}.xlsx`);
+    };
+
+    const downloadZip = async () => {
+      const zip = new JSZip();
+      
+      // 1. Allocations
+      const allocHeaders = ['ID', 'SOE', 'Range', 'Amount', 'Scheme', 'Sector', 'Activity', 'SubActivity'];
+      const allocData = currentAllocations.map(a => [
+        a.id,
+        a.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).join(', ') || 'Pending',
+        ranges.find(r => r.id === a.rangeId)?.name || 'N/A',
+        a.amount,
+        schemes.find(s => s.id === a.schemeId)?.name || 'N/A',
+        sectors.find(s => s.id === a.sectorId)?.name || 'N/A',
+        activities.find(ac => ac.id === a.activityId)?.name || 'N/A',
+        subActivities.find(sa => sa.id === a.subActivityId)?.name || 'N/A'
+      ]);
+      const allocWs = XLSX.utils.aoa_to_sheet([allocHeaders, ...allocData]);
+      const allocCsv = XLSX.utils.sheet_to_csv(allocWs);
+      zip.file("allocations.csv", allocCsv);
+
+      // 2. Expenses
+      const expHeaders = ['ID', 'Date', 'Amount', 'Description', 'Allocation ID', 'Approval ID'];
+      const expData = currentExpenses.map(e => [
+        e.id, e.date ? e.date.split('-').reverse().join('/') : '', e.amount, e.description, e.allocationId, e.approvalId ? `#${e.approvalId}` : '-'
+      ]);
+      const expWs = XLSX.utils.aoa_to_sheet([expHeaders, ...expData]);
+      const expCsv = XLSX.utils.sheet_to_csv(expWs);
+      zip.file("expenses.csv", expCsv);
+
+      // 3. SOE Summary (Admin/DEO only)
+      if (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') {
+        const soeHeaders = ['SOE ID', 'Name', 'Approved Budget', 'Received in TRY', 'Allocated', 'Spent', 'Remaining'];
+        const soeData = soeAbstractData.map(s => [
+          s.soeId, 
+          s.soeName, 
+          s.approvedBudget, 
+          s.receivedInTry, 
+          s.allocated, 
+          s.spent, 
+          s.remainingToSpend
+        ]);
+        const soeWs = XLSX.utils.aoa_to_sheet([soeHeaders, ...soeData]);
+        const soeCsv = XLSX.utils.sheet_to_csv(soeWs);
+        zip.file("soe_summary.csv", soeCsv);
+      }
+
+      const content = await zip.generateAsync({ type: "blob" });
+      saveAs(content, `financial_data_fy_${selectedFY}.zip`);
+    };
+
+    const comprehensiveReportData = baseAllocations.map(a => {
+      const soeNames = a.fundedSOEs?.map((f: any) => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(', ') || 'Pending Funds';
+      const range = ranges.find(r => r.id === a.rangeId);
+      
+      let sa = subActivities.find(s => s.id === a.subActivityId);
+      let act = activities.find(ac => ac.id === a.activityId);
+      let sec = sectors.find(s => s.id === a.sectorId);
+      let sch = schemes.find(s => s.id === a.schemeId);
+
+      const budget = soes.filter(s => 
+        ALLOWED_SOES.includes(s.name || 'Provisional') &&
+        s.schemeId === a.schemeId && 
+        (s.sectorId || null) === (a.sectorId || null) && 
+        (s.activityId || null) === (a.activityId || null) && 
+        (s.subActivityId || null) === (a.subActivityId || null)
+      ).reduce((sum, s) => sum + getApprovedBudget(s), 0);
+      const totalBudget = budget || 0;
+      const allocated = a.amount;
+      const expenditure = baseExpenses.filter(e => e.allocationId === a.id && e.status !== 'rejected').reduce((sum, e) => sum + e.amount, 0);
+      const remaining = allocated - expenditure;
+
+      return {
+        soe: soeNames,
+        range: range?.name || 'N/A',
+        scheme: sch?.name || 'N/A',
+        sector: sec?.name || 'N/A',
+        activity: act?.name || 'N/A',
+        subActivity: sa?.name || 'N/A',
+        totalBudget: totalBudget,
+        allocated: allocated,
+        expenditure: expenditure,
+        remaining: remaining,
+        balance: remaining // for report consistency
+      };
+    });
+
+    const allocationExpenditureData: any[] = [];
+    baseAllocations.forEach(alloc => {
+      const sch = schemes.find(s => s.id === alloc.schemeId);
+      const sec = sectors.find(s => s.id === alloc.sectorId);
+      const act = activities.find(a => a.id === alloc.activityId);
+      const sa = subActivities.find(s => s.id === alloc.subActivityId);
+      const range = ranges.find(r => r.id === alloc.rangeId);
+
+      alloc.fundedSOEs?.forEach(f => {
+        const soe = soes.find(s => s.id === f.soeId);
+        const allocExpenses = baseExpenses.filter(e => e.allocationId === alloc.id && e.soeId === f.soeId && e.status !== 'rejected');
+        
+        const totalSpentOnSoe = allocExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+        if (allocExpenses.length === 0) {
+          allocationExpenditureData.push({
+            id: `alloc-${alloc.id}-${f.soeId}`,
+            allocationId: alloc.id,
+            soeId: f.soeId,
+            date: alloc.createdAt ? new Date(alloc.createdAt).toISOString().split('T')[0] : 'N/A',
+            scheme: sch?.name || 'N/A',
+            sector: sec?.name || 'N/A',
+            activity: act?.name || 'N/A',
+            subActivity: sa?.name || 'N/A',
+            soe: soe?.name || 'N/A',
+            range: range?.name || 'N/A',
+            allocation: f.amount,
+            expenditure: 0,
+            balance: f.amount,
+            description: 'Initial Allocation',
+            status: 'approved'
+          });
+        } else {
+          allocExpenses.forEach(exp => {
+            allocationExpenditureData.push({
+              id: exp.id,
+              allocationId: exp.allocationId,
+              soeId: exp.soeId,
+              date: exp.date,
+              scheme: sch?.name || 'N/A',
+              sector: sec?.name || 'N/A',
+              activity: act?.name || 'N/A',
+              subActivity: sa?.name || 'N/A',
+              soe: soe?.name || 'N/A',
+              range: range?.name || 'N/A',
+              allocation: f.amount,
+              expenditure: exp.amount,
+              balance: f.amount - totalSpentOnSoe,
+              description: exp.description,
+              status: exp.status
+            });
+          });
+        }
+      });
+    });
+
+    const combinedReportData = [...comprehensiveReportData, ...allocationExpenditureData];
+    const uniqueSchemes = Array.from(new Set(combinedReportData.map(r => r.scheme))).filter(Boolean).sort();
+    const uniqueSectors = Array.from(new Set(combinedReportData.map(r => r.sector))).filter(Boolean).sort();
+    const uniqueActivities = Array.from(new Set(combinedReportData.map(r => r.activity))).filter(Boolean).sort();
+    const uniqueSubActivities = Array.from(new Set(combinedReportData.map(r => r.subActivity))).filter(Boolean).sort();
+    const uniqueSoes = Array.from(new Set(soes.map(s => s.name))).filter(Boolean).sort();
+    const uniqueRangesList = Array.from(new Set(ranges.map(r => r.name === 'Rajgarh Forest Division' ? 'Division' : r.name))).filter(Boolean).sort();
+
+    const renderAllocationExpenditureReport = () => {
+      const searchLower = reportSearchTerm.toLowerCase();
+      const filtered = allocationExpenditureData.filter(row => {
+        const matchesSearch = (
+          row.scheme.toLowerCase().includes(searchLower) ||
+          row.sector.toLowerCase().includes(searchLower) ||
+          row.activity.toLowerCase().includes(searchLower) ||
+          row.subActivity.toLowerCase().includes(searchLower) ||
+          row.soe.toLowerCase().includes(searchLower) ||
+          row.range.toLowerCase().includes(searchLower) ||
+          row.description.toLowerCase().includes(searchLower)
+        );
+
+        const matchesFilters = (
+          (!reportFilters.scheme || row.scheme === reportFilters.scheme) &&
+          (!reportFilters.sector || row.sector === reportFilters.sector) &&
+          (!reportFilters.activity || row.activity === reportFilters.activity) &&
+          (!reportFilters.subActivity || row.subActivity === reportFilters.subActivity) &&
+          (!reportFilters.range || row.range === reportFilters.range) &&
+          (!reportFilters.soe || row.soe.includes(reportFilters.soe))
+        );
+
+        return matchesSearch && matchesFilters;
+      }).sort((a, b) => {
+        // Sort by Activity first, then Sub-Activity, then Date
+        if (a.activity !== b.activity) {
+          return a.activity.localeCompare(b.activity);
+        }
+        if (a.subActivity !== b.subActivity) {
+          return a.subActivity.localeCompare(b.subActivity);
+        }
+        // Sort by date (assuming YYYY-MM-DD format)
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      });
+
+      // Totals for searched/filtered items
+      // Fix: Calculate total allocation correctly by only counting each unique allocation-SOE pair once
+      const uniqueAllocationsInFiltered = Array.from(new Set(filtered.map(r => (r as any).allocationId + '-' + (r as any).soeId)));
+      const totalAllocation = uniqueAllocationsInFiltered.reduce((sum, key) => {
+        const row = filtered.find(r => ((r as any).allocationId + '-' + (r as any).soeId) === key);
+        return sum + (row ? (row as any).allocation : 0);
+      }, 0);
+
+      const totalExpenditure = filtered.reduce((sum, r) => sum + r.expenditure, 0);
+      const totalBalance = totalAllocation - totalExpenditure;
+
+      // Pagination
+      const totalPages = reportItemsPerPage === -1 ? 1 : Math.ceil(filtered.length / reportItemsPerPage);
+      const paginatedData = reportItemsPerPage === -1 ? filtered : filtered.slice((reportPage - 1) * reportItemsPerPage, reportPage * reportItemsPerPage);
+
+      const headers = ['Date', 'Range', 'Scheme', 'Sector', 'Activity', 'Sub-Activity', 'SOE', 'Description', 'Allocation', 'Expenditure', 'Balance to Book'];
+      const tableData = filtered.map(r => [
+        r.date, r.range, r.scheme, r.sector, r.activity, r.subActivity, r.soe, r.description, r.allocation, r.expenditure, r.balance
+      ]);
+
+      return (
+        <div className="space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4 flex-1">
+              <div className="relative flex-1 max-w-md flex items-center gap-1">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search report by scheme, sector, activity, soe, range..."
+                    value={reportSearchTerm}
+                    onChange={(e) => { setReportSearchTerm(e.target.value); setReportPage(1); }}
+                    className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                  />
+                </div>
+                <button 
+                  className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+                  title="Search"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+              </div>
+              <button 
+                onClick={() => setShowReportFilters(!showReportFilters)}
+                className={`flex items-center gap-1 px-3 py-2 border rounded-lg text-sm transition-colors ${showReportFilters ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white hover:bg-gray-50'}`}
+              >
+                <Filter className="w-4 h-4" />
+                <span>Filters</span>
+                {showReportFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              <select 
+                value={reportItemsPerPage} 
+                onChange={(e) => { setReportItemsPerPage(Number(e.target.value)); setReportPage(1); }}
+                className="p-2 border rounded text-sm bg-white"
+              >
+                <option value={10}>10 per page</option>
+                <option value={25}>25 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={-1}>View All</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+
+              <button 
+                onClick={() => downloadPDF('Allocation & Expenditure Report', [], [], tableData, headers)}
+                className="bg-red-600 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1 hover:bg-red-700 transition-colors"
+              >
+                <Download className="w-3 h-3" /> PDF
+              </button>
+              <button 
+                onClick={() => downloadExcel('Allocation & Expenditure Report', [], [], tableData, headers)}
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1 hover:bg-emerald-700 transition-colors"
+              >
+                <Download className="w-3 h-3" /> Excel
+              </button>
+            </div>
+          </div>
+
+              {showReportFilters && (
+                <div className="mb-6 animate-in fade-in slide-in-from-top-2">
+                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-t-lg border border-gray-200">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                      <select 
+                        value={reportFilters.range}
+                        onChange={(e) => { setReportFilters({ ...reportFilters, range: e.target.value, scheme: '', sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All Ranges</option>
+                        {uniqueRangesList.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+                      <select 
+                        value={reportFilters.scheme}
+                        onChange={(e) => { setReportFilters({ ...reportFilters, scheme: e.target.value, sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All Schemes</option>
+                        {uniqueSchemes.filter(s => {
+                          if (!reportFilters.range) return true;
+                          return combinedReportData.some(r => r.range === reportFilters.range && r.scheme === s);
+                        }).map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+                      <select 
+                        value={reportFilters.sector}
+                        onChange={(e) => { setReportFilters({ ...reportFilters, sector: e.target.value, activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All Sectors</option>
+                        {uniqueSectors.filter(s => {
+                          if (!reportFilters.range && !reportFilters.scheme) return true;
+                          return combinedReportData.some(r => {
+                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                            return rangeMatch && schemeMatch && r.sector === s;
+                          });
+                        }).map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+                      <select 
+                        value={reportFilters.activity}
+                        onChange={(e) => { setReportFilters({ ...reportFilters, activity: e.target.value, subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All Activities</option>
+                        {uniqueActivities.filter(a => {
+                          if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector) return true;
+                          return combinedReportData.some(r => {
+                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                            const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
+                            return rangeMatch && schemeMatch && sectorMatch && r.activity === a;
+                          });
+                        }).map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+                      <select 
+                        value={reportFilters.subActivity}
+                        onChange={(e) => { setReportFilters({ ...reportFilters, subActivity: e.target.value, soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All Sub-Activities</option>
+                        {uniqueSubActivities.filter(sa => {
+                          if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity) return true;
+                          return combinedReportData.some(r => {
+                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                            const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
+                            const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
+                            return rangeMatch && schemeMatch && sectorMatch && activityMatch && r.subActivity === sa;
+                          });
+                        }).map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
+                      <select 
+                        value={reportFilters.soe}
+                        onChange={(e) => { setReportFilters({ ...reportFilters, soe: e.target.value }); setReportPage(1); }}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All SOEs</option>
+                        {uniqueSoes.filter(s => {
+                          if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity && !reportFilters.subActivity) return true;
+                          return combinedReportData.some(r => {
+                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                            const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
+                            const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
+                            const subActivityMatch = !reportFilters.subActivity || r.subActivity === reportFilters.subActivity;
+                            return rangeMatch && schemeMatch && sectorMatch && activityMatch && subActivityMatch && (r as any).soe.includes(s);
+                          });
+                        }).map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div className="lg:col-span-6 flex justify-end">
+                      <button 
+                        onClick={() => {
+                          setReportFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
+                          setReportSearchTerm('');
+                          setReportPage(1);
+                        }}
+                        className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
+                      >
+                        <X className="w-3 h-3" />
+                        Reset Filters
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 bg-emerald-50 rounded-b-lg border-x border-b border-gray-200">
+                    <div className="flex justify-between items-center px-2">
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase">Total Allocation:</span>
+                      <span className="text-sm font-bold text-emerald-700">₹{totalAllocation.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center px-2 border-x border-emerald-100">
+                      <span className="text-[10px] font-bold text-red-800 uppercase">Total Expenditure:</span>
+                      <span className="text-sm font-bold text-red-700">₹{totalExpenditure.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center px-2">
+                      <span className="text-[10px] font-bold text-blue-800 uppercase">Total Balance:</span>
+                      <span className="text-sm font-bold text-blue-700">₹{totalBalance.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">Date</th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
+                    <div className="flex items-center justify-between">
+                      Range <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
+                    </div>
+                  </th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
+                    <div className="flex items-center justify-between">
+                      Scheme <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
+                    </div>
+                  </th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
+                    <div className="flex items-center justify-between">
+                      Sector <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
+                    </div>
+                  </th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
+                    <div className="flex items-center justify-between">
+                      Activity <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
+                    </div>
+                  </th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
+                    <div className="flex items-center justify-between">
+                      Sub-Activity <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
+                    </div>
+                  </th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
+                    <div className="flex items-center justify-between">
+                      SOE <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
+                    </div>
+                  </th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">Description</th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight text-right">Allocation</th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight text-right">Expenditure</th>
+                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight text-right">Balance to Book</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedData.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50 border-b border-gray-200">
+                    <td className="p-2 text-[10px] border border-gray-300">{row.date}</td>
+                    <td className="p-2 text-[10px] border border-gray-300">{row.range}</td>
+                    <td className="p-2 text-[10px] border border-gray-300">{row.scheme}</td>
+                    <td className="p-2 text-[10px] border border-gray-300">{row.sector}</td>
+                    <td className="p-2 text-[10px] border border-gray-300">{row.activity}</td>
+                    <td className="p-2 text-[10px] border border-gray-300">{row.subActivity}</td>
+                    <td className="p-2 text-[10px] border border-gray-300 font-medium">{row.soe}</td>
+                    <td className="p-2 text-[10px] border border-gray-300">{row.description}</td>
+                    <td className="p-2 text-[10px] border border-gray-300 text-right font-medium text-emerald-700">₹{row.allocation.toLocaleString()}</td>
+                    <td className="p-2 text-[10px] border border-gray-300 text-right font-bold text-red-700">₹{row.expenditure.toLocaleString()}</td>
+                    <td className="p-2 text-[10px] border border-gray-300 text-right font-bold text-blue-700">₹{row.balance.toLocaleString()}</td>
+                  </tr>
+                ))}
+                {paginatedData.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="p-8 text-center text-gray-500 border border-gray-300">No expenditure data found.</td>
+                  </tr>
+                )}
+              </tbody>
+              {paginatedData.length > 0 && (
+                <tfoot className="bg-gray-100 font-bold">
+                  <tr>
+                    <td colSpan={8} className="p-2 text-[10px] border border-gray-300 text-right uppercase">Total (Filtered)</td>
+                    <td className="p-2 text-[10px] border border-gray-300 text-right text-emerald-700">₹{totalAllocation.toLocaleString()}</td>
+                    <td className="p-2 text-[10px] border border-gray-300 text-right text-red-700">₹{totalExpenditure.toLocaleString()}</td>
+                    <td className="p-2 text-[10px] border border-gray-300 text-right text-blue-700">₹{totalBalance.toLocaleString()}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {reportItemsPerPage !== -1 && totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <span className="text-xs text-gray-500">Showing {(reportPage - 1) * reportItemsPerPage + 1} to {Math.min(reportPage * reportItemsPerPage, filtered.length)} of {filtered.length} entries</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setReportPage(p => Math.max(1, p - 1))}
+                  disabled={reportPage === 1}
+                  className="p-1 rounded border hover:bg-gray-100 disabled:opacity-50"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="flex gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) pageNum = i + 1;
+                    else if (reportPage <= 3) pageNum = i + 1;
+                    else if (reportPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                    else pageNum = reportPage - 2 + i;
+                    
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setReportPage(pageNum)}
+                        className={`w-8 h-8 text-xs rounded border ${reportPage === pageNum ? 'bg-emerald-600 text-white border-emerald-600' : 'hover:bg-gray-100'}`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setReportPage(p => Math.min(totalPages, p + 1))}
+                  disabled={reportPage === totalPages}
+                  className="p-1 rounded border hover:bg-gray-100 disabled:opacity-50"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Calculate total allocated per SOE Head across all ranges to get accurate "To be Allocated"
+    const totalAllocatedBySoe: Record<string, number> = {};
+    comprehensiveReportData.forEach(a => {
+      totalAllocatedBySoe[a.soe] = (totalAllocatedBySoe[a.soe] || 0) + a.allocated;
+    });
+
+    // Filtering
+    const filteredData = comprehensiveReportData.filter(row => {
+      return (
+        (!reportFilters.range || row.range === reportFilters.range) &&
+        (!reportFilters.scheme || row.scheme === reportFilters.scheme) &&
+        (!reportFilters.sector || row.sector === reportFilters.sector) &&
+        (!reportFilters.activity || row.activity === reportFilters.activity) &&
+        (!reportFilters.subActivity || row.subActivity === reportFilters.subActivity) &&
+        (!reportFilters.soe || row.soe.includes(reportFilters.soe))
+      );
+    });
+
+    const sortedData = [...filteredData].sort((a, b) => {
+      if (a.scheme !== b.scheme) return a.scheme.localeCompare(b.scheme);
+      if (a.sector !== b.sector) return a.sector.localeCompare(b.sector);
+      if (a.activity !== b.activity) return a.activity.localeCompare(b.activity);
+      return a.subActivity.localeCompare(b.subActivity);
+    });
+
+    const groupedData = [];
+    
+    // Helper to calculate totals for a group of rows
+    const calculateTotals = (rows: any[]) => {
+      const distinctSoes: Record<string, number> = {};
+      let totalAllocated = 0;
+      let totalExpenditure = 0;
+
+      rows.forEach(r => {
+        if (!(r.soe in distinctSoes)) {
+          distinctSoes[r.soe] = r.totalBudget;
+        }
+        totalAllocated += r.allocated;
+        totalExpenditure += r.expenditure;
+      });
+
+      const totalBudget = Object.values(distinctSoes).reduce((sum, b) => sum + b, 0);
+      const toBeAllocated = totalBudget - totalAllocated;
+      const remaining = totalAllocated - totalExpenditure; // Fix: Balance = Allocated - Expenditure
+
+      return {
+        totalBudget,
+        allocated: totalAllocated,
+        toBeAllocated,
+        expenditure: totalExpenditure,
+        remaining
+      };
+    };
+
+    let currentSchemeRows = [];
+    let currentSectorRows = [];
+    let currentActivityRows = [];
+    let currentSubActivityRows = [];
+
+    let currentScheme = null;
+    let currentSector = null;
+    let currentActivity = null;
+    let currentSubActivity = null;
+
+    sortedData.forEach((row, idx) => {
+      const totalAllocatedForThisSoe = totalAllocatedBySoe[row.soe] || 0;
+      const toBeAllocated = row.totalBudget - totalAllocatedForThisSoe;
+      const rowWithCalc = { ...row, toBeAllocated };
+
+      if (idx > 0) {
+        if (row.subActivity !== currentSubActivity || row.activity !== currentActivity || row.sector !== currentSector || row.scheme !== currentScheme) {
+          const totals = calculateTotals(currentSubActivityRows);
+          groupedData.push({ ...totals, range: '', scheme: '', sector: '', activity: '', subActivity: `Total for ${currentSubActivity}`, soe: '', isTotal: true, level: 'subActivity' });
+          currentSubActivityRows = [];
+        }
+        if (row.activity !== currentActivity || row.sector !== currentSector || row.scheme !== currentScheme) {
+          const totals = calculateTotals(currentActivityRows);
+          groupedData.push({ ...totals, range: '', scheme: '', sector: '', activity: `Total for ${currentActivity}`, subActivity: '', soe: '', isTotal: true, level: 'activity' });
+          currentActivityRows = [];
+        }
+        if (row.sector !== currentSector || row.scheme !== currentScheme) {
+          const totals = calculateTotals(currentSectorRows);
+          groupedData.push({ ...totals, range: '', scheme: '', sector: `Total for ${currentSector}`, activity: '', subActivity: '', soe: '', isTotal: true, level: 'sector' });
+          currentSectorRows = [];
+        }
+        if (row.scheme !== currentScheme) {
+          const totals = calculateTotals(currentSchemeRows);
+          groupedData.push({ ...totals, range: '', scheme: `Total for ${currentScheme}`, sector: '', activity: '', subActivity: '', soe: '', isTotal: true, level: 'scheme' });
+          currentSchemeRows = [];
+        }
+      }
+
+      currentScheme = row.scheme;
+      currentSector = row.sector;
+      currentActivity = row.activity;
+      currentSubActivity = row.subActivity;
+
+      groupedData.push(rowWithCalc);
+      
+      currentSubActivityRows.push(rowWithCalc);
+      currentActivityRows.push(rowWithCalc);
+      currentSectorRows.push(rowWithCalc);
+      currentSchemeRows.push(rowWithCalc);
+    });
+
+    if (sortedData.length > 0) {
+      const saTotals = calculateTotals(currentSubActivityRows);
+      groupedData.push({ ...saTotals, range: '', scheme: '', sector: '', activity: '', subActivity: `Total for ${currentSubActivity}`, soe: '', isTotal: true, level: 'subActivity' });
+      
+      const actTotals = calculateTotals(currentActivityRows);
+      groupedData.push({ ...actTotals, range: '', scheme: '', sector: '', activity: `Total for ${currentActivity}`, subActivity: '', soe: '', isTotal: true, level: 'activity' });
+      
+      const secTotals = calculateTotals(currentSectorRows);
+      groupedData.push({ ...secTotals, range: '', scheme: '', sector: `Total for ${currentSector}`, activity: '', subActivity: '', soe: '', isTotal: true, level: 'sector' });
+      
+      const schTotals = calculateTotals(currentSchemeRows);
+      groupedData.push({ ...schTotals, range: '', scheme: `Total for ${currentScheme}`, sector: '', activity: '', subActivity: '', soe: '', isTotal: true, level: 'scheme' });
+      
+      const grandTotals = calculateTotals(sortedData);
+      groupedData.push({ ...grandTotals, range: '', scheme: '', sector: '', activity: '', subActivity: '', soe: 'Grand Total', isTotal: true, level: 'grand' });
+    }
+
+    // --- SOE Abstract Summary Calculation ---
+    const abstractRows = soeAbstractData.filter(row => {
+      // Apply UI filters
+      const matchesFilters = (
+        (!reportFilters.scheme || row.schemeName === reportFilters.scheme) &&
+        (!reportFilters.sector || row.sectorName === reportFilters.sector) &&
+        (!reportFilters.activity || row.activityName === reportFilters.activity) &&
+        (!reportFilters.subActivity || row.subActivityName === reportFilters.subActivity)
+      );
+
+      if (!matchesFilters) return false;
+
+      if (soeAbstractSearch) {
+        const searchStr = soeAbstractSearch.toLowerCase();
+        return (
+          row.hierarchy.toLowerCase().includes(searchStr) ||
+          row.soeName.toLowerCase().includes(searchStr)
+        );
+      }
+
+      return true;
+    }).map(r => ({
+      ...r,
+      expenditure: r.spent, // Rename for report consistency
+      remaining: r.remainingToSpend // Rename for report consistency
+    })).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
+
+    const abstractHeaders = ['Hierarchy', 'Name of SOE', 'Approved Budget', 'Received in Try', 'Allocated', 'To be Allocated', 'Try Balance', 'Expenditure', 'Remaining'];
+    const abstractTableData = abstractRows.map(r => [
+      r.hierarchy, r.soeName, r.approvedBudget, r.receivedInTry, r.allocated, r.toBeAllocated, r.tryBalance, r.expenditure, r.remaining
+    ]);
+
+    const isGlobalUser = userRole === 'admin' || userRole === 'deo' || userRole === 'approver';
+    const detailedHeaders = ['Range', 'Scheme', 'Sector', 'Activity', 'Sub-Activity', 'SOE Head'];
+    if (!userRangeId) detailedHeaders.push('Total Budget');
+    detailedHeaders.push('Allocation');
+    detailedHeaders.push('Expenditure', 'Balance to Book');
+    
+    const detailedTableData = groupedData.map(row => {
+      const cols = [row.range, row.scheme, row.sector, row.activity, row.subActivity, row.soe];
+      if (!userRangeId) cols.push(row.totalBudget);
+      cols.push(row.allocated);
+      cols.push(row.expenditure, row.remaining);
+      return cols;
+    });
+
+    const renderTaxDeductionReport = () => {
+      const filtered = baseExpenses.filter(e => {
+        if (e.status === 'rejected') return false;
+        if (!e.deductionType || e.deductionType === 'None') return false;
+        
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        if (!alloc) return false;
+
+        const scheme = schemes.find(s => s.id === alloc.schemeId)?.name || 'N/A';
+        const sector = sectors.find(s => s.id === alloc.sectorId)?.name || 'N/A';
+        const range = ranges.find(r => r.id === alloc.rangeId)?.name || 'N/A';
+
+        const matchesFilters = (
+          (!reportFilters.scheme || scheme === reportFilters.scheme) &&
+          (!reportFilters.sector || sector === reportFilters.sector) &&
+          (!reportFilters.range || range === reportFilters.range) &&
+          (!reportFilters.deductionType || 
+            (reportFilters.deductionType === 'TDS' && (e.deductionType === 'TDS' || e.deductionType === 'Both')) ||
+            (reportFilters.deductionType === 'TDS_GST' && (e.deductionType === 'TDS_GST' || e.deductionType === 'Both'))
+          )
+        );
+
+        return matchesFilters;
+      });
+
+      const headers = ['Date', 'Bill No', 'Range', 'Scheme', 'Sector', 'Payee', 'PAN', 'GST', 'Gross Amt', 'TDS (1%)', 'TDS GST (2%)', 'Total Deducted', 'Net Paid'];
+      const tableData = filtered.map(e => {
+        const alloc = allocations.find(a => a.id === e.allocationId);
+        const bill = bills.find(b => b.expenseIds.includes(e.id));
+        const payee = payees.find(p => p.id === e.payeeId);
+        return [
+          e.date,
+          bill?.billNo || 'N/A',
+          ranges.find(r => r.id === alloc?.rangeId)?.name || 'N/A',
+          schemes.find(s => s.id === alloc?.schemeId)?.name || 'N/A',
+          sectors.find(s => s.id === alloc?.sectorId)?.name || 'N/A',
+          e.payeeName || payee?.name || 'N/A',
+          e.panNumber || payee?.panNumber || '-',
+          e.gstNumber || payee?.gstNumber || '-',
+          e.amount,
+          Math.round(e.tdsAmount || 0),
+          Math.round(e.tdsGstAmount || 0),
+          Math.round(e.deductedAmount || 0),
+          Math.round(e.netAmount || (e.amount - (e.deductedAmount || 0)))
+        ];
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-bold text-gray-700 uppercase">Tax Deduction Report</h4>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => downloadPDF('Tax Deduction Report', [], [], tableData, headers)}
+                className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 hover:bg-red-700 transition-colors"
+              >
+                <Download className="w-3 h-3" /> PDF
+              </button>
+              <button 
+                onClick={() => downloadExcel('Tax Deduction Report', [], [], tableData, headers)}
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 hover:bg-emerald-700 transition-colors"
+              >
+                <Download className="w-3 h-3" /> Excel
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto border rounded-xl shadow-sm">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-gray-50">
+                <tr>
+                  {headers.map(h => (
+                    <th key={h} className="p-2 text-[10px] font-bold text-gray-700 border border-gray-200 uppercase tracking-tight text-left">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((e, i) => {
+                  const alloc = allocations.find(a => a.id === e.allocationId);
+                  const bill = bills.find(b => b.expenseIds.includes(e.id));
+                  const payee = payees.find(p => p.id === e.payeeId);
+                  const net = e.netAmount || (e.amount - (e.deductedAmount || 0));
+                  return (
+                    <tr key={e.id} className="hover:bg-gray-50 border-b border-gray-100">
+                      <td className="p-2 border border-gray-100">{e.date}</td>
+                      <td className="p-2 border border-gray-100 font-medium">{bill?.billNo || '-'}</td>
+                      <td className="p-2 border border-gray-100">{ranges.find(r => r.id === alloc?.rangeId)?.name || '-'}</td>
+                      <td className="p-2 border border-gray-100">{schemes.find(s => s.id === alloc?.schemeId)?.name || '-'}</td>
+                      <td className="p-2 border border-gray-100">{sectors.find(s => s.id === alloc?.sectorId)?.name || '-'}</td>
+                      <td className="p-2 border border-gray-100">{e.payeeName || payee?.name || '-'}</td>
+                      <td className="p-2 border border-gray-100 font-mono text-[10px]">{e.panNumber || payee?.panNumber || '-'}</td>
+                      <td className="p-2 border border-gray-100 font-mono text-[10px]">{e.gstNumber || payee?.gstNumber || '-'}</td>
+                      <td className="p-2 border border-gray-100 text-right">₹{e.amount.toLocaleString()}</td>
+                      <td className="p-2 border border-gray-100 text-right text-blue-600">₹{Math.round(e.tdsAmount || 0).toLocaleString()}</td>
+                      <td className="p-2 border border-gray-100 text-right text-blue-600">₹{Math.round(e.tdsGstAmount || 0).toLocaleString()}</td>
+                      <td className="p-2 border border-gray-100 text-right font-bold text-red-600">₹{Math.round(e.deductedAmount || 0).toLocaleString()}</td>
+                      <td className="p-2 border border-gray-100 text-right font-bold text-emerald-700">₹{Math.round(net).toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={headers.length} className="p-8 text-center text-gray-500">No tax deduction records found.</td>
+                  </tr>
+                )}
+              </tbody>
+              {filtered.length > 0 && (
+                <tfoot className="bg-gray-50 font-bold">
+                  <tr>
+                    <td colSpan={8} className="p-2 text-right uppercase">Totals</td>
+                    <td className="p-2 text-right">₹{filtered.reduce((sum, e) => sum + e.amount, 0).toLocaleString()}</td>
+                    <td className="p-2 text-right text-blue-600">₹{filtered.reduce((sum, e) => sum + Math.round(e.tdsAmount || 0), 0).toLocaleString()}</td>
+                    <td className="p-2 text-right text-blue-600">₹{filtered.reduce((sum, e) => sum + Math.round(e.tdsGstAmount || 0), 0).toLocaleString()}</td>
+                    <td className="p-2 text-right text-red-600">₹{filtered.reduce((sum, e) => sum + Math.round(e.deductedAmount || 0), 0).toLocaleString()}</td>
+                    <td className="p-2 text-right text-emerald-700">₹{filtered.reduce((sum, e) => sum + Math.round(e.netAmount || (e.amount - (e.deductedAmount || 0))), 0).toLocaleString()}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white p-3 md:p-6 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex border-b border-gray-200 mb-6 overflow-x-auto whitespace-nowrap scrollbar-hide">
+            <button
+              onClick={() => { setReportSubTab('summary'); setReportPage(1); }}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'summary' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              Summary Report
+            </button>
+            <button
+              onClick={() => { setReportSubTab('allocation-expenditure'); setReportPage(1); }}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'allocation-expenditure' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              Allocation & Expenditure Details
+            </button>
+            <button
+              onClick={() => { setReportSubTab('ledger'); setReportPage(1); }}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'ledger' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              Scheme Wise Ledger
+            </button>
+            {(userRole === 'admin' || userRole === 'Division') && (
+              <button
+                onClick={() => { setReportSubTab('master-control'); setReportPage(1); }}
+                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'master-control' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                Master Control
+              </button>
+            )}
+            <button
+              onClick={() => { setReportSubTab('tax-deduction'); setReportPage(1); }}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'tax-deduction' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              Tax Deduction
+            </button>
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <FileBarChart className="text-emerald-600" /> {reportSubTab === 'summary' ? 'Comprehensive Budget Report' : reportSubTab === 'ledger' ? 'Scheme Wise Ledger' : 'Allocation & Expenditure Details'}
+            </h3>
+            <div className="flex flex-wrap gap-1">
+              <button 
+                onClick={() => setShowReportFilters(!showReportFilters)}
+                className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-gray-200 transition-colors border border-gray-200"
+              >
+                <Filter className="w-3 h-3" /> {showReportFilters ? 'Hide' : 'Show'} Filters
+                {showReportFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+              {reportSubTab === 'summary' && (
+                <>
+                  <button 
+                    onClick={() => downloadPDF('Comprehensive Budget Report', (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractTableData : [], (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractHeaders : [], detailedTableData, detailedHeaders)}
+                    className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-red-700 transition-colors shadow-sm"
+                  >
+                    <Download className="w-3 h-3" /> PDF
+                  </button>
+                  <button 
+                    onClick={() => downloadExcel('Comprehensive Budget Report', (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractTableData : [], (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractHeaders : [], detailedTableData, detailedHeaders)}
+                    className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-emerald-700 transition-colors shadow-sm"
+                  >
+                    <Download className="w-3 h-3" /> Excel
+                  </button>
+                  <button 
+                    onClick={downloadZip}
+                    className="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-blue-700 transition-colors shadow-sm"
+                  >
+                    <Download className="w-3 h-3" /> ZIP
+                  </button>
+                </>
+              )}
+              {reportSubTab === 'ledger' && (
+                <button 
+                  onClick={downloadLedgerPDF}
+                  className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-red-700 transition-colors shadow-sm"
+                >
+                  <Download className="w-3 h-3" /> PDF
+                </button>
+              )}
+              {reportSubTab === 'master-control' && (
+                <>
+                  <button 
+                    onClick={() => {
+                      const headers = ["Range", "Scheme", "Sector", "Activity", "Sub-Activity", "SOE", "Allocated", "Expenditure", "Balance"];
+                      const data = masterControlData.map(r => [r.rangeName, r.schemeName, r.sectorName, r.activityName, r.subActivityName, r.soeName, r.allocated, r.expenditure, r.balance]);
+                      downloadPDF('Master Control Budget Report', [], [], data, headers);
+                    }}
+                    className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-red-700 transition-colors shadow-sm"
+                  >
+                    <Download className="w-3 h-3" /> PDF
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const headers = ["Range", "Scheme", "Sector", "Activity", "Sub-Activity", "SOE", "Allocated", "Expenditure", "Balance"];
+                      const data = masterControlData.map(r => [r.rangeName, r.schemeName, r.sectorName, r.activityName, r.subActivityName, r.soeName, r.allocated, r.expenditure, r.balance]);
+                      downloadExcel('Master Control Budget Report', [], [], data, headers);
+                    }}
+                    className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-emerald-700 transition-colors shadow-sm"
+                  >
+                    <Download className="w-3 h-3" /> Excel
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {showReportFilters && (
+            <div className="mb-6 animate-in fade-in slide-in-from-top-2">
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
+                {reportSubTab === 'summary' && (
+                  <div className="lg:col-span-1 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                    <h5 className="text-xs font-bold text-gray-700 uppercase mb-3 flex items-center gap-2">
+                      <PieChartIcon className="w-3 h-3 text-emerald-600" /> Budget Distribution
+                    </h5>
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie 
+                            data={[
+                              { name: 'Spent', value: calculateTotals(sortedData).expenditure },
+                              { name: 'Balance', value: calculateTotals(sortedData).remaining }
+                            ]} 
+                            innerRadius={35} 
+                            outerRadius={50} 
+                            paddingAngle={5} 
+                            dataKey="value"
+                          >
+                            <Cell fill="#dc3545" />
+                            <Cell fill="#10b981" />
+                          </Pie>
+                          <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex justify-center gap-4 mt-2">
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <span className="text-[10px] text-gray-500">Spent</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <span className="text-[10px] text-gray-500">Balance</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                    
+                <div className={`${reportSubTab === 'summary' ? 'lg:col-span-3' : 'lg:col-span-4'} grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200`}>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                    <select 
+                      value={reportFilters.range}
+                      onChange={(e) => { setReportFilters({ ...reportFilters, range: e.target.value, scheme: '', sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Ranges</option>
+                      {uniqueRangesList.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+                    <select 
+                      value={reportFilters.scheme}
+                      onChange={(e) => { setReportFilters({ ...reportFilters, scheme: e.target.value, sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Schemes</option>
+                      {uniqueSchemes.filter(s => {
+                        if (!reportFilters.range) return true;
+                        return combinedReportData.some(r => r.range === reportFilters.range && r.scheme === s);
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+                    <select 
+                      value={reportFilters.sector}
+                      onChange={(e) => { setReportFilters({ ...reportFilters, sector: e.target.value, activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Sectors</option>
+                      {uniqueSectors.filter(s => {
+                        if (!reportFilters.range && !reportFilters.scheme) return true;
+                        return combinedReportData.some(r => {
+                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                          return rangeMatch && schemeMatch && r.sector === s;
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+                    <select 
+                      value={reportFilters.activity}
+                      onChange={(e) => { setReportFilters({ ...reportFilters, activity: e.target.value, subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Activities</option>
+                      {uniqueActivities.filter(a => {
+                        if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector) return true;
+                        return combinedReportData.some(r => {
+                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                          const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
+                          return rangeMatch && schemeMatch && sectorMatch && r.activity === a;
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+                    <select 
+                      value={reportFilters.subActivity}
+                      onChange={(e) => { setReportFilters({ ...reportFilters, subActivity: e.target.value, soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Sub-Activities</option>
+                      {uniqueSubActivities.filter(sa => {
+                        if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity) return true;
+                        return combinedReportData.some(r => {
+                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                          const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
+                          const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
+                          return rangeMatch && schemeMatch && sectorMatch && activityMatch && r.subActivity === sa;
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
+                    <select 
+                      value={reportFilters.soe}
+                      onChange={(e) => { setReportFilters({ ...reportFilters, soe: e.target.value, deductionType: reportFilters.deductionType }); setReportPage(1); }}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All SOEs</option>
+                      {uniqueSoes.filter(s => {
+                        if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity && !reportFilters.subActivity) return true;
+                        return combinedReportData.some(r => {
+                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
+                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
+                          const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
+                          const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
+                          const subActivityMatch = !reportFilters.subActivity || r.subActivity === reportFilters.subActivity;
+                          return rangeMatch && schemeMatch && sectorMatch && activityMatch && subActivityMatch && (r as any).soe.includes(s);
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  {reportSubTab === 'tax-deduction' && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Deduction Type</label>
+                      <select 
+                        value={reportFilters.deductionType}
+                        onChange={(e) => setReportFilters({ ...reportFilters, deductionType: e.target.value })}
+                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                      >
+                        <option value="">All Deductions</option>
+                        <option value="TDS">TDS (1%)</option>
+                        <option value="TDS_GST">TDS on GST (2%)</option>
+                      </select>
+                    </div>
+                  )}
+                  {reportSubTab === 'ledger' && (
+                    <div className="lg:col-span-2">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Search Ledger</label>
+                      <div className="flex items-center gap-1">
+                        <div className="relative flex-1">
+                          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="Search hierarchy, SOE, range..."
+                            value={ledgerSearchTerm}
+                            onChange={(e) => setLedgerSearchTerm(e.target.value)}
+                            className="pl-9 pr-4 py-2 border border-gray-300 rounded text-xs bg-white w-full"
+                          />
+                        </div>
+                        <button 
+                          className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+                          title="Search"
+                        >
+                          <Search className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className={`${reportSubTab === 'ledger' ? 'lg:col-span-4' : 'lg:col-span-6'} flex justify-end`}>
+                    <button 
+                      onClick={() => {
+                        setReportFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
+                        setSoeAbstractSearch('');
+                        setLedgerSearchTerm('');
+                        setReportPage(1);
+                      }}
+                      className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" />
+                      Reset Filters
+                    </button>
+                  </div>
+                </div>
+                  </div>
+                  {sortedData.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-3 bg-emerald-50 rounded-lg border border-gray-200">
+                      <div className="flex justify-between items-center px-2">
+                        <span className="text-[10px] font-bold text-emerald-800 uppercase">Total Allocation:</span>
+                        <span className="text-sm font-bold text-emerald-700">₹{calculateTotals(sortedData).allocated.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 border-x border-emerald-100">
+                        <span className="text-[10px] font-bold text-red-800 uppercase">Total Expenditure:</span>
+                        <span className="text-sm font-bold text-red-700">₹{calculateTotals(sortedData).expenditure.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center px-2">
+                        <span className="text-[10px] font-bold text-blue-800 uppercase">Total Balance:</span>
+                        <span className="text-sm font-bold text-blue-700">₹{calculateTotals(sortedData).remaining.toLocaleString()}</span>
+                      </div>
+                      <div className="px-2">
+                        <div className="flex justify-between mb-1">
+                          <span className="text-[10px] font-bold text-gray-600 uppercase">Usage:</span>
+                          <span className="text-[10px] font-bold text-gray-700">{calculateTotals(sortedData).allocated > 0 ? `${((calculateTotals(sortedData).expenditure / calculateTotals(sortedData).allocated) * 100).toFixed(1)}%` : '0%'}</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5">
+                          <div 
+                            className="bg-emerald-600 h-1.5 rounded-full" 
+                            style={{ width: `${Math.min(100, calculateTotals(sortedData).allocated > 0 ? (calculateTotals(sortedData).expenditure / calculateTotals(sortedData).allocated) * 100 : 0)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {reportSubTab === 'summary' && (
+                <>
+                  {/* SOE Abstract Summary Table */}
+              {(userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'Division') && (
+                <div className="mb-10">
+                  <div 
+                    className="flex justify-between items-center mb-4 cursor-pointer hover:bg-gray-50 p-2 rounded -mx-2"
+                    onClick={() => setShowSoeAbstract(!showSoeAbstract)}
+                  >
+                    <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                      <Table className="w-4 h-4 text-emerald-600" /> SOE Abstract Summary
+                    </h4>
+                    <div className="flex items-center gap-2 md:gap-4">
+                      {showSoeAbstract && (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <div className={`relative transition-all duration-300 ${showMobileReportSearch ? 'w-40 sm:w-64' : 'w-0 sm:w-64 overflow-hidden'}`}>
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="Search abstract..."
+                              value={soeAbstractSearch}
+                              onChange={(e) => setSoeAbstractSearch(e.target.value)}
+                              className="pl-9 pr-4 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                            />
+                          </div>
+                          <button 
+                            onClick={() => setShowMobileReportSearch(!showMobileReportSearch)}
+                            className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm sm:hidden"
+                            title="Search"
+                          >
+                            <Search className="w-4 h-4" />
+                          </button>
+                          <button 
+                            className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm hidden sm:block"
+                            title="Search"
+                          >
+                            <Search className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                      <button type="button" className="text-gray-500 hover:text-gray-700">
+                        {showSoeAbstract ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {showSoeAbstract && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse border border-gray-300">
+                        <thead>
+                          <tr className="bg-emerald-50 border-b border-gray-300">
+                            {abstractHeaders.map(h => <th key={h} className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase tracking-tight">{h}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {abstractRows.map((row, i) => (
+                            <tr key={i} className="border-b border-gray-300 hover:bg-emerald-50/30 transition-colors">
+                              <td className="p-1.5 text-[10px] border border-gray-300 font-medium text-gray-600">{row.hierarchy}</td>
+                              <td className="p-1.5 text-[10px] border border-gray-300 font-bold text-gray-800">{row.soeName}</td>
+                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-gray-700">₹{row.approvedBudget.toLocaleString()}</td>
+                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-indigo-700">₹{row.receivedInTry.toLocaleString()}</td>
+                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-emerald-700 font-medium">₹{row.allocated.toLocaleString()}</td>
+                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-amber-700 font-medium">₹{row.toBeAllocated.toLocaleString()}</td>
+                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-purple-700 font-medium">₹{row.tryBalance.toLocaleString()}</td>
+                              <td 
+                                className="p-1.5 text-[10px] border border-gray-300 text-right text-red-700 font-medium cursor-pointer hover:underline"
+                                onClick={() => setViewingSoeExp({ soeId: row.soeId, soeName: row.soeName, hierarchy: row.hierarchy })}
+                                title="Click to view expenditure details"
+                              >
+                                ₹{row.expenditure.toLocaleString()}
+                              </td>
+                              <td className={`p-1.5 text-[10px] border border-gray-300 text-right font-bold ${row.remaining < 0 ? 'text-red-600 bg-red-50' : 'text-blue-700'}`}>
+                                ₹{row.remaining.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                          {abstractRows.length === 0 && (
+                            <tr>
+                              <td colSpan={9} className="p-4 text-center text-gray-500 border border-gray-300 text-xs">No abstract data available.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mb-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                <div 
+                  className="flex items-center justify-between cursor-pointer group"
+                  onClick={() => setShowDetailedReport(!showDetailedReport)}
+                >
+                  <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                    <Table className="w-4 h-4 text-emerald-600" /> Detailed Range-wise Report
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 group-hover:text-gray-600 transition-colors">
+                      {showDetailedReport ? 'Click to collapse' : 'Click to expand'}
+                    </span>
+                    <button type="button" className="p-1 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-all">
+                      {showDetailedReport ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+                
+                {showDetailedReport && (
+                  <div className="overflow-x-auto mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <table className="w-full text-left border-collapse border border-gray-300">
+                      <thead>
+                        <tr className="bg-gray-100 border-b border-gray-300">
+                          {detailedHeaders.map(h => <th key={h} className="p-1.5 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupedData.map((row, i) => {
+                          let rowClass = "border-b border-gray-300 hover:bg-gray-50";
+                          let textClass = "text-[10px]";
+                          if (row.isTotal) {
+                            textClass = "text-[9px] uppercase tracking-tight";
+                            if (row.level === 'grand') rowClass = "bg-gray-800 text-white font-bold";
+                            else if (row.level === 'scheme') rowClass = "bg-amber-50 font-bold";
+                            else if (row.level === 'sector') rowClass = "bg-emerald-50 font-bold";
+                            else if (row.level === 'activity') rowClass = "bg-blue-50 font-bold";
+                            else if (row.level === 'subActivity') rowClass = "bg-gray-100 font-bold";
+                          }
+
+                          return (
+                            <tr key={i} className={rowClass}>
+                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.range}</td>
+                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.scheme}</td>
+                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.sector}</td>
+                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.activity}</td>
+                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.subActivity}</td>
+                              <td className={`p-1.5 font-medium border border-gray-300 whitespace-nowrap ${textClass}`}>{row.soe}</td>
+                              {!userRangeId && <td className={`p-1.5 text-right border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-gray-600'}`}>₹{row.totalBudget.toLocaleString()}</td>}
+                              <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-emerald-700'}`}>₹{row.allocated.toLocaleString()}</td>
+                              <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-red-700'}`}>₹{row.expenditure.toLocaleString()}</td>
+                              <td className={`p-1.5 text-right font-bold border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-blue-700'}`}>₹{row.remaining.toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                        {groupedData.length === 0 && (
+                          <tr>
+                            <td colSpan={detailedHeaders.length} className="p-8 text-center text-gray-500 border border-gray-300">No data available for the selected filters.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+            <div className="p-3 md:p-6">
+              {reportSubTab === 'summary' && (
+                <div className="space-y-6">
+                  {/* SOE Abstract Summary Table */}
+                  {(userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'Division') && (
+                    <div className="mb-10">
+                      <div 
+                        className="flex justify-between items-center mb-4 cursor-pointer hover:bg-gray-50 p-2 rounded -mx-2"
+                        onClick={() => setShowSoeAbstract(!showSoeAbstract)}
+                      >
+                        <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                          <Table className="w-4 h-4 text-emerald-600" /> SOE Abstract Summary
+                        </h4>
+                        <div className="flex items-center gap-2 md:gap-4">
+                          {showSoeAbstract && (
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <div className={`relative transition-all duration-300 ${showMobileReportSearch ? 'w-40 sm:w-64' : 'w-0 sm:w-64 overflow-hidden'}`}>
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Search abstract..."
+                                  value={soeAbstractSearch}
+                                  onChange={(e) => setSoeAbstractSearch(e.target.value)}
+                                  className="pl-9 pr-4 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                                />
+                              </div>
+                              <button 
+                                onClick={() => setShowMobileReportSearch(!showMobileReportSearch)}
+                                className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm sm:hidden"
+                                title="Search"
+                              >
+                                <Search className="w-4 h-4" />
+                              </button>
+                              <button 
+                                className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm hidden sm:block"
+                                title="Search"
+                              >
+                                <Search className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                          <button type="button" className="text-gray-500 hover:text-gray-700">
+                            {showSoeAbstract ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {showSoeAbstract && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse border border-gray-300">
+                            <thead>
+                              <tr className="bg-emerald-50 border-b border-gray-300">
+                                {abstractHeaders.map(h => <th key={h} className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase tracking-tight">{h}</th>)}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {abstractRows.map((row, i) => (
+                                <tr key={i} className="border-b border-gray-300 hover:bg-emerald-50/30 transition-colors">
+                                  <td className="p-1.5 text-[10px] border border-gray-300 font-medium text-gray-600">{row.hierarchy}</td>
+                                  <td className="p-1.5 text-[10px] border border-gray-300 font-bold text-gray-800">{row.soeName}</td>
+                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-gray-700">₹{row.approvedBudget.toLocaleString()}</td>
+                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-indigo-700">₹{row.receivedInTry.toLocaleString()}</td>
+                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-emerald-700 font-medium">₹{row.allocated.toLocaleString()}</td>
+                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-amber-700 font-medium">₹{row.toBeAllocated.toLocaleString()}</td>
+                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-purple-700 font-medium">₹{row.tryBalance.toLocaleString()}</td>
+                                  <td 
+                                    className="p-1.5 text-[10px] border border-gray-300 text-right text-red-700 font-medium cursor-pointer hover:underline"
+                                    onClick={() => setViewingSoeExp({ soeId: row.soeId, soeName: row.soeName, hierarchy: row.hierarchy })}
+                                    title="Click to view expenditure details"
+                                  >
+                                    ₹{row.expenditure.toLocaleString()}
+                                  </td>
+                                  <td className={`p-1.5 text-[10px] border border-gray-300 text-right font-bold ${row.remaining < 0 ? 'text-red-600 bg-red-50' : 'text-blue-700'}`}>
+                                    ₹{row.remaining.toLocaleString()}
+                                  </td>
+                                </tr>
+                              ))}
+                              {abstractRows.length === 0 && (
+                                <tr>
+                                  <td colSpan={9} className="p-4 text-center text-gray-500 border border-gray-300 text-xs">No abstract data available.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mb-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div 
+                      className="flex items-center justify-between cursor-pointer group"
+                      onClick={() => setShowDetailedReport(!showDetailedReport)}
+                    >
+                      <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                        <Table className="w-4 h-4 text-emerald-600" /> Detailed Budget Report
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 group-hover:text-gray-600 transition-colors">
+                          {showDetailedReport ? 'Click to collapse' : 'Click to expand'}
+                        </span>
+                        <button type="button" className="p-1 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-all">
+                          {showDetailedReport ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {showDetailedReport && (
+                      <div className="overflow-x-auto mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                        <table className="w-full text-left border-collapse border border-gray-300">
+                          <thead>
+                            <tr className="bg-gray-100 border-b border-gray-300">
+                              {detailedHeaders.map(h => <th key={h} className="p-1.5 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">{h}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {groupedData.map((row, i) => {
+                              let rowClass = "border-b border-gray-300 hover:bg-gray-50";
+                              let textClass = "text-[10px]";
+                              if (row.isTotal) {
+                                textClass = "text-[9px] uppercase tracking-tight";
+                                if (row.level === 'grand') rowClass = "bg-gray-800 text-white font-bold";
+                                else if (row.level === 'scheme') rowClass = "bg-amber-50 font-bold";
+                                else if (row.level === 'sector') rowClass = "bg-emerald-50 font-bold";
+                                else if (row.level === 'activity') rowClass = "bg-blue-50 font-bold";
+                                else if (row.level === 'subActivity') rowClass = "bg-gray-100 font-bold";
+                              }
+
+                              return (
+                                <tr key={i} className={rowClass}>
+                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.range}</td>
+                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.scheme}</td>
+                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.sector}</td>
+                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.activity}</td>
+                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.subActivity}</td>
+                                  <td className={`p-1.5 font-medium border border-gray-300 whitespace-nowrap ${textClass}`}>{row.soe}</td>
+                                  {!userRangeId && <td className={`p-1.5 text-right border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-gray-600'}`}>₹{row.totalBudget.toLocaleString()}</td>}
+                                  <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-emerald-700'}`}>₹{row.allocated.toLocaleString()}</td>
+                                  <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-red-700'}`}>₹{row.expenditure.toLocaleString()}</td>
+                                  <td className={`p-1.5 text-right font-bold border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-blue-700'}`}>₹{row.remaining.toLocaleString()}</td>
+                                </tr>
+                              );
+                            })}
+                            {groupedData.length === 0 && (
+                              <tr>
+                                <td colSpan={detailedHeaders.length} className="p-8 text-center text-gray-500 border border-gray-300">No data available for the selected filters.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {reportSubTab === 'allocation-expenditure' && renderAllocationExpenditureReport()}
+              {reportSubTab === 'ledger' && renderSchemeWiseLedger()}
+              {reportSubTab === 'master-control' && (
+                <>
+                  <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100">
+                      <p className="text-[10px] font-bold text-emerald-800 uppercase">Total Allocated</p>
+                      <p className="text-lg font-bold text-emerald-700">₹{masterControlData.reduce((sum: any, r: any) => sum + r.allocated, 0).toLocaleString()}</p>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded-lg border border-red-100">
+                      <p className="text-[10px] font-bold text-red-800 uppercase">Total Expenditure</p>
+                      <p className="text-lg font-bold text-red-700">₹{masterControlData.reduce((sum: any, r: any) => sum + r.expenditure, 0).toLocaleString()}</p>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                      <p className="text-[10px] font-bold text-blue-800 uppercase">Total Balance</p>
+                      <p className="text-lg font-bold text-blue-700">₹{masterControlData.reduce((sum: any, r: any) => sum + r.balance, 0).toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse border border-gray-300">
+                      <thead>
+                        <tr className="bg-emerald-50 border-b border-gray-300">
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Range</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Scheme</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Sector</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Activity</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Sub-Activity</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">SOE</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase text-right">Allocated</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase text-right">Expenditure</th>
+                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase text-right">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {masterControlData.map((row, i) => (
+                          <tr key={i} className="border-b border-gray-300 hover:bg-emerald-50/30">
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.rangeName}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.schemeName}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.sectorName}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.activityName}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.subActivityName}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 font-bold text-gray-800">{row.soeName}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-right text-emerald-700 font-medium">₹{row.allocated.toLocaleString()}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-right text-red-700 font-medium">₹{row.expenditure.toLocaleString()}</td>
+                            <td className="p-1.5 text-[10px] border border-gray-300 text-right text-blue-700 font-bold">₹{row.balance.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                        {masterControlData.length === 0 && (
+                          <tr>
+                            <td colSpan={9} className="p-8 text-center text-gray-400 italic">No budget data found for the selected filters.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+              {reportSubTab === 'tax-deduction' && renderTaxDeductionReport()}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSchemeWiseLedger = () => {
+    if (userRole !== 'admin' && userRole !== 'deo' && userRole !== 'approver') return null;
+
+    // Group allocations and expenditures by Hierarchy + SOE Head
+    const ledgerGroups: Record<string, { hierarchy: string, soeName: string, totalAllocation: number, items: any[] }> = {};
+
+    const filteredAllocations = currentAllocations.filter(alloc => {
+      const sch = schemes.find(s => s.id === alloc.schemeId);
+      const sec = sectors.find(s => s.id === alloc.sectorId);
+      const act = activities.find(a => a.id === alloc.activityId);
+      const sa = subActivities.find(s => s.id === alloc.subActivityId);
+      const r = ranges.find(r => r.id === alloc.rangeId);
+      const rangeName = r?.name === 'Rajgarh Forest Division' ? 'Division' : (r?.name || '');
+      
+      const matchesFilters = (
+        (!reportFilters.scheme || sch?.name === reportFilters.scheme) &&
+        (!reportFilters.sector || sec?.name === reportFilters.sector) &&
+        (!reportFilters.activity || act?.name === reportFilters.activity) &&
+        (!reportFilters.subActivity || sa?.name === reportFilters.subActivity) &&
+        (!reportFilters.range || rangeName === reportFilters.range)
+      );
+
+      if (!matchesFilters) return false;
+
+      if (ledgerSearchTerm) {
+        const searchLower = ledgerSearchTerm.toLowerCase();
+        const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(' ') || '';
+        const hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+        return (
+          hierarchy.toLowerCase().includes(searchLower) ||
+          soeNames.toLowerCase().includes(searchLower) ||
+          rangeName.toLowerCase().includes(searchLower) ||
+          alloc.remarks?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      return true;
+    });
+
+    filteredAllocations.forEach(alloc => {
+      alloc.fundedSOEs?.forEach(f => {
+        const soe = soes.find(s => s.id === f.soeId);
+        if (!soe) return;
+
+        let hierarchy = '';
+        if (alloc.subActivityId) {
+          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+          const act = activities.find(a => a.id === sa?.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+        } else if (alloc.activityId) {
+          const act = activities.find(a => a.id === alloc.activityId);
+          const sec = sectors.find(sec => sec.id === act?.sectorId);
+          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
+        }
+
+        const key = `${hierarchy}-${soe.name}`;
+
+        if (!ledgerGroups[key]) {
+          ledgerGroups[key] = {
+            hierarchy,
+            soeName: soe.name,
+            totalAllocation: 0,
+            items: []
+          };
+        }
+
+        ledgerGroups[key].totalAllocation += f.amount;
+      });
+    });
+
+    // Now add expenditures
+    currentExpenses.forEach(exp => {
+      const alloc = filteredAllocations.find(a => a.id === exp.allocationId);
+      if (!alloc) return;
+      const soe = soes.find(s => s.id === exp.soeId);
+      if (!soe) return;
+
+      let hierarchy = '';
+      if (alloc.subActivityId) {
+        const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+        const act = activities.find(a => a.id === sa?.activityId);
+        const sec = sectors.find(sec => sec.id === act?.sectorId);
+        const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+        hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
+      } else if (alloc.activityId) {
+        const act = activities.find(a => a.id === alloc.activityId);
+        const sec = sectors.find(sec => sec.id === act?.sectorId);
+        const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+        hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
+      }
+
+      const key = `${hierarchy}-${soe.name}`;
+
+      if (ledgerGroups[key]) {
+        ledgerGroups[key].items.push({
+          date: exp.date,
+          expenditure: exp.amount,
+          status: exp.status || 'pending'
+        });
+      }
+    });
+
+    // Sort groups
+    const sortedGroups = Object.values(ledgerGroups).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
+
+    return (
+      <div className="mt-10">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+          <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-emerald-600" /> Scheme Wise Allocation and Expenditure Details
+          </h4>
+          <button
+            type="button"
+            onClick={downloadLedgerPDF}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+            title="Download Scheme Wise Ledger as PDF"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download Ledger PDF</span>
+          </button>
+        </div>
+        <div className="space-y-8">
+          {sortedGroups.map((group, gIdx) => {
+            // Sort items by date
+            const sortedItems = group.items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            
+            let runningBalance = group.totalAllocation;
+            let totalExp = 0;
+
+            return (
+              <div key={gIdx} className="border border-gray-300 rounded-lg overflow-hidden">
+                <div className="bg-gray-100 p-3 border-b border-gray-300 flex justify-between items-center">
+                  <div className="font-bold text-gray-800">
+                    <span className="text-emerald-700">{group.soeName}</span> <span className="text-gray-500 font-normal text-sm">[{group.hierarchy}]</span>
+                  </div>
+                  <div className="font-bold text-blue-700">
+                    Total Allocation: ₹{group.totalAllocation.toLocaleString()}
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200 text-gray-600">
+                        <th className="p-2 border-r border-gray-200">S.No</th>
+                        <th className="p-2 border-r border-gray-200">Date</th>
+                        <th className="p-2 border-r border-gray-200 text-right">Allocation</th>
+                        <th className="p-2 border-r border-gray-200 text-right">Expenditure</th>
+                        <th className="p-2 border-r border-gray-200 text-center">Status</th>
+                        <th className="p-2 text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Row 1: Initialization */}
+                      <tr className="border-b border-gray-200">
+                        <td className="p-2 border-r border-gray-200 text-center">1</td>
+                        <td className="p-2 border-r border-gray-200 text-gray-500 italic">Allocation Date</td>
+                        <td className="p-2 border-r border-gray-200 text-right font-medium text-emerald-600">₹{group.totalAllocation.toLocaleString()}</td>
+                        <td className="p-2 border-r border-gray-200 text-right text-gray-400">-</td>
+                        <td className="p-2 border-r border-gray-200 text-center text-gray-400">-</td>
+                        <td className="p-2 text-right font-bold text-blue-600">₹{runningBalance.toLocaleString()}</td>
+                      </tr>
+                      {/* Row 2+: Expenditures */}
+                      {sortedItems.map((item, i) => {
+                        const isRejected = item.status === 'rejected';
+                        if (!isRejected) {
+                          runningBalance -= item.expenditure;
+                          totalExp += item.expenditure;
+                        }
+                        return (
+                          <tr key={i} className={`border-b border-gray-200 hover:bg-gray-50 ${isRejected ? 'opacity-50 grayscale' : ''}`}>
+                            <td className="p-2 border-r border-gray-200 text-center">{i + 2}</td>
+                            <td className="p-2 border-r border-gray-200">{item.date ? item.date.split('-').reverse().join('/') : ''}</td>
+                            <td className="p-2 border-r border-gray-200 text-right text-gray-400">-</td>
+                            <td className="p-2 border-r border-gray-200 text-right font-medium text-red-600">₹{item.expenditure.toLocaleString()}</td>
+                            <td className="p-2 border-r border-gray-200 text-center">
+                              <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full ${
+                                item.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                                item.status === 'rejected' ? 'bg-red-100 text-red-800' : 
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {item.status}
+                              </span>
+                            </td>
+                            <td className="p-2 text-right font-bold text-blue-600">₹{runningBalance.toLocaleString()}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-bold border-t-2 border-gray-300">
+                        <td colSpan={2} className="p-2 border-r border-gray-200 text-right">Total</td>
+                        <td className="p-2 border-r border-gray-200 text-right text-emerald-700">₹{group.totalAllocation.toLocaleString()}</td>
+                        <td className="p-2 border-r border-gray-200 text-right text-red-700">₹{totalExp.toLocaleString()}</td>
+                        <td className="p-2 border-r border-gray-200 text-center text-gray-400">-</td>
+                        <td className="p-2 text-right text-blue-700">₹{runningBalance.toLocaleString()}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          {sortedGroups.length === 0 && (
+            <div className="p-8 text-center text-gray-500 border border-gray-300 rounded-lg bg-gray-50">No allocation data available for ledger.</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-emerald-50">
+        <div className="animate-pulse flex flex-col items-center">
+          <TreePine className="h-20 w-20 text-emerald-600 mb-4" />
+          <h2 className="text-xl font-semibold text-emerald-800">Forest Budget Control</h2>
+          <p className="text-emerald-600/70 mt-2">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4 sm:p-6 relative">
+        {/* Top-side Refresh Button on Login Page */}
+        <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-10 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleForceAppRefresh}
+            disabled={isRefreshingApp}
+            title="Purge local cache and sync the latest version of the application"
+            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-emerald-50 text-emerald-800 hover:text-emerald-900 border border-emerald-200 hover:border-emerald-300 rounded-xl shadow-sm text-xs font-bold transition-all transform active:scale-95 cursor-pointer group disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 text-emerald-600 ${isRefreshingApp ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+            <span>{isRefreshingApp ? 'Updating...' : 'Refresh App'}</span>
+          </button>
+        </div>
+
+        <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-100 max-w-md w-full text-center space-y-6">
+          <img src="/logo.png" alt="Forest Budget Logo" className="h-16 w-auto mx-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} />
+          <Landmark className="h-16 w-16 text-emerald-600 mx-auto hidden" />
+          <h1 className="text-3xl font-bold text-gray-900">Forest Budget Control</h1>
+          <p className="text-gray-500">Please sign in to access the financial management system.</p>
+          
+          <form onSubmit={handleLogin} className="space-y-4 text-left">
+            {loginError && <div className="p-3 bg-red-50 text-red-600 rounded text-sm">{loginError}</div>}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ID / Email</label>
+              <input 
+                type="text" 
+                required
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="e.g. DA123 or admin@email.com"
+                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input 
+                type="password" 
+                required
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex justify-between items-center">
+                <span>Financial Year (FY)</span>
+                <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">Select FY for Login</span>
+              </label>
+              <select
+                value={loginFY}
+                onChange={(e) => {
+                  setLoginFY(e.target.value);
+                  setSelectedFY(e.target.value);
+                }}
+                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-semibold text-gray-800 cursor-pointer shadow-sm"
+              >
+                {fyOptions.map(fyName => (
+                  <option key={fyName} value={fyName}>{fyName}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="flex justify-between items-center text-xs font-semibold text-emerald-700">
+              <button 
+                type="button"
+                onClick={() => {
+                  if (!loginEmail) {
+                    setLoginError('Please enter your User ID or Email first.');
+                    return;
+                  }
+                  let emailToUse = loginEmail.trim();
+                  if (!emailToUse.includes('@')) {
+                    emailToUse = `${emailToUse}@rajgarhforest.app`;
+                  }
+                  handleResetPassword(emailToUse);
+                }}
+                className="hover:underline"
+              >
+                Forgot Password?
+              </button>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02]"
+            >
+              Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (user && !userRole) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 text-center">
+        <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-100 max-w-md w-full space-y-4">
+          <Shield className="h-16 w-16 text-amber-500 mx-auto" />
+          <h2 className="text-2xl font-bold">Access Pending</h2>
+          <p className="text-gray-500">Your account ({user.email}) is registered but has no assigned role. Please contact an administrator to grant you access.</p>
+          <button onClick={handleLogout} className="text-emerald-600 font-semibold hover:underline">Sign Out</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans text-gray-800">
+      <div className="max-w-7xl mx-auto space-y-6 overflow-visible">
+        
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200">
+          <div 
+            className="flex items-center gap-2 md:gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => {
+              setActiveTab('Dashboard');
+              setSearchTerm('');
+              setEditingItem(null);
+              setIsFormExpanded(window.innerWidth > 1024);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          >
+            <img src="/logo.png" alt="Forest Budget Logo" className="h-8 md:h-10 w-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} />
+            <Landmark className="h-8 md:h-10 w-8 md:w-10 text-emerald-600 hidden" />
+            <div>
+              <h1 className="text-lg md:text-2xl font-bold text-gray-900 leading-tight">Forest Budget Control</h1>
+              <p className="text-[10px] md:text-sm text-gray-500">Financial Management System</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-between md:justify-end">
+            {isAdmin() ? (
+              <div className="flex items-center gap-1.5 bg-emerald-50 px-2 md:px-3 py-1.5 md:py-2 rounded-lg border border-emerald-100">
+                <span className="text-xs md:text-sm font-semibold text-emerald-800">FY:</span>
+                <select 
+                  value={selectedFY} 
+                  onChange={(e) => setSelectedFY(e.target.value)}
+                  className="bg-transparent border-none focus:ring-0 text-emerald-700 font-bold cursor-pointer text-xs md:text-sm"
+                >
+                  {fyOptions.map(fyName => <option key={fyName} value={fyName}>{fyName}</option>)}
+                </select>
+              </div>
+            ) : (
+              !isFyHiddenForUsers && (
+                <div className="flex items-center gap-1.5 bg-gray-100 px-2 md:px-3 py-1.5 md:py-2 rounded-lg border border-gray-200" title="Financial Year selected at login">
+                  <Lock className="w-3.5 h-3.5 text-gray-500" />
+                  <span className="text-xs md:text-sm font-semibold text-gray-600">FY:</span>
+                  <span className="text-xs md:text-sm font-bold text-gray-800">{selectedFY}</span>
+                </div>
+              )
+            )}
+
+            <div className="flex items-center gap-2 w-full md:w-auto">
+                {activeTab !== 'Dashboard' && (
+                  <div className="relative flex-1 md:flex-none">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 text-xs md:text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-48 lg:w-64 bg-white shadow-sm"
+                    />
+                  </div>
+                )}
+              {userRole === 'admin' && currentSchemes.length === 0 && (
+                <button
+                  onClick={async () => {
+                    await preloadDatabase(selectedFY);
+                    showAlert('Preloaded data added successfully!');
+                  }}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm text-sm"
+                >
+                  Load Preloaded Data
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleForceAppRefresh}
+                disabled={isRefreshingApp}
+                title="Purge local cache and sync the latest version of the application"
+                className="flex items-center gap-1.5 bg-gray-50 hover:bg-emerald-50 text-gray-700 hover:text-emerald-800 px-2.5 md:px-3 py-1.5 md:py-2 rounded-lg border border-gray-200 hover:border-emerald-300 font-semibold transition-all text-xs md:text-sm cursor-pointer shadow-xs group disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-600 ${isRefreshingApp ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                <span className="hidden sm:inline">{isRefreshingApp ? 'Updating...' : 'Refresh'}</span>
+              </button>
+              {isInstallable && (
+                <button
+                  onClick={handleInstallClick}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Install
+                </button>
+              )}
+              <div className="flex items-center gap-2 bg-gray-50 px-2 md:px-3 py-1.5 rounded-lg border border-gray-200">
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <div className="bg-emerald-100 p-1 md:p-1.5 rounded-full">
+                    <User className="w-3 h-3 md:w-4 md:h-4 text-emerald-600" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs md:text-sm font-bold text-gray-800 leading-none truncate max-w-[80px] md:max-w-none">{user.displayName || user.email?.split('@')[0]}</span>
+                    <span className="text-[8px] md:text-[10px] font-medium text-gray-500 uppercase tracking-wider">{userRole}</span>
+                  </div>
+                </div>
+                <div className="w-px h-5 md:h-6 bg-gray-300 mx-0.5 md:mx-1"></div>
+                <button 
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 text-gray-500 hover:text-red-600 transition-colors text-xs md:text-sm font-medium"
+                  title="Logout"
+                >
+                  <LogOut className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <div className="bg-gray-800 rounded-lg shadow-sm mb-6 sticky top-0 z-50 overflow-visible">
+          <div className="lg:hidden flex items-center justify-between p-4 border-b border-gray-700">
+            <span className="text-white font-medium">Menu: {activeTab}</span>
+            <button 
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="p-2 text-gray-400 hover:text-white transition-colors"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+          </div>
+          
+          <div className={`${menuOpen ? 'grid' : 'hidden'} lg:flex grid-cols-2 sm:grid-cols-3 lg:flex-row flex-wrap gap-1 p-2 overflow-visible`}>
+            {menuItems.map((item) => {
+              if (!item.children) {
+                return (
+                  <button 
+                    key={item.name} 
+                    id={`tab-${item.name}`}
+                    onClick={() => {
+                      setActiveTab(item.name);
+                      setSearchTerm('');
+                      setEditingItem(null);
+                      setMenuOpen(false);
+                      setIsFormExpanded(window.innerWidth > 1024);
+                      setCurrentPage(1);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className={`px-3 py-2 text-xs sm:text-sm font-medium rounded transition-all text-left lg:text-center flex items-center gap-2 ${activeTab === item.name ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
+                  >
+                    {item.icon}
+                    <span className="truncate">{item.name}</span>
+                  </button>
+                );
+              } else {
+                const isActive = item.children.some(child => child.name === activeTab);
+                const isOpen = openDropdown === item.name;
+                return (
+                  <div 
+                    key={item.name}
+                    className={`relative group ${isOpen ? 'z-[60]' : 'z-10'} hover:z-[60]`}
+                    onMouseEnter={() => setOpenDropdown(item.name)}
+                    onMouseLeave={() => setOpenDropdown(null)}
+                  >
+                    <button 
+                      onClick={() => setOpenDropdown(isOpen ? null : item.name)}
+                      className={`px-3 py-2 text-xs sm:text-sm font-medium rounded transition-all text-left lg:text-center flex items-center gap-2 w-full ${isActive ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
+                    >
+                      {item.icon}
+                      <span className="truncate">{item.name}</span>
+                      <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    <div className={`absolute top-full left-0 bg-gray-800 border border-gray-700 rounded shadow-xl min-w-[180px] z-[100] ${isOpen ? 'block' : 'hidden'} group-hover:block`}>
+                      {item.children.map(child => (
+                        <button
+                          key={child.name}
+                          onClick={() => {
+                            setActiveTab(child.name);
+                            setSearchTerm('');
+                            setEditingItem(null);
+                            setMenuOpen(false);
+                            setOpenDropdown(null);
+                            setIsFormExpanded(window.innerWidth > 1024);
+                            setCurrentPage(1);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className={`w-full px-4 py-2.5 text-xs sm:text-sm font-medium text-left flex items-center gap-2 hover:bg-gray-700 transition-colors ${activeTab === child.name ? 'text-emerald-400 bg-gray-700/50' : 'text-gray-300'}`}
+                        >
+                          {child.icon}
+                          {child.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+            })}
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'Dashboard' && renderDashboard()}
+        {activeTab === 'Notifications' && renderNotificationsTab()}
+        
+        {/* Scroll to Top Button */}
+        {showScrollTop && (
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="fixed bottom-8 right-8 bg-emerald-600 text-white p-3 rounded-full shadow-lg hover:bg-emerald-700 transition-all z-[60] animate-in fade-in zoom-in"
+            title="Scroll to Top"
+          >
+            <ChevronUp className="w-6 h-6" />
+          </button>
+        )}
+        
+        {activeTab === 'Financial Years' && renderSimpleManager(
+          'Financial Year', 
+          fys, 
+          [{key: 'name', label: 'Financial Year (e.g. 2025-26)'}], 
+          handleAddFy, 
+          (id) => handleDelete('financialYears', id), 
+          <input name="name" required defaultValue={editingItem?.type === 'Financial Year' ? editingItem.item.name : ''} placeholder="Financial Year (e.g. 2025-26)" className="w-full p-2 border rounded" />,
+          (item) => setEditingItem({ type: 'Financial Year', item })
+        )}
+
+        {activeTab === 'Ranges' && renderSimpleManager(
+          'Range', 
+          ranges, 
+          [{key: 'name', label: 'Range Name', render: (val) => val === 'Rajgarh Forest Division' ? 'Division' : val}], 
+          handleAddRange, 
+          (id) => handleDelete('ranges', id), 
+          <input name="name" required defaultValue={editingItem?.type === 'Range' ? editingItem.item.name : ''} placeholder="Range Name" className="w-full p-1.5 border rounded text-sm" />,
+          (item) => setEditingItem({ type: 'Range', item })
+        )}
+
+        {activeTab === 'Schemes' && renderSimpleManager(
+          'Scheme', 
+          schemes, 
+          [
+            {key: 'name', label: 'Scheme Name'}
+          ], 
+          handleAddScheme, 
+          (id) => handleDelete('schemes', id), 
+          <>
+            <input name="name" required defaultValue={editingItem?.type === 'Scheme' ? editingItem.item.name : ''} placeholder="Scheme Name" className="w-full p-1.5 border rounded text-sm" />
+          </>,
+          (item) => setEditingItem({ type: 'Scheme', item })
+        )}
+
+        {activeTab === 'Sectors' && renderSimpleManager(
+          'Sector', 
+          sectors, 
+          [
+            {key: 'schemeId', label: 'Scheme', 
+              searchableText: (val) => schemes.find(s => s.id === val)?.name || '',
+              render: (val) => schemes.find(s => s.id === val)?.name
+            },
+            {key: 'name', label: 'Sector Name'}
+          ], 
+          handleAddSector, 
+          (id) => handleDelete('sectors', id), 
+          <>
+            <div className="flex gap-2">
+              <select name="schemeId" required defaultValue={editingItem?.type === 'Sector' ? editingItem.item.schemeId : ''} className="w-full p-1.5 border rounded text-sm">
+                <option value="">Select Scheme</option>
+                {currentSchemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <button type="button" onClick={() => document.getElementById('tab-Schemes')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Scheme">+</button>
+            </div>
+            <input name="name" required defaultValue={editingItem?.type === 'Sector' ? editingItem.item.name : ''} placeholder="Sector Name (e.g. CA, NPV)" className="w-full p-1.5 border rounded text-sm" />
+          </>,
+          (item) => setEditingItem({ type: 'Sector', item })
+        )}
+
+        {activeTab === 'Activities' && renderSimpleManager(
+          'Activity', 
+          activities, 
+          [
+            {key: 'parent', label: 'Scheme / Sector', 
+              searchableText: (_, item) => {
+                if (item.sectorId) {
+                  const sec = sectors.find(s => s.id === item.sectorId);
+                  const sch = schemes.find(s => s.id === sec?.schemeId);
+                  return `[${sch?.name}] ${sec?.name}`;
+                }
+                const sch = schemes.find(s => s.id === item.schemeId);
+                return sch?.name || '';
+              },
+              render: (_, item) => {
+              if (item.sectorId) {
+                const sec = sectors.find(s => s.id === item.sectorId);
+                const sch = schemes.find(s => s.id === sec?.schemeId);
+                return `[${sch?.name}] ${sec?.name}`;
+              } else {
+                const sch = schemes.find(s => s.id === item.schemeId);
+                return `[${sch?.name}] (Direct)`;
+              }
+            }},
+            {key: 'name', label: 'Activity Name'}
+          ], 
+          handleAddActivity, 
+          (id) => handleDelete('activities', id), 
+          <ActivityFormContent 
+            schemes={currentSchemes} 
+            sectors={currentSectors} 
+            editingItem={editingItem} 
+          />,
+          (item) => setEditingItem({ type: 'Activity', item }),
+          (item) => userRole === 'admin' || userRole === 'deo' || user?.email?.toLowerCase() === 'admin@rajgarhforest.app' || user?.email?.toLowerCase() === 'sharmaanuj860@gmail.com'
+        )}
+
+        {activeTab === 'Sub-Activities' && renderSimpleManager(
+          'Sub-Activity', 
+          subActivities, 
+          [
+            {key: 'activityId', label: 'Hierarchy', 
+              searchableText: (val) => {
+                const act = activities.find(a => a.id === val);
+                const sec = sectors.find(s => s.id === act?.sectorId);
+                const sch = schemes.find(s => s.id === (act?.schemeId || sec?.schemeId));
+                let text = '';
+                if (sch) text += `[${sch.name}] `;
+                if (sec) text += `${sec.name} > `;
+                if (act) text += act.name;
+                return text;
+              },
+              render: (val) => {
+                const act = activities.find(a => a.id === val);
+                const sec = sectors.find(s => s.id === act?.sectorId);
+                const sch = schemes.find(s => s.id === (act?.schemeId || sec?.schemeId));
+                return (
+                  <div className="text-xs text-gray-500">
+                    {sch && <div className="font-medium text-gray-700">{sch.name}</div>}
+                    {sec && <div>Sector: {sec.name}</div>}
+                    {act && <div>Activity: {act.name}</div>}
+                  </div>
+                );
+            }},
+            {key: 'name', label: 'Sub-Activity Name'}
+          ], 
+          handleAddSubActivity, 
+          (id) => handleDelete('subActivities', id), 
+          <CascadingDropdowns 
+            schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={currentExpenses}
+            editingItem={editingItem} type="Sub-Activity" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
+          >
+            <input name="name" required defaultValue={editingItem?.type === 'Sub-Activity' ? editingItem.item.name : ''} placeholder="Sub-Activity Name" className="w-full p-1.5 border rounded text-sm" />
+          </CascadingDropdowns>,
+          (item) => setEditingItem({ type: 'Sub-Activity', item }),
+          (item) => userRole === 'admin' || userRole === 'deo' || user?.email?.toLowerCase() === 'admin@rajgarhforest.app' || user?.email?.toLowerCase() === 'sharmaanuj860@gmail.com'
+        )}
+
+        {activeTab === 'SOE Heads' && renderSOEHeads()}
+        {activeTab === 'Allocations' && (
+          <div className="space-y-6">
+            {!userRangeId && renderBudgetTracker()}
+            {renderSimpleManager(
+              'Allocation', 
+              currentAllocations, 
+              [
+                {key: 'hierarchy', label: 'Hierarchy / Unit', render: (_, item) => {
+                  const r = ranges.find(r => r.id === item.rangeId);
+                  const hText = getHierarchyText(item);
+                  return (
+                    <div className="max-w-[180px]">
+                      <div className="font-bold text-gray-900 truncate leading-tight">{r?.name === 'Rajgarh Forest Division' ? 'Division' : r?.name}</div>
+                      <div className="text-[9px] text-gray-500 truncate" title={hText}>{hText}</div>
+                    </div>
+                  );
+                }, searchableText: (_, item) => getHierarchyText(item)},
+                {key: 'rangeId', label: 'Range', render: (val) => ranges.find(r => r.id === val)?.name, searchableText: (val) => ranges.find(r => r.id === val)?.name || ''},
+                {key: 'amount', label: 'Sanctioned Amount', render: (val, item) => (
+                  <div className="flex flex-col min-w-[80px]">
+                    <span className="font-bold text-gray-900">₹{val.toLocaleString()}</span>
+                    <div className="mt-1 space-y-0.5 border-t pt-1">
+                      {item.fundedSOEs && item.fundedSOEs.length > 0 ? (
+                        item.fundedSOEs.map((f: any, idx: number) => {
+                          const s = soes.find(soe => soe.id === f.soeId);
+                          return (
+                            <div key={idx} className="text-[8px] text-gray-400 flex justify-between gap-1 leading-none">
+                              <span className="truncate max-w-[40px]">{s?.name || 'Unnamed'}:</span>
+                              <span>₹{f.amount.toLocaleString()}</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-[8px] text-orange-400 italic">No SOE funding</div>
+                      )}
+                    </div>
+                  </div>
+                )},
+                {
+                  key: 'expenditure', 
+                  label: 'Expenditure', 
+                  render: (_, item) => {
+                    // Row-specific expenditure (only expenses linked to this specific allocation ID)
+                    const expenditure = baseExpenses
+                      .filter(e => e.allocationId === item.id && e.status !== 'rejected')
+                      .reduce((sum, e) => sum + e.amount, 0);
+                    return <span className="font-medium text-red-600">₹{expenditure.toLocaleString()}</span>;
+                  }
+                },
+                {
+                  key: 'balance', 
+                  label: 'Net Balance', 
+                  render: (_, item) => {
+                    const expenditure = baseExpenses
+                      .filter(e => e.allocationId === item.id && e.status !== 'rejected')
+                      .reduce((sum, e) => sum + e.amount, 0);
+                    
+                    // Calculate surrenders for this specific allocation
+                    const surrendered = surrenders
+                      .filter(s => 
+                        s.rangeId === item.rangeId && 
+                        s.schemeId === item.schemeId &&
+                        (s.sectorId || '') === (item.sectorId || '') &&
+                        (s.activityId || '') === (item.activityId || '') &&
+                        (s.subActivityId || '') === (item.subActivityId || '')
+                      )
+                      .reduce((sum, s) => sum + s.amount, 0);
+
+                    const netSanctioned = item.amount - surrendered;
+                    const balance = netSanctioned - expenditure;
+                    
+                    return (
+                      <div className="flex flex-col">
+                        <span className={`font-bold ${balance < 0 ? 'text-red-700' : 'text-blue-700'}`}>₹{balance.toLocaleString()}</span>
+                        <div className="flex flex-col text-[8px] text-gray-400 uppercase leading-tight">
+                          <span>Net: ₹{netSanctioned.toLocaleString()}</span>
+                          {surrendered > 0 && <span className="text-orange-500">Surr: ₹{surrendered.toLocaleString()}</span>}
+                        </div>
+                      </div>
+                    );
+                  }
+                },
+                {key: 'remarks', label: 'Description / Remarks', render: (val) => <div className="text-[10px] italic text-gray-500 max-w-[150px] whitespace-normal break-words" title={val}>{val || '-'}</div>},
+                {key: 'status', label: 'Funding Status', render: (val, item) => (
+                  <div className="flex flex-col">
+                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full w-fit ${val === 'Funded' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}>
+                      {val}
+                    </span>
+                    <div className="mt-1 space-y-1">
+                      {item.fundedSOEs && item.fundedSOEs.length > 0 ? (
+                        item.fundedSOEs.map((f: any, idx: number) => {
+                          const s = soes.find(soe => soe.id === f.soeId);
+                          return (
+                            <div key={idx} className="text-[10px] text-gray-500 flex justify-between gap-2">
+                              <span>{s?.name || 'Unnamed SOE'}:</span>
+                              <span className="font-medium">₹{f.amount.toLocaleString()}</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-[10px] text-orange-400 italic">Pending funding assignment</div>
+                      )}
+                    </div>
+                  </div>
+                )},
+                {key: 'actions', label: 'Funding', render: (_, item) => (
+                  userRole === 'admin' && item.status === 'Pending SOE Funds' && (
+                    <button
+                      onClick={() => setFundingAllocation(item)}
+                      className="bg-emerald-600 text-white px-3 py-1 rounded text-xs hover:bg-emerald-700 transition-colors"
+                    >
+                      Assign SOE Funds
+                    </button>
+                  )
+                )}
+              ], 
+              handleAddAllocation, 
+              (id) => handleDelete('allocations', id), 
+              <CascadingDropdowns 
+                schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={currentExpenses}
+                editingItem={editingItem} type="Allocation" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
+                onSelectionChange={setAllocationFormFilters}
+              >
+                <input 
+                  name="amount" 
+                  type="number" 
+                  required 
+                  value={allocationAmount}
+                  onChange={(e) => setAllocationAmount(e.target.value)}
+                  placeholder="Amount (₹)" 
+                  className={`w-full p-1.5 border rounded text-sm ${isAllocationInvalid ? 'border-red-500 bg-red-50' : ''}`} 
+                />
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-[10px] text-gray-500 font-medium">
+                    Remaining Budget: ₹{allocationBudgetStatus.remaining.toLocaleString()}
+                  </span>
+                  {isAllocationInvalid && (
+                    <span className="text-[10px] text-red-600 font-bold animate-pulse">
+                      {allocationBudgetStatus.error || 'Amount exceeds available budget!'}
+                    </span>
+                  )}
+                </div>
+                <textarea name="remarks" defaultValue={editingItem?.type === 'Allocation' ? editingItem.item.remarks : ''} placeholder="Remarks / Description (Optional)" className="w-full p-1.5 border rounded text-sm" rows={2} />
+              </CascadingDropdowns>,
+              (item) => setEditingItem({ type: 'Allocation', item }),
+              (item) => isAdmin() || isDEO(),
+              null,
+              null,
+              isAllocationInvalid,
+              isAllocFilterExpanded,
+              setIsAllocFilterExpanded,
+              <>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+                  <select 
+                    value={allocFilters.schemeId}
+                    onChange={(e) => { setAllocFilters({ ...allocFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: '', soeId: '' }); setCurrentPage(1); }}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Schemes</option>
+                    {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+                  <select 
+                    value={allocFilters.sectorId}
+                    onChange={(e) => { setAllocFilters({ ...allocFilters, sectorId: e.target.value, activityId: '', subActivityId: '', soeId: '' }); setCurrentPage(1); }}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Sectors</option>
+                    {sectors.filter(s => !allocFilters.schemeId || s.schemeId === allocFilters.schemeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+                  <select 
+                    value={allocFilters.activityId}
+                    onChange={(e) => { setAllocFilters({ ...allocFilters, activityId: e.target.value, subActivityId: '', soeId: '' }); setCurrentPage(1); }}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Activities</option>
+                    {activities.filter(a => {
+                      if (allocFilters.sectorId) return a.sectorId === allocFilters.sectorId;
+                      if (allocFilters.schemeId) return a.schemeId === allocFilters.schemeId || sectors.find(s => s.id === a.sectorId)?.schemeId === allocFilters.schemeId;
+                      return true;
+                    }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+                  <select 
+                    value={allocFilters.subActivityId}
+                    onChange={(e) => { setAllocFilters({ ...allocFilters, subActivityId: e.target.value, soeId: '' }); setCurrentPage(1); }}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Sub-Activities</option>
+                    {subActivities.filter(sa => !allocFilters.activityId || sa.activityId === allocFilters.activityId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                  <select 
+                    value={allocFilters.rangeId}
+                    onChange={(e) => { setAllocFilters({ ...allocFilters, rangeId: e.target.value }); setCurrentPage(1); }}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All Ranges</option>
+                    {ranges.map(s => <option key={s.id} value={s.id}>{s.name === 'Rajgarh Forest Division' ? 'Division' : s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE Head</label>
+                  <select 
+                    value={allocFilters.soeId}
+                    onChange={(e) => { setAllocFilters({ ...allocFilters, soeId: e.target.value }); setCurrentPage(1); }}
+                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                  >
+                    <option value="">All SOEs</option>
+                    {soes.filter(s => {
+                      if (allocFilters.subActivityId) return s.subActivityId === allocFilters.subActivityId;
+                      if (allocFilters.activityId) return s.activityId === allocFilters.activityId;
+                      if (allocFilters.sectorId) return s.sectorId === allocFilters.sectorId;
+                      if (allocFilters.schemeId) return s.schemeId === allocFilters.schemeId;
+                      return true;
+                    }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </>,
+              () => {
+                setAllocFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
+                setSearchTerm('');
+              }
+            )}
+          </div>
+        )}
+
+        {activeTab === 'Expenditures' && (
+          <div className="space-y-4">
+            <div className="flex gap-4 mb-2 border-b pb-2">
+              <button 
+                onClick={() => setExpenditureSubTab('list')}
+                className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'list' ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Expenditure List
+                {expenditureSubTab === 'list' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+              </button>
+              {(userRole === 'admin' || userRole === 'deo') && (
+                <button 
+                  onClick={() => setExpenditureSubTab('bills')}
+                  className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'bills' ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Bill Creation
+                  {expenditureSubTab === 'bills' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+                </button>
+              )}
+              {(userRole === 'admin' || userRole === 'deo' || userRangeId) && (
+                <button 
+                  onClick={() => setExpenditureSubTab('payees')}
+                  className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'payees' ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Add Payee
+                  {expenditureSubTab === 'payees' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+                </button>
+              )}
+              <button 
+                onClick={() => setExpenditureSubTab('memo')}
+                className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'memo' ? 'text-emerald-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Memo for Fund
+                {expenditureSubTab === 'memo' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+              </button>
+            </div>
+
+            {expenditureSubTab === 'list' && (
+              renderSimpleManager(
+                'Expenditure', 
+                currentExpenses, 
+                [
+                  {key: 'date', label: 'Date', render: (val) => val ? val.split('-').reverse().join('/') : ''},
+                  {key: 'payeeId', label: 'Payee Details', 
+                    searchableText: (val, item) => {
+                      const p = payees.find(p => p.id === val);
+                      return `${p?.name || item.payeeName || ''} ${p?.accountNumber || ''} ${p?.ifscCode || ''} ${p?.treasuryCode || ''}`;
+                    },
+                    render: (val, item) => {
+                      const p = payees.find(p => p.id === val);
+                      if (p) {
+                        return (
+                          <div className="flex flex-col gap-0.5 min-w-[150px]">
+                            <div className="font-bold text-emerald-800 leading-tight">{p.name}</div>
+                            <div className="flex items-center gap-2">
+                              {p.treasuryCode && (
+                                <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded border border-emerald-100">
+                                  {p.treasuryCode}
+                                </span>
+                              )}
+                              <div className="text-[9px] font-mono text-gray-500">
+                                {p.accountNumber} <span className="text-gray-400">({p.ifscCode})</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (item.payeeName) {
+                        return <div className="font-medium text-blue-700">{item.payeeName}</div>;
+                      }
+                      return <span className="text-gray-400 italic">No Payee</span>;
+                    }
+                  },
+                  {key: 'allocationId', label: 'Unit / Hierarchy / SOE', 
+                    searchableText: (val, item) => {
+                      const al = allocations.find(a => a.id === val);
+                      const r = ranges.find(r => r.id === al?.rangeId);
+                      const s = soes.find(s => s.id === item.soeId);
+                      const hierarchy = al ? getHierarchyText(al) : 'N/A';
+                      return `${hierarchy} ${r?.name} ${s?.name}`;
+                    },
+                    render: (val, item) => {
+                      const al = allocations.find(a => a.id === val);
+                      const r = ranges.find(r => r.id === al?.rangeId);
+                      const s = soes.find(s => s.id === item.soeId);
+                      const hierarchy = al ? getHierarchyText(al) : 'N/A';
+                      return (
+                        <div className="max-w-[180px]">
+                          <div className="font-bold text-gray-900 truncate leading-tight">{r?.name === 'Rajgarh Forest Division' ? 'Division' : r?.name} / {s?.name || 'N/A'}</div>
+                          <div className="text-[9px] text-gray-500 truncate" title={hierarchy}>{hierarchy}</div>
+                        </div>
+                      );
+                    }
+                  },
+                  {key: 'description', label: 'Description', render: (val, item) => (
+                    <div className="max-w-[200px] whitespace-normal break-words">
+                      <div className="text-xs italic text-gray-500">{val}</div>
+                      {item.syncedMemoNo && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded text-[10px] font-bold">
+                            <RefreshCw className="w-3 h-3 text-emerald-600" /> Memo #{item.syncedMemoNo}
+                          </span>
+                          {userRole === 'admin' && (
+                            <button
+                              type="button"
+                              onClick={() => handleUnsyncExpense(item.id)}
+                              className="p-0.5 text-red-500 hover:bg-red-50 rounded cursor-pointer"
+                              title="Admin: Remove Memo Sync Link"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {item.approvalReason && (
+                        <div className="text-[10px] text-gray-400 italic mt-1 border-t pt-1">
+                          Action Reason: {item.approvalReason}
+                        </div>
+                      )}
+                    </div>
+                  )},
+                  {key: 'status', label: 'Status', render: (val) => {
+                    const colors = {
+                      pending: 'bg-yellow-100 text-yellow-800',
+                      approved: 'bg-green-100 text-green-800',
+                      rejected: 'bg-red-100 text-red-800'
+                    };
+                    return (
+                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${colors[val as keyof typeof colors] || 'bg-gray-100'}`}>
+                        {val || 'pending'}
+                      </span>
+                    );
+                  }},
+                  {key: 'approvalId', label: 'Approval ID', render: (val) => val ? `#${val}` : '-'},
+                  {key: 'isBilled', label: 'Billed', 
+                    searchableText: (_, item) => {
+                      const bill = bills.find(b => b.expenseIds.includes(item.id));
+                      return bill ? `Yes ${bill.billNo}` : 'No';
+                    },
+                    render: (_, item) => {
+                      const bill = bills.find(b => b.expenseIds.includes(item.id));
+                      return (
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${bill ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
+                          {bill ? `Yes (${bill.billNo})` : 'No'}
+                        </span>
+                      );
+                    }
+                  },
+                  {key: 'amount', label: 'Amount', searchableText: (val) => String(val), render: (val, item) => {
+                    const totalAmt = Number(val) || 0;
+                    const tds = Math.round(item.tdsAmount || 0);
+                    const gstTds = Math.round(item.tdsGstAmount || 0);
+                    const totalDeducted = Math.round(item.deductedAmount || (tds + gstTds));
+                    const netPayable = Math.round(item.netAmount ?? (totalAmt - totalDeducted));
+
+                    if (totalDeducted > 0) {
+                      return (
+                        <div className="flex flex-col text-xs leading-tight min-w-[130px] space-y-0.5">
+                          <div className="flex justify-between items-center gap-2">
+                            <span className="text-[10px] text-gray-500 font-medium">Total:</span>
+                            <span className="font-bold text-gray-900">₹{totalAmt.toLocaleString('en-IN')}</span>
+                          </div>
+                          {tds > 0 && (
+                            <div className="flex justify-between items-center gap-2 text-[10px] text-red-600">
+                              <span>TDS (1%):</span>
+                              <span className="font-semibold">-₹{tds.toLocaleString('en-IN')}</span>
+                            </div>
+                          )}
+                          {gstTds > 0 && (
+                            <div className="flex justify-between items-center gap-2 text-[10px] text-purple-600">
+                              <span>TDS GST (2%):</span>
+                              <span className="font-semibold">-₹{gstTds.toLocaleString('en-IN')}</span>
+                            </div>
+                          )}
+                          {tds === 0 && gstTds === 0 && (
+                            <div className="flex justify-between items-center gap-2 text-[10px] text-red-600">
+                              <span>TDS:</span>
+                              <span className="font-semibold">-₹{totalDeducted.toLocaleString('en-IN')}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center gap-2 border-t border-gray-200 pt-0.5 font-bold text-emerald-700">
+                            <span className="text-[10px]">Net to Pay:</span>
+                            <span>₹{netPayable.toLocaleString('en-IN')}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="flex flex-col">
+                        <span className="text-gray-900 font-bold">₹{totalAmt.toLocaleString('en-IN')}</span>
+                      </div>
+                    );
+                  }},
+                  {key: 'updatedBy', label: 'Modified By', 
+                    searchableText: (val, item) => {
+                      const u = users.find(u => u.id === val || u.email === val);
+                      const creator = users.find(u => u.id === item.createdBy || u.email === item.createdBy);
+                      return `${u?.email || val || ''} ${creator?.email || item.createdBy || ''}`;
+                    },
+                    render: (val, item) => {
+                      const u = users.find(u => u.id === val || u.email === val);
+                      const creator = users.find(u => u.id === item.createdBy || u.email === item.createdBy);
+                      return (
+                        <div className="text-[9px] leading-tight">
+                          <div className="text-gray-400">Created: {creator?.email?.split('@')[0] || 'System'}</div>
+                          {val && val !== item.createdBy && (
+                            <div className="text-blue-500 font-medium">Edited: {u?.email?.split('@')[0] || 'System'}</div>
+                          )}
+                        </div>
+                      );
+                    }
+                  },
+                  {key: 'balance', label: 'Balance', 
+                    searchableText: (_, item) => {
+                      const alloc = allocations.find(a => a.id === item.allocationId);
+                      if (!alloc) return 'N/A';
+                      
+                      const soeName = soes.find(s => s.id === item.soeId)?.name;
+                      if (!soeName) return 'N/A';
+
+                      // Aggregate allocation for this hierarchy and SOE Name
+                      const totalAllocatedForSoe = baseAllocations.filter(a => 
+                        a.rangeId === alloc.rangeId &&
+                        a.schemeId === alloc.schemeId &&
+                        (a.sectorId || null) === (alloc.sectorId || null) &&
+                        (a.activityId || null) === (alloc.activityId || null) &&
+                        (a.subActivityId || null) === (alloc.subActivityId || null)
+                      ).reduce((sum, a) => {
+                        const funded = a.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === soeName);
+                        return sum + (funded?.amount || 0);
+                      }, 0);
+
+                      // Aggregate expenditure for this hierarchy and SOE Name
+                      const totalSpentForSoe = baseExpenses.filter(e => {
+                        const eAlloc = allocations.find(a => a.id === e.allocationId);
+                        const eSoeName = soes.find(s => s.id === e.soeId)?.name;
+                        return (
+                          eAlloc &&
+                          eAlloc.rangeId === alloc.rangeId &&
+                          eAlloc.schemeId === alloc.schemeId &&
+                          (eAlloc.sectorId || null) === (alloc.sectorId || null) &&
+                          (eAlloc.activityId || null) === (alloc.activityId || null) &&
+                          (eAlloc.subActivityId || null) === (alloc.subActivityId || null) &&
+                          eSoeName === soeName &&
+                          e.status !== 'rejected'
+                        );
+                      }).reduce((sum, e) => sum + e.amount, 0);
+
+                      return String(totalAllocatedForSoe - totalSpentForSoe);
+                    },
+                    render: (_, item) => {
+                      const alloc = allocations.find(a => a.id === item.allocationId);
+                      if (!alloc) return 'N/A';
+                      
+                      const soeName = soes.find(s => s.id === item.soeId)?.name;
+                      if (!soeName) return 'N/A';
+
+                      // Aggregate allocation for this hierarchy and SOE Name
+                      const totalAllocatedForSoe = baseAllocations.filter(a => 
+                        a.rangeId === alloc.rangeId &&
+                        a.schemeId === alloc.schemeId &&
+                        (a.sectorId || null) === (alloc.sectorId || null) &&
+                        (a.activityId || null) === (alloc.activityId || null) &&
+                        (a.subActivityId || null) === (alloc.subActivityId || null)
+                      ).reduce((sum, a) => {
+                        const funded = a.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === soeName);
+                        return sum + (funded?.amount || 0);
+                      }, 0);
+
+                      // Aggregate expenditure for this hierarchy and SOE Name
+                      const totalSpentForSoe = baseExpenses.filter(e => {
+                        const eAlloc = allocations.find(a => a.id === e.allocationId);
+                        const eSoeName = soes.find(s => s.id === e.soeId)?.name;
+                        return (
+                          eAlloc &&
+                          eAlloc.rangeId === alloc.rangeId &&
+                          eAlloc.schemeId === alloc.schemeId &&
+                          (eAlloc.sectorId || null) === (alloc.sectorId || null) &&
+                          (eAlloc.activityId || null) === (alloc.activityId || null) &&
+                          (eAlloc.subActivityId || null) === (alloc.subActivityId || null) &&
+                          eSoeName === soeName &&
+                          e.status !== 'rejected'
+                        );
+                      }).reduce((sum, e) => sum + e.amount, 0);
+
+                      const balance = totalAllocatedForSoe - totalSpentForSoe;
+                      return <span className={`font-bold ${balance < 0 ? 'text-red-700' : 'text-blue-700'}`}>₹{balance.toLocaleString()}</span>;
+                    }
+                  }
+                ], 
+                handleAddExpense, 
+                (id) => handleDelete('expenditures', id), 
+                <CascadingDropdowns 
+                  schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={baseExpenses}
+                  editingItem={editingItem} type="Expenditure" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
+                  onBalanceChange={setCurrentSoeBalance}
+                  onSelectionChange={setExpenseFormSelection}
+                >
+                  {isMemoSyncEnabled && !editingItem && (
+                    <div className="mb-3 p-2.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg flex items-center justify-between shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-emerald-600 text-white rounded-md shadow-xs">
+                          <RefreshCw className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-emerald-950">Sync with Memo For Fund</div>
+                          <div className="text-[10px] text-emerald-800">
+                            {selectedSyncedMemo ? (
+                              <span className="font-bold text-emerald-900 bg-emerald-200/60 px-1.5 py-0.5 rounded">
+                                ✓ Synced with Memo #{selectedSyncedMemo.memoNo}
+                              </span>
+                            ) : (
+                              'Import payee, amount & scheme directly from an issued Memo'
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {selectedSyncedMemo ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedSyncedMemo(null);
+                              setExpenseAmount('');
+                              setExpenseDescription('');
+                              setSelectedPayeesForExpense([]);
+                            }}
+                            className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                          >
+                            <X className="w-3 h-3" /> Clear Sync
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowMemoSyncModal(true)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs rounded-md font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" /> Sync Memo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 mt-2 border-t pt-2">
+                    {editingItem?.type === 'Expenditure' ? (
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase">Payee</label>
+                          <select name="payeeId" defaultValue={editingItem.item.payeeId || ''} className="w-full p-2 border rounded text-sm">
+                            <option value="">Select Payee (Optional)</option>
+                            {filteredPayeesList.map((p, idx) => <option key={`exp-edit-p-${p.id}-${idx}`} value={p.id}>{p.name} ({p.accountNumber})</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase">Manual Payee Name</label>
+                          <input name="payeeName" type="text" defaultValue={editingItem.item.payeeName || ''} placeholder="Enter name if no payee selected" className="w-full p-2 border rounded text-sm" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <PayeeSelector 
+                          payees={filteredPayeesList}
+                          selectedPayees={selectedPayeesForExpense}
+                          onSelect={(payeeId) => setSelectedPayeesForExpense([...selectedPayeesForExpense, { payeeId, amount: '' }])}
+                          onRemove={(payeeId) => setSelectedPayeesForExpense(selectedPayeesForExpense.filter(p => p.payeeId !== payeeId))}
+                          onAmountChange={(payeeId, amount) => setSelectedPayeesForExpense(selectedPayeesForExpense.map(p => p.payeeId === payeeId ? { ...p, amount } : p))}
+                          ranges={ranges}
+                          availableBalance={currentSoeBalance}
+                          selectedDeductions={selectedDeductions}
+                          gstNumber={gstNumber}
+                        />
+                        {selectedPayeesForExpense.length === 0 && (
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Manual Payee Name</label>
+                            <input name="payeeName" type="text" placeholder="Enter name if no payee selected" className="w-full p-2 border rounded text-sm" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Date</label>
+                        <input 
+                          name="date" 
+                          type="date" 
+                          max={new Date().toISOString().split('T')[0]} 
+                          required 
+                          value={expenseDate}
+                          onChange={(e) => setExpenseDate(e.target.value)}
+                          className="w-full p-2 border rounded text-sm" 
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Amount (₹)</label>
+                        {selectedPayeesForExpense.length === 0 ? (
+                          <input 
+                            name="amount" 
+                            type="number" 
+                            required={editingItem?.type === 'Expenditure'} 
+                            value={expenseAmount}
+                            onChange={(e) => setExpenseAmount(e.target.value)}
+                            placeholder="0.00" 
+                            className={`w-full p-2 border rounded text-sm ${isExpenseInvalid ? 'border-red-500 bg-red-50' : ''}`} 
+                          />
+                        ) : (
+                          <div className="p-2 bg-gray-50 border rounded text-sm text-gray-500 font-bold">
+                            ₹{selectedPayeesForExpense.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Deductions (Optional)</label>
+                      <div className="flex flex-wrap gap-2">
+                        <label className="flex items-center gap-2 p-2 border rounded text-xs cursor-pointer hover:bg-gray-50">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedDeductions.includes('TDS')}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedDeductions([...selectedDeductions, 'TDS']);
+                              else setSelectedDeductions(selectedDeductions.filter(d => d !== 'TDS'));
+                            }}
+                          />
+                          <span>TDS (1% &gt; 30k)</span>
+                        </label>
+                        <label className="flex items-center gap-2 p-2 border rounded text-xs cursor-pointer hover:bg-gray-50">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedDeductions.includes('TDS_GST')}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedDeductions([...selectedDeductions, 'TDS_GST']);
+                              else setSelectedDeductions(selectedDeductions.filter(d => d !== 'TDS_GST'));
+                            }}
+                          />
+                          <span>TDS on GST (2% &gt; 250k)</span>
+                        </label>
+                      </div>
+
+                      {(selectedDeductions.length > 0) && (
+                        <div className="bg-blue-50 p-2 rounded border border-blue-100 space-y-2">
+                          <table className="w-full text-[10px]">
+                            <thead>
+                              <tr className="text-gray-500 uppercase font-bold border-b border-blue-200">
+                                <th className="text-left pb-1">Type</th>
+                                <th className="text-right pb-1">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(() => {
+                                let totalGross = 0;
+                                let totalTds = 0;
+                                let totalGstTds = 0;
+
+                                if (selectedPayeesForExpense.length > 0) {
+                                  selectedPayeesForExpense.forEach(sp => {
+                                    const p = payees.find(payee => payee.id === sp.payeeId);
+                                    const pAmt = parseFloat(sp.amount) || 0;
+                                    const pGst = p?.gstNumber || gstNumber;
+                                    totalGross += pAmt;
+                                    if (selectedDeductions.includes('TDS') && pAmt > 30000) {
+                                      totalTds += Math.round(pAmt * 0.01);
+                                    }
+                                    if (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) {
+                                      totalGstTds += Math.round(pAmt * 0.02);
+                                    }
+                                  });
+                                } else {
+                                  const amt = parseFloat(expenseAmount) || 0;
+                                  totalGross = amt;
+                                  const hasGst = Boolean(gstNumber && gstNumber.trim());
+                                  if (selectedDeductions.includes('TDS') && amt > 30000) {
+                                    totalTds = Math.round(amt * 0.01);
+                                  }
+                                  if (selectedDeductions.includes('TDS_GST') && amt > 250000 && hasGst) {
+                                    totalGstTds = Math.round(amt * 0.02);
+                                  }
+                                }
+
+                                totalGross = Math.round(totalGross);
+                                const totalDeduction = totalTds + totalGstTds;
+                                const netPayable = totalGross - totalDeduction;
+
+                                return (
+                                  <>
+                                    {selectedDeductions.includes('TDS') && (
+                                      <tr>
+                                        <td className="py-1">TDS (1% &gt; ₹30,000)</td>
+                                        <td className="py-1 text-right font-bold text-red-600">
+                                          ₹{totalTds.toLocaleString('en-IN')}
+                                        </td>
+                                      </tr>
+                                    )}
+                                    {selectedDeductions.includes('TDS_GST') && (
+                                      <tr>
+                                        <td className="py-1">TDS on GST (2% &gt; ₹2,50,000 + GSTIN)</td>
+                                        <td className="py-1 text-right font-bold text-purple-600">
+                                          ₹{totalGstTds.toLocaleString('en-IN')}
+                                        </td>
+                                      </tr>
+                                    )}
+                                    <tr className="border-t border-blue-200 font-bold text-blue-900">
+                                      <td className="pt-1">Total Deductions</td>
+                                      <td className="pt-1 text-right text-red-600">₹{totalDeduction.toLocaleString('en-IN')}</td>
+                                    </tr>
+                                    <tr className="text-emerald-800 font-black">
+                                      <td className="pt-1">Net Amount to Pay (RTGS)</td>
+                                      <td className="pt-1 text-right text-sm">₹{netPayable.toLocaleString('en-IN')}</td>
+                                    </tr>
+                                  </>
+                                );
+                              })()}
+                            </tbody>
+                          </table>
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            {selectedDeductions.includes('TDS') && (
+                              <div>
+                                <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">PAN Number</label>
+                                <input 
+                                  type="text" 
+                                  value={panNumber}
+                                  onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
+                                  placeholder="ABCDE1234F"
+                                  className="w-full p-1.5 border rounded text-xs"
+                                />
+                              </div>
+                            )}
+                            {selectedDeductions.includes('TDS_GST') && (
+                              <div>
+                                <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">GST Number</label>
+                                <input 
+                                  type="text" 
+                                  value={gstNumber}
+                                  onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
+                                  placeholder="22AAAAA0000A1Z5"
+                                  className="w-full p-1.5 border rounded text-xs"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Description / Remarks</label>
+                      <textarea 
+                        name="description" 
+                        required 
+                        value={expenseDescription}
+                        onChange={(e) => setExpenseDescription(e.target.value)}
+                        placeholder="Purpose of expenditure..." 
+                        className="w-full p-2 border rounded text-sm" 
+                        rows={2} 
+                      />
+                    </div>
+                  </div>
+                </CascadingDropdowns>,
+                (item) => setEditingItem({ type: 'Expenditure', item }),
+                undefined,
+                (userRole === 'admin' || userRole === 'DA' || userRole === 'approver') && (
+                  <div className="flex justify-end mb-2">
+                    <button
+                      onClick={handleResetUnbilledExpenses}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors shadow-sm"
+                      title="Reset all approved expenditures that are not part of any bill back to pending status"
+                    >
+                      <RefreshCcw className="w-3.5 h-3.5" />
+                      RESET UNBILLED APPROVED TO PENDING
+                    </button>
+                  </div>
+                ),
+                (item) => (
+                  <div className="flex gap-1">
+                    {item.status === 'pending' && (userRole === 'approver' || userRole === 'admin' || userRole === 'DA') && (
+                      <button 
+                        onClick={() => {
+                          setSelectedExpenseForApproval(item);
+                          setApprovalStatus('approved');
+                          setIsApprovalModalOpen(true);
+                        }}
+                        className="text-blue-600 hover:text-blue-800 p-1 border border-blue-100 rounded bg-blue-50"
+                        title="Take Action"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                      </button>
+                    )}
+                    {item.isLocked && (userRole === 'admin' || userRole === 'approver' || (userRole === 'DA' && item.status === 'approved' && !bills.some(b => b.expenseIds.includes(item.id)))) && (
+                      <button 
+                        onClick={() => {
+                          const isBilled = bills.some(b => b.expenseIds.includes(item.id));
+                          if (isBilled) {
+                            showAlert("This expenditure is already part of a bill and cannot be reset.");
+                            return;
+                          }
+                          showConfirm(item.status === 'approved' ? "Reset this approved expenditure to pending?" : "Unlock this expenditure?", () => handleUpdateExpenseStatus(item.id, item.status === 'approved' ? 'pending' : item.status, false));
+                        }}
+                        className="text-orange-600 hover:text-orange-800 p-1 border border-orange-100 rounded bg-orange-50"
+                        title={item.status === 'approved' ? "Reset to Pending" : "Unlock"}
+                      >
+                        <RefreshCcw className="w-4 h-4" />
+                      </button>
+                    )}
+                    {!item.isLocked && (userRole === 'admin' || userRole === 'approver') && item.status === 'approved' && (
+                      <button 
+                        onClick={() => handleUpdateExpenseStatus(item.id, 'approved', true)}
+                        className="text-gray-600 hover:text-gray-800 p-1 border border-gray-100 rounded bg-gray-50"
+                        title="Lock Expenditure"
+                      >
+                        <Lock className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ),
+                isExpenseInvalid,
+                isExpFilterExpanded,
+                setIsExpFilterExpanded,
+                <>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+                    <select 
+                      value={expFilters.schemeId}
+                      onChange={(e) => setExpFilters({ ...expFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: '' })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Schemes</option>
+                      {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+                    <select 
+                      value={expFilters.sectorId}
+                      onChange={(e) => setExpFilters({ ...expFilters, sectorId: e.target.value, activityId: '', subActivityId: '' })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Sectors</option>
+                      {sectors.filter(s => !expFilters.schemeId || s.schemeId === expFilters.schemeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+                    <select 
+                      value={expFilters.activityId}
+                      onChange={(e) => setExpFilters({ ...expFilters, activityId: e.target.value, subActivityId: '' })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Activities</option>
+                      {activities.filter(a => {
+                        if (expFilters.sectorId) return a.sectorId === expFilters.sectorId;
+                        if (expFilters.schemeId) return a.schemeId === expFilters.schemeId || sectors.find(s => s.id === a.sectorId)?.schemeId === expFilters.schemeId;
+                        return true;
+                      }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+                    <select 
+                      value={expFilters.subActivityId}
+                      onChange={(e) => setExpFilters({ ...expFilters, subActivityId: e.target.value })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Sub-Activities</option>
+                      {subActivities.filter(sa => !expFilters.activityId || sa.activityId === expFilters.activityId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                    <select 
+                      value={expFilters.rangeId}
+                      onChange={(e) => setExpFilters({ ...expFilters, rangeId: e.target.value })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Ranges</option>
+                      {ranges.map(s => <option key={s.id} value={s.id}>{s.name === 'Rajgarh Forest Division' ? 'Division' : s.name}</option>)}
+                    </select>
+                  </div>
+                </>,
+                () => {
+                  setExpFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '' });
+                  setSearchTerm('');
+                },
+                false,
+                null,
+                (item) => {
+                  const creator = users.find(u => u.id === item.createdBy);
+                  if (creator?.role === 'admin' || item.createdByRole === 'admin') return 'bg-green-50/50';
+                  if (creator?.role === 'deo' || item.createdByRole === 'deo') return 'bg-blue-50/50';
+                  return 'bg-white';
+                },
+                undefined,
+                undefined,
+                (item) => {
+                  if (userRole === 'admin') return true;
+                  if (item.isLocked) return false;
+                  
+                  if (userRole === 'deo') return true; // DEO can edit any unlocked entry (including admin's)
+                  
+                  // Regular users can only edit their own pending entries
+                  return item.createdBy === user?.uid && item.status === 'pending';
+                },
+                (item) => {
+                  if (userRole === 'admin') return true;
+                  if (item.isLocked) return false;
+                  if (item.status !== 'pending') return false; // Non-admins can only delete pending entries
+                  
+                  // DEO cannot delete admin entries
+                  if (item.createdByRole === 'admin') return false;
+                  
+                  if (userRole === 'deo') {
+                    // For old entries without role field, only allow if it's their own
+                    if (!item.createdByRole && item.createdBy !== user?.uid) return false;
+                    return true;
+                  }
+                  
+                  // Regular users can only delete their own pending entries
+                  return item.createdBy === user?.uid;
+                }
+              )
+            )}
+
+            {expenditureSubTab === 'bills' && (userRole === 'admin' || userRole === 'deo' || userRangeId) && (() => {
+              const billedExpenseIds = new Set(bills.flatMap(b => b.expenseIds));
+              const availableApprovedExpenses = expenses.filter(e => 
+                e.status === 'approved' && 
+                e.financialYear === selectedFY && 
+                !billedExpenseIds.has(e.id)
+              );
+              const firstSelectedExp = expenses.find(e => selectedExpensesForBill.includes(e.id));
+              const lockedSoeId = firstSelectedExp?.soeId;
+
+              const filteredForSoeList = availableApprovedExpenses.filter(e => {
+                const al = allocations.find(a => a.id === e.allocationId);
+                if (billExpFilters.rangeId && al?.rangeId !== billExpFilters.rangeId) return false;
+                if (billExpFilters.schemeId && al?.schemeId !== billExpFilters.schemeId) return false;
+                if (billExpFilters.sectorId && al?.sectorId !== billExpFilters.sectorId) return false;
+                if (billExpFilters.activityId && al?.activityId !== billExpFilters.activityId) return false;
+                if (billExpFilters.subActivityId && al?.subActivityId !== billExpFilters.subActivityId) return false;
+                return true;
+              });
+              const availableSoeIds = Array.from(new Set(filteredForSoeList.map(e => e.soeId)));
+              const availableSoesForBill = soes.filter(s => availableSoeIds.includes(s.id));
+
+              const filteredBills = bills.filter(b => {
+                const matchesBillNo = !billFilters.billNo || b.billNo.toLowerCase().includes(billFilters.billNo.toLowerCase());
+                
+                const firstExp = expenses.find(e => b.expenseIds.includes(e.id));
+                const al = allocations.find(a => a.id === firstExp?.allocationId);
+                const matchesRange = !billFilters.rangeId || al?.rangeId === billFilters.rangeId;
+                const matchesSoe = !billFilters.soeId || firstExp?.soeId === billFilters.soeId;
+                const matchesAmount = !billFilters.amount || b.totalAmount.toString().includes(billFilters.amount);
+
+                const matchesSearch = !billSearchTerm || (
+                  b.billNo.toLowerCase().includes(billSearchTerm.toLowerCase()) ||
+                  (b.remarks || '').toLowerCase().includes(billSearchTerm.toLowerCase())
+                );
+
+                return matchesBillNo && matchesRange && matchesSoe && matchesAmount && matchesSearch;
+              });
+
+              const isBillNoDuplicate = (billNo: string, currentId?: string) => {
+                return bills.some(b => b.billNo.toLowerCase() === billNo.toLowerCase() && b.id !== currentId);
+              };
+
+              return renderSimpleManager(
+                'Bill',
+                filteredBills,
+                [
+                  {key: 'billNo', label: 'Bill No', render: (val, item) => (
+                    <span className={`font-bold ${isBillNoDuplicate(val, item.id) ? 'text-red-600 bg-red-50 px-1 rounded' : 'text-emerald-700'}`}>
+                      {val}
+                    </span>
+                  )},
+                  {key: 'billDate', label: 'Bill Date', render: (val) => val ? val.split('-').reverse().join('/') : ''},
+                  {key: 'rangeId', label: 'Range', render: (_, item: Bill) => {
+                    const firstExp = expenses.find(e => item.expenseIds.includes(e.id));
+                    const al = allocations.find(a => a.id === firstExp?.allocationId);
+                    const r = ranges.find(r => r.id === al?.rangeId);
+                    return <span className="text-[10px] font-bold text-gray-600">{r?.name || 'N/A'}</span>
+                  }},
+                  {key: 'soeId', label: 'SOE', render: (_, item: Bill) => {
+                    const firstExp = expenses.find(e => item.expenseIds.includes(e.id));
+                    const s = soes.find(s => s.id === firstExp?.soeId);
+                    return <span className="text-[10px] font-bold text-gray-600">{s?.name || 'N/A'}</span>
+                  }},
+                  {key: 'expenseIds', label: 'Expenditures', render: (val: string[], item: Bill) => (
+                    <div className="space-y-1">
+                      <div className="text-[10px] text-gray-500 font-bold uppercase">{val.length} Entries</div>
+                      <div className="max-h-32 overflow-y-auto border rounded p-1 bg-gray-50 space-y-1">
+                        {val.map(id => {
+                          const exp = expenses.find(e => e.id === id);
+                          if (!exp) return null;
+                          const s = soes.find(s => s.id === exp.soeId);
+                          return (
+                            <div key={id} className="text-[9px] flex justify-between items-center bg-white p-1 rounded border border-gray-100">
+                              <span className="truncate flex-1">
+                                {exp.date ? exp.date.split('-').reverse().join('/') : 'N/A'} - {s?.name} - ₹{exp.amount.toLocaleString()}
+                              </span>
+                              {(userRole === 'admin' || (userRole === 'deo' && item.status === 'draft')) && (
+                                <button 
+                                  onClick={() => handleRemoveExpenseFromBill(item.id, id)}
+                                  className="text-red-500 hover:text-red-700 ml-1"
+                                  title="Remove from Bill"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )},
+                  {key: 'totalAmount', label: 'Total Amount', render: (val) => <span className="text-emerald-600 font-bold">₹{val.toLocaleString()}</span>},
+                  {key: 'status', label: 'Status', render: (val) => (
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${val === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
+                      {val}
+                    </span>
+                  )}
+                ],
+                handleCreateBill,
+                (id) => handleDelete('bills', id),
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative">
+                      <input 
+                        name="billNo" 
+                        required 
+                        defaultValue={editingItem?.type === 'Bill' ? editingItem.item.billNo : ''} 
+                        placeholder="Bill Number (e.g. TRY-123)" 
+                        className={`w-full p-2 border rounded text-sm ${editingItem?.type === 'Bill' && isBillNoDuplicate(editingItem.item.billNo, editingItem.item.id) ? 'border-red-500 bg-red-50' : ''}`}
+                        onChange={(e) => {
+                          if (isBillNoDuplicate(e.target.value, editingItem?.item?.id)) {
+                            e.target.classList.add('border-red-500', 'bg-red-50');
+                          } else {
+                            e.target.classList.remove('border-red-500', 'bg-red-50');
+                          }
+                        }}
+                      />
+                      {editingItem?.type === 'Bill' && isBillNoDuplicate(editingItem.item.billNo, editingItem.item.id) && (
+                        <div className="text-[8px] text-red-600 font-bold mt-0.5">Duplicate Bill Number!</div>
+                      )}
+                    </div>
+                    <input name="billDate" type="date" required defaultValue={editingItem?.type === 'Bill' ? editingItem.item.billDate : new Date().toISOString().split('T')[0]} className="p-2 border rounded text-sm" />
+                  </div>
+                  <textarea name="remarks" defaultValue={editingItem?.type === 'Bill' ? editingItem.item.remarks : ''} placeholder="Remarks (optional)" className="w-full p-2 border rounded text-sm" rows={2} />
+                  
+                  <div className="mt-4 border-t pt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-bold text-gray-600 uppercase">Select Expenditures</label>
+                      <div className="flex gap-1">
+                        <select 
+                          value={billExpFilters.rangeId} 
+                          onChange={(e) => setBillExpFilters({...billExpFilters, rangeId: e.target.value, schemeId: '', sectorId: '', activityId: '', subActivityId: '', soeId: ''})}
+                          className="text-[10px] p-1 border rounded bg-white"
+                        >
+                          <option value="">All Ranges</option>
+                          {ranges.map(r => <option key={r.id} value={r.id}>{r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}</option>)}
+                        </select>
+                        <select 
+                          value={billExpFilters.soeId} 
+                          onChange={(e) => setBillExpFilters({...billExpFilters, soeId: e.target.value})}
+                          className="text-[10px] p-1 border rounded bg-white"
+                        >
+                          <option value="">All SOEs</option>
+                          {availableSoesForBill.filter(s => {
+                            if (!billExpFilters.rangeId) return true;
+                            return availableApprovedExpenses.some(e => {
+                              const al = allocations.find(a => a.id === e.allocationId);
+                              return al?.rangeId === billExpFilters.rangeId && e.soeId === s.id;
+                            });
+                          }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 mb-1">
+                      <select 
+                        value={billExpFilters.schemeId} 
+                        onChange={(e) => setBillExpFilters({...billExpFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: ''})}
+                        className="text-[10px] p-1 border rounded bg-white"
+                      >
+                        <option value="">All Schemes</option>
+                        {schemes.filter(s => {
+                          if (!billExpFilters.rangeId) return true;
+                          return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.schemeId === s.id);
+                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <select 
+                        value={billExpFilters.sectorId} 
+                        onChange={(e) => setBillExpFilters({...billExpFilters, sectorId: e.target.value, activityId: '', subActivityId: ''})}
+                        className="text-[10px] p-1 border rounded bg-white"
+                      >
+                        <option value="">All Sectors</option>
+                        {sectors.filter(s => {
+                          if (billExpFilters.schemeId && s.schemeId !== billExpFilters.schemeId) return false;
+                          if (billExpFilters.rangeId) {
+                            return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.sectorId === s.id);
+                          }
+                          return true;
+                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 mb-2">
+                      <select 
+                        value={billExpFilters.activityId} 
+                        onChange={(e) => setBillExpFilters({...billExpFilters, activityId: e.target.value, subActivityId: ''})}
+                        className="text-[10px] p-1 border rounded bg-white"
+                      >
+                        <option value="">All Activities</option>
+                        {activities.filter(a => {
+                          if (billExpFilters.sectorId && a.sectorId !== billExpFilters.sectorId) return false;
+                          if (billExpFilters.rangeId) {
+                            return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.activityId === a.id);
+                          }
+                          return true;
+                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <select 
+                        value={billExpFilters.subActivityId} 
+                        onChange={(e) => setBillExpFilters({...billExpFilters, subActivityId: e.target.value})}
+                        className="text-[10px] p-1 border rounded bg-white"
+                      >
+                        <option value="">All Sub-Activities</option>
+                        {subActivities.filter(sa => {
+                          if (billExpFilters.activityId && sa.activityId !== billExpFilters.activityId) return false;
+                          if (billExpFilters.rangeId) {
+                            return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.subActivityId === sa.id);
+                          }
+                          return true;
+                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+
+                    <div className={`${isBillFormFullScreen ? 'max-h-[60vh]' : 'max-h-60'} overflow-y-auto border rounded divide-y bg-gray-50 custom-scrollbar`}>
+                      {expenses
+                        .filter(e => e.status === 'approved' && e.financialYear === selectedFY)
+                        .filter(e => {
+                          const isAlreadyInBill = bills.some(b => b.expenseIds.includes(e.id) && b.id !== editingItem?.item?.id);
+                          if (isAlreadyInBill) return false;
+                          
+                          // SOE Restriction
+                          if (lockedSoeId && e.soeId !== lockedSoeId) return false;
+
+                          const al = allocations.find(a => a.id === e.allocationId);
+                          if (billExpFilters.rangeId && al?.rangeId !== billExpFilters.rangeId) return false;
+                          if (billExpFilters.soeId && e.soeId !== billExpFilters.soeId) return false;
+                          if (billExpFilters.schemeId && al?.schemeId !== billExpFilters.schemeId) return false;
+                          if (billExpFilters.sectorId && al?.sectorId !== billExpFilters.sectorId) return false;
+                          if (billExpFilters.activityId && al?.activityId !== billExpFilters.activityId) return false;
+                          if (billExpFilters.subActivityId && al?.subActivityId !== billExpFilters.subActivityId) return false;
+                          
+                          return true;
+                        })
+                        .map(exp => {
+                          const s = soes.find(s => s.id === exp.soeId);
+                          const al = allocations.find(a => a.id === exp.allocationId);
+                          const r = ranges.find(r => r.id === al?.rangeId);
+                          const isSelected = selectedExpensesForBill.includes(exp.id);
+                          
+                          let hierarchy = '';
+                          if (al?.subActivityId) {
+                            const sa = subActivities.find(sa => sa.id === al.subActivityId);
+                            const act = activities.find(a => a.id === sa?.activityId);
+                            const sec = sectors.find(sec => sec.id === act?.sectorId);
+                            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+                            hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+                          } else if (al?.activityId) {
+                            const act = activities.find(a => a.id === al.activityId);
+                            const sec = sectors.find(sec => sec.id === act?.sectorId);
+                            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+                            hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+                          }
+
+                          return (
+                            <div 
+                              key={exp.id} 
+                              onClick={() => {
+                                setSelectedExpensesForBill(prev => 
+                                  prev.includes(exp.id) ? prev.filter(id => id !== exp.id) : [...prev, exp.id]
+                                );
+                              }}
+                              className={`p-2 text-[10px] cursor-pointer transition-colors flex items-start gap-2 ${isSelected ? 'bg-emerald-50 border-l-2 border-emerald-500' : 'hover:bg-white'}`}
+                            >
+                              <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-gray-300'}`}>
+                                {isSelected && <Check className="w-3 h-3" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start mb-1">
+                                  <span className="font-bold text-gray-900">{exp.date ? exp.date.split('-').reverse().join('/') : 'N/A'}</span>
+                                  <span className="font-bold text-emerald-600">₹{exp.amount.toLocaleString()}</span>
+                                </div>
+                                <div className="text-gray-600 font-medium mb-1">Range: {r?.name} | SOE: {s?.name}</div>
+                                <div className="text-gray-500 text-[9px] mb-1 italic">{hierarchy}</div>
+                                <div className="text-gray-400 truncate">{exp.description}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      {expenses.filter(e => e.status === 'approved' && e.financialYear === selectedFY).length === 0 && (
+                        <div className="p-4 text-center text-gray-500 italic text-xs">No approved expenditures available.</div>
+                      )}
+                    </div>
+                    <div className="mt-2 p-2 bg-gray-50 rounded flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-gray-600 uppercase">
+                        {selectedExpensesForBill.length} Selected
+                      </span>
+                      <span className="text-xs font-bold text-emerald-700">
+                        Total: ₹{expenses.filter(e => selectedExpensesForBill.includes(e.id)).reduce((sum, e) => sum + e.amount, 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>,
+                (item) => {
+                  setEditingItem({ type: 'Bill', item });
+                  setSelectedExpensesForBill(item.expenseIds);
+                },
+                (item) => isAdmin() || (isDEO() && item.status === 'draft') || (userRangeId && item.rangeId === userRangeId && item.status === 'draft'),
+                undefined,
+                (item) => (
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => handleViewBill(item)}
+                      className="p-1 border border-gray-200 rounded text-emerald-600 hover:bg-emerald-50"
+                      title="View Bill PDF"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => handleDownloadBill(item)}
+                      className="p-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+                      title="Download Bill PDF"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                    {(userRole === 'admin' || userRole === 'deo' || (userRangeId && item.rangeId === userRangeId)) && (
+                      <button 
+                        onClick={() => {
+                          const newStatus = item.status === 'draft' ? 'finalized' : 'draft';
+                          updateDoc(doc(db, 'bills', item.id), { status: newStatus, updatedAt: Date.now() });
+                        }}
+                        className={`p-1 border rounded ${item.status === 'finalized' ? 'text-blue-600 border-blue-100 bg-blue-50' : 'text-emerald-600 border-emerald-100 bg-emerald-50'}`}
+                        title={item.status === 'finalized' ? 'Mark as Draft' : 'Finalize Bill'}
+                      >
+                        {item.status === 'finalized' ? <RefreshCcw className="w-4 h-4" /> : <Check className="w-4 h-4" />}
+                      </button>
+                    )}
+                  </div>
+                ),
+                false,
+                isExpFilterExpanded,
+                setIsExpFilterExpanded,
+                <>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                    <select 
+                      value={billFilters.rangeId}
+                      onChange={(e) => setBillFilters({ ...billFilters, rangeId: e.target.value })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Ranges</option>
+                      {ranges.map(r => <option key={r.id} value={r.id}>{r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Bill Number</label>
+                    <input 
+                      type="text"
+                      value={billFilters.billNo}
+                      onChange={(e) => setBillFilters({ ...billFilters, billNo: e.target.value })}
+                      placeholder="Search Bill No..."
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE Head</label>
+                    <select 
+                      value={billFilters.soeId}
+                      onChange={(e) => setBillFilters({ ...billFilters, soeId: e.target.value })}
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All SOEs</option>
+                      {soes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Amount</label>
+                    <input 
+                      type="text"
+                      value={billFilters.amount}
+                      onChange={(e) => setBillFilters({ ...billFilters, amount: e.target.value })}
+                      placeholder="Search Amount..."
+                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
+                    />
+                  </div>
+                </>,
+                () => setBillFilters({ billNo: '', rangeId: '', soeId: '', amount: '' }),
+                isBillFormFullScreen,
+                setIsBillFormFullScreen,
+                undefined,
+                billSearchTerm,
+                setBillSearchTerm
+              )
+            })()}
+
+            {expenditureSubTab === 'payees' && (userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'DA' || userRangeId) && (
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-gray-800">Payee Directory & Account Exports</h3>
+                    <p className="text-xs text-gray-500">Download payee account, IFSC code, PAN, and GST details for your logged-in range/role.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPayeePrintModal(true)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4" /> Print / Preview
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadPayeesPDF}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" /> Export PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadPayeesWord}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4" /> Export Word (.doc)
+                    </button>
+                  </div>
+                </div>
+
+                {renderSimpleManager(
+                  'Payee',
+                  filteredPayeesList,
+                  [
+                    { key: 'name', label: 'Name', searchableText: (val) => val },
+                    { key: 'address', label: 'Address', searchableText: (val) => val },
+                    { 
+                      key: 'accountNumber', 
+                      label: 'Bank Account Details', 
+                      searchableText: (val, item) => `${val} ${item.ifscCode}`,
+                      render: (val, item) => (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="font-mono font-bold text-gray-900">{val}</div>
+                          <div className="font-mono text-[10px] text-gray-500">{item.ifscCode || 'No IFSC'}</div>
+                        </div>
+                      )
+                    },
+                    { 
+                      key: 'treasuryCode', 
+                      label: 'Try Code', 
+                      searchableText: (val) => val || 'N/A', 
+                      render: (val) => val ? (
+                        <span className="font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px]">
+                          {val}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 italic text-[11px]">Not Assigned</span>
+                      )
+                    },
+                    { key: 'panNumber', label: 'PAN Number', searchableText: (val) => val || 'N/A', render: (val) => val || <span className="text-gray-400 italic">N/A</span> },
+                    { key: 'gstNumber', label: 'GST Number', searchableText: (val) => val || 'N/A', render: (val) => val || <span className="text-gray-400 italic">N/A</span> },
+                    { 
+                      key: 'rangeId', 
+                      label: 'Range', 
+                      searchableText: (val) => ranges.find(r => r.id === val)?.name || 'N/A',
+                      render: (val) => ranges.find(r => r.id === val)?.name || <span className="text-gray-400 italic">Not Specified</span>
+                    }
+                  ],
+                  handleAddPayee,
+                  (id) => handleDelete('payees', id),
+                  <>
+                    <input name="name" type="text" required defaultValue={editingItem?.type === 'Payee' ? editingItem.item.name : ''} placeholder="Payee Name" className="w-full p-2 border rounded text-sm" />
+                    <input name="address" type="text" required defaultValue={editingItem?.type === 'Payee' ? editingItem.item.address : ''} placeholder="Address" className="w-full p-2 border rounded text-sm" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input name="accountNumber" type="text" required defaultValue={editingItem?.type === 'Payee' ? editingItem.item.accountNumber : ''} placeholder="Account Number" className="w-full p-2 border rounded text-sm font-mono" />
+                      <input name="ifscCode" type="text" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.ifscCode : ''} placeholder="IFSC Code" className="w-full p-2 border rounded text-sm font-mono" />
+                    </div>
+                    {(isAdmin() || isDEO()) && (
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-bold text-emerald-800 uppercase">
+                          Treasury Code / Try Code (DEO & Admin Only)
+                        </label>
+                        <input 
+                          name="treasuryCode" 
+                          type="text" 
+                          defaultValue={editingItem?.type === 'Payee' ? (editingItem.item.treasuryCode || '') : ''} 
+                          placeholder="e.g. TRY-109284" 
+                          className="w-full p-2 border border-emerald-300 bg-emerald-50/40 rounded text-sm font-mono text-emerald-950 focus:ring-2 focus:ring-emerald-500" 
+                        />
+                      </div>
+                    )}
+                    <input name="panNumber" type="text" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.panNumber : ''} placeholder="PAN Number (Optional)" className="w-full p-2 border rounded text-sm font-mono uppercase" />
+                    <input name="gstNumber" type="text" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.gstNumber : ''} placeholder="GST Number (Optional)" className="w-full p-2 border rounded text-sm font-mono uppercase" />
+                    {(isAdmin() || isDEO()) ? (
+                      <select name="rangeId" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.rangeId : ''} className="w-full p-2 border rounded text-sm">
+                        <option value="">Select Range (Optional)</option>
+                        {ranges.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    ) : (
+                      <input type="hidden" name="rangeId" value={userRangeId || ''} />
+                    )}
+                  </>,
+                  (item) => setEditingItem({ type: 'Payee', item }),
+                  (item) => isAdmin() || isDEO() || (userRangeId && item.rangeId === userRangeId),
+                  undefined,
+                  (item) => (
+                    <div className="flex items-center gap-1.5">
+                      {(isAdmin() || isDEO()) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTreasuryCodeModalPayee(item);
+                            setTreasuryCodeInput(item.treasuryCode || '');
+                          }}
+                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold border border-emerald-200 flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Add / Update Treasury Portal ID"
+                        >
+                          <Building2 className="w-3 h-3" />
+                          <span>{item.treasuryCode ? 'Edit Treasury Code' : '+ Treasury Code'}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMemoPayeeId(item.id);
+                          setExpenditureSubTab('memo');
+                        }}
+                        className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[10px] font-bold border border-blue-200 flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Generate Memo for Fund for this Payee"
+                      >
+                        <FileText className="w-3 h-3" />
+                        <span>Memo</span>
+                      </button>
+                    </div>
+                  ),
+                  false,
+                  undefined,
+                  undefined,
+                  undefined,
+                  undefined,
+                  undefined,
+                  undefined,
+                  undefined,
+                  payeeSearchTerm,
+                  setPayeeSearchTerm
+                )}
+              </div>
+            )}
+
+            {expenditureSubTab === 'memo' && (
+              <div className="space-y-8">
+                {isMemoLockedForUser && (
+                  <div className="bg-amber-50 border-2 border-amber-300 p-5 rounded-2xl flex items-center gap-4 shadow-sm">
+                    <div className="p-3 bg-amber-100 text-amber-800 rounded-xl">
+                      <Lock className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-amber-950 text-sm">Memo For Fund Module is Locked</h4>
+                      <p className="text-xs text-amber-800">
+                        Creation and editing of Memo for Fund entries has been locked for {userRangeName || 'your role'} by the Division Administrator.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Header Banner */}
+                <div className="no-print bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-emerald-600" />
+                      Memo for Fund Generator & Register
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Create, edit, and lock formal Memo for Fund letters for multiple payees (10, 20+ payees per memo) with income tax deduction calculations.
+                    </p>
+                  </div>
+                  {editingMemo && (
+                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
+                      <span className="text-xs font-bold text-amber-800">
+                        Editing Memo No. {editingMemo.memoNo} ({editingMemo.status})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleResetMemoForm}
+                        className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded text-xs font-bold"
+                      >
+                        Cancel Editing
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Main 2-Column Grid: Memo Form + Side Table */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Left Panel: Memo Creation Form (7 cols) */}
+                  <div className="lg:col-span-7 bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-6">
+                    <div className="border-b pb-3 flex justify-between items-center">
+                      <h4 className="text-sm font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
+                        <PlusCircle className="w-4 h-4 text-emerald-600" />
+                        {editingMemo ? '1. Edit Memo Details' : '1. Create New Memo for Fund'}
+                      </h4>
+                      <span className="text-xs text-gray-400 font-medium">* Required fields</span>
+                    </div>
+
+                    {/* Step 1: Letter Header Configuration */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200 text-xs">
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700">
+                          Memo Ref Number <span className="text-gray-400 font-normal">(Auto-generated)</span>
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={memoNoInput}
+                          className="w-full p-2 border border-gray-300 rounded-lg font-mono bg-gray-100 font-bold text-gray-700 cursor-not-allowed outline-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700">
+                          Memo Date <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={memoDateInput}
+                          onChange={(e) => setMemoDateInput(e.target.value)}
+                          className="w-full p-2 border border-gray-300 rounded-lg font-mono bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700">
+                          For Month / Period <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={memoMonthYearInput}
+                          onChange={(e) => setMemoMonthYearInput(e.target.value)}
+                          placeholder="e.g. August 2026 or 08/2026"
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700">Select Scheme</label>
+                        <select
+                          value={memoSchemeIdInput}
+                          onChange={(e) => {
+                            setMemoSchemeIdInput(e.target.value);
+                            setMemoSectorIdInput('');
+                          }}
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          <option value="">-- All / Select Scheme --</option>
+                          {currentSchemes.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700">Select Sector (Optional)</label>
+                        <select
+                          value={memoSectorIdInput}
+                          onChange={(e) => setMemoSectorIdInput(e.target.value)}
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          <option value="">-- All Sectors --</option>
+                          {currentSectors
+                            .filter(sec => !memoSchemeIdInput || sec.schemeId === memoSchemeIdInput)
+                            .map(sec => (
+                              <option key={sec.id} value={sec.id}>{sec.name}</option>
+                            ))
+                          }
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700 flex items-center justify-between">
+                          <span>From Authority</span>
+                          <span className="text-gray-400 font-normal text-[10px]">(Auto-locked)</span>
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={memoFromInput}
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 font-bold text-gray-800 cursor-not-allowed outline-none"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 space-y-1">
+                        <label className="block font-bold text-gray-700">To (Authority)</label>
+                        <input
+                          type="text"
+                          value={memoToInput}
+                          onChange={(e) => setMemoToInput(e.target.value)}
+                          placeholder="DCF Rajgarh"
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Step 2: Payee Row Input Section */}
+                    <div className="border-t pt-4 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-emerald-600" />
+                          2. Add Payee to Memo ({memoPayeeEntries.length} Payees Added)
+                        </h4>
+                        {editingEntryIndex !== null && (
+                          <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
+                            Editing Row #{editingEntryIndex + 1}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Select existing payee directory drop-down */}
+                      <div className="space-y-1 text-xs">
+                        <label className="block font-bold text-gray-600">Quick Select Payee Directory (Optional)</label>
+                        <select
+                          value={entryPayeeId}
+                          onChange={(e) => handleSelectPayeeForMemoEntry(e.target.value)}
+                          className="w-full p-2 border border-emerald-300 rounded-lg bg-emerald-50/50 font-semibold text-emerald-950 focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          <option value="">-- Choose Payee from Directory or Fill Form Below --</option>
+                          {filteredPayeesList.map((p, idx) => (
+                            <option key={`memo-p-${p.id}-${idx}`} value={p.id}>
+                              {p.name} (A/C: {p.accountNumber} - IFSC: {p.ifscCode || 'N/A'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Individual Payee Entry Inputs */}
+                      <form onSubmit={handleAddOrUpdatePayeeEntry} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs">
+                        <div className="space-y-1">
+                          <label className="block font-bold text-gray-700">Payee Name <span className="text-red-500">*</span></label>
+                          <input
+                            type="text"
+                            required
+                            value={entryName}
+                            onChange={(e) => setEntryName(e.target.value)}
+                            placeholder="e.g. Hemant Kumar"
+                            className="w-full p-2 border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block font-bold text-gray-700">Address / Remarks</label>
+                          <input
+                            type="text"
+                            value={entryAddress}
+                            onChange={(e) => setEntryAddress(e.target.value)}
+                            placeholder="e.g. Sarahan"
+                            className="w-full p-2 border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider">Account No & IFSC Code <span className="text-red-500">*</span></label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              required
+                              value={entryAccountNo}
+                              onChange={(e) => setEntryAccountNo(e.target.value)}
+                              placeholder="Account No"
+                              className="w-full p-2 border rounded-lg font-mono bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                            <input
+                              type="text"
+                              required
+                              value={entryIfsc}
+                              onChange={(e) => setEntryIfsc(e.target.value)}
+                              placeholder="IFSC Code"
+                              className="w-full p-2 border rounded-lg font-mono bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider">Try Code / PAN Number</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              value={entryTreasuryCode}
+                              onChange={(e) => setEntryTreasuryCode(e.target.value)}
+                              placeholder="Try Code"
+                              className="w-full p-2 border rounded-lg font-mono bg-emerald-50/50 border-emerald-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                            <input
+                              type="text"
+                              value={entryPan}
+                              onChange={(e) => setEntryPan(e.target.value.toUpperCase())}
+                              placeholder="PAN Number"
+                              className="w-full p-2 border rounded-lg font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider">GST Number (Optional)</label>
+                          <input
+                            type="text"
+                            value={entryGst}
+                            onChange={(e) => setEntryGst(e.target.value.toUpperCase())}
+                            placeholder="e.g. 02ABCDE1234F1Z5"
+                            className="w-full p-2 border rounded-lg font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+
+                        {/* Expenditure Amount & Sub-Vouchers Breakdown */}
+                        <div className="space-y-2 sm:col-span-2 bg-white p-3 rounded-xl border border-gray-200">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                            <label className="block font-bold text-gray-800">
+                              Total Expenditure Amount (₹) <span className="text-red-500">*</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setShowSubVoucherSection(!showSubVoucherSection)}
+                              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 self-start sm:self-auto cursor-pointer ${
+                                showSubVoucherSection || entrySubVouchers.length > 0
+                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200'
+                              }`}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>
+                                {entrySubVouchers.length > 0
+                                  ? `Sub-Vouchers Active (${entrySubVouchers.length})`
+                                  : '+ Breakdown into Sub-Vouchers / Bills'}
+                              </span>
+                            </button>
+                          </div>
+
+                          <input
+                            type="number"
+                            required
+                            step="1"
+                            value={entryTotalAmount}
+                            onChange={(e) => handleTotalAmountInputChange(e.target.value)}
+                            placeholder="e.g. 35000"
+                            className="w-full p-2.5 border rounded-lg font-black text-lg bg-emerald-50/40 border-emerald-300 focus:ring-2 focus:ring-emerald-500 outline-none text-emerald-950"
+                          />
+
+                          {/* Sub-Vouchers Breakdown Box */}
+                          {(showSubVoucherSection || entrySubVouchers.length > 0) && (
+                            <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1">
+                                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                                  Sub-Vouchers / Bill Breakdown
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  Sum auto-populates Total Amount
+                                </span>
+                              </div>
+
+                              {/* Sub-voucher inline adder */}
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-white p-2.5 rounded-lg border border-slate-200 items-end">
+                                <div className="sm:col-span-3 space-y-1">
+                                  <label className="block text-[10px] font-bold text-gray-600">Voucher / Bill No.</label>
+                                  <input
+                                    type="text"
+                                    value={subVoucherNoInput}
+                                    onChange={(e) => setSubVoucherNoInput(e.target.value)}
+                                    placeholder="e.g. V-01 / Bill-104"
+                                    className="w-full p-1.5 border rounded text-xs bg-gray-50 focus:bg-white outline-none"
+                                  />
+                                </div>
+                                <div className="sm:col-span-5 space-y-1">
+                                  <label className="block text-[10px] font-bold text-gray-600">Work Description / Purpose</label>
+                                  <input
+                                    type="text"
+                                    value={subVoucherDescInput}
+                                    onChange={(e) => setSubVoucherDescInput(e.target.value)}
+                                    placeholder="e.g. Nursery labour / Soil works"
+                                    className="w-full p-1.5 border rounded text-xs bg-gray-50 focus:bg-white outline-none"
+                                  />
+                                </div>
+                                <div className="sm:col-span-2 space-y-1">
+                                  <label className="block text-[10px] font-bold text-gray-600">Amount (₹)</label>
+                                  <input
+                                    type="number"
+                                    step="1"
+                                    value={subVoucherAmountInput}
+                                    onChange={(e) => setSubVoucherAmountInput(e.target.value)}
+                                    placeholder="e.g. 5000"
+                                    className="w-full p-1.5 border rounded text-xs font-bold bg-gray-50 focus:bg-white outline-none"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleAddSubVoucher();
+                                      }
+                                    }}
+                                  />
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleAddSubVoucher}
+                                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" /> Add
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* List of added sub-vouchers */}
+                              {entrySubVouchers.length > 0 && (
+                                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                                  {entrySubVouchers.map((sv, idx) => (
+                                    <div
+                                      key={sv.id}
+                                      className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-bold text-slate-400 text-[10px]">#{idx + 1}</span>
+                                        <span className="font-bold text-slate-800 font-mono">
+                                          {sv.voucherNo || 'Sub-voucher'}
+                                        </span>
+                                        {sv.description && (
+                                          <span className="text-slate-500 text-[11px] italic">
+                                            ({sv.description})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-black text-emerald-800">
+                                          ₹{Math.round(sv.amount).toLocaleString('en-IN')}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveSubVoucher(sv.id)}
+                                          className="text-red-500 hover:text-red-700 p-0.5 rounded cursor-pointer"
+                                          title="Remove sub-voucher"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <div className="flex justify-between items-center px-2 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 rounded">
+                                    <span>Total Sub-Vouchers Sum:</span>
+                                    <span className="text-emerald-900 font-black">
+                                      ₹{entrySubVouchers.reduce((s, v) => s + v.amount, 0).toLocaleString('en-IN')}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Deductions Checkboxes */}
+                        <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-100 p-2.5 rounded-lg border border-slate-200">
+                          <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-gray-200 hover:border-emerald-400 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={entryDeductITax}
+                              onChange={(e) => setEntryDeductITax(e.target.checked)}
+                              className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500"
+                            />
+                            <div className="text-[11px]">
+                              <span className="font-bold text-gray-800 block">Deduct I/Tax @ 1%</span>
+                              <span className="text-[10px] text-gray-500">Applicable above ₹30,000</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-gray-200 hover:border-emerald-400 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={entryDeductGst}
+                              onChange={(e) => setEntryDeductGst(e.target.checked)}
+                              className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500"
+                            />
+                            <div className="text-[11px]">
+                              <span className="font-bold text-gray-800 block">Deduct GST TDS @ 2%</span>
+                              <span className="text-[10px] text-gray-500">Applicable above ₹2,50,000</span>
+                            </div>
+                          </label>
+                        </div>
+
+                        {/* Calculated amounts preview & Add button */}
+                        <div className="sm:col-span-2 pt-2 flex flex-col sm:flex-row justify-between items-center gap-3 bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
+                          {(() => {
+                            const tot = parseFloat(entryTotalAmount) || 0;
+                            const isITax = entryDeductITax && tot > 30000;
+                            const isGst = entryDeductGst && tot > 250000;
+                            const iTaxAmt = isITax ? Math.round((tot * (parseFloat(entryITaxPercent) || 1)) / 100) : 0;
+                            const gstAmt = isGst ? Math.round((tot * (parseFloat(entryGstPercent) || 2)) / 100) : 0;
+                            const netRtgs = Math.round(tot) - iTaxAmt - gstAmt;
+
+                            return (
+                              <div className="text-xs text-emerald-900 font-medium grid grid-cols-2 sm:grid-cols-4 gap-2 w-full sm:w-auto">
+                                <div>
+                                  <span className="text-[10px] text-gray-500 block">Gross Amt:</span>
+                                  <strong className="text-gray-900">₹{tot.toLocaleString('en-IN')}</strong>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-red-600 block">I/Tax (1%):</span>
+                                  <strong className="text-red-700">
+                                    -₹{iTaxAmt.toLocaleString('en-IN')}
+                                  </strong>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-purple-600 block">GST TDS (2%):</span>
+                                  <strong className="text-purple-700">
+                                    -₹{gstAmt.toLocaleString('en-IN')}
+                                  </strong>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-emerald-700 block">Net RTGS:</span>
+                                  <strong className="text-emerald-950 text-sm">
+                                    ₹{netRtgs.toLocaleString('en-IN')}
+                                  </strong>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          <button
+                            type="submit"
+                            className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-1.5 active:scale-95 shrink-0"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>{editingEntryIndex !== null ? 'Update Payee Row' : '+ Add Payee to Memo'}</span>
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+
+                    {/* Step 3: Added Payees Table inside Form */}
+                    <div className="border-t pt-4 space-y-3">
+                      <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wide">
+                        3. Payees Included in Memo ({memoPayeeEntries.length})
+                      </h4>
+
+                      {memoPayeeEntries.length > 0 ? (
+                        <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
+                          <table className="w-full text-left text-[11px] border-collapse">
+                            <thead>
+                              <tr className="bg-gray-100 font-bold text-gray-800 border-b border-gray-200">
+                                <th className="p-2 w-8 text-center border-r">#</th>
+                                <th className="p-2 border-r min-w-[130px]">Name & Address</th>
+                                <th className="p-2 border-r">Try Code</th>
+                                <th className="p-2 border-r">Bank Account Details</th>
+                                <th className="p-2 border-r text-right font-bold">Total Amt (₹)</th>
+                                <th className="p-2 border-r min-w-[140px]">Sub Voucher Details</th>
+                                <th className="p-2 border-r text-right">Deductions (IT+GST)</th>
+                                <th className="p-2 border-r text-right font-bold text-emerald-900">Net RTGS (₹)</th>
+                                <th className="p-2 border-r">PAN & GSTIN</th>
+                                <th className="p-2 text-center w-16">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {memoPayeeEntries.map((entry, idx) => {
+                                const iTax = Math.round(Number(entry.iTaxAmount) || 0);
+                                const gst = Math.round(Number(entry.gstAmount) || 0);
+                                const totDed = iTax + gst;
+
+                                return (
+                                  <tr key={idx} className={editingEntryIndex === idx ? 'bg-amber-50 font-medium' : 'hover:bg-gray-50'}>
+                                    <td className="p-2 text-center font-bold text-gray-500 border-r">{idx + 1}</td>
+                                    <td className="p-2 border-r">
+                                      <div className="font-bold text-gray-900">{entry.name}</div>
+                                      {entry.address && <div className="text-[10px] text-gray-500">{entry.address}</div>}
+                                    </td>
+                                    <td className="p-2 border-r font-mono text-[10px] font-bold text-emerald-800">
+                                      {entry.treasuryCode || '-'}
+                                    </td>
+                                    <td className="p-2 border-r font-mono text-[10px]">
+                                      <div className="font-bold text-gray-900">{entry.accountNumber || '-'}</div>
+                                      <div className="text-gray-500 text-[9px]">{entry.ifscCode || '-'}</div>
+                                    </td>
+                                    <td className="p-2 text-right font-bold border-r">
+                                      ₹{Math.round(Number(entry.totalAmount) || 0).toLocaleString('en-IN')}
+                                    </td>
+                                    <td className="p-2 border-r text-[10px]">
+                                      {entry.subVouchers && entry.subVouchers.length > 0 ? (
+                                        <div className="space-y-0.5 text-emerald-800">
+                                          {entry.subVouchers.map((sv, sIdx) => (
+                                            <div key={sIdx} className="leading-tight">
+                                              <span className="font-semibold">{sIdx + 1}.</span> {sv.voucherNo ? `[${sv.voucherNo}] ` : ''}₹{Math.round(sv.amount).toLocaleString('en-IN')}{sv.description ? ` (${sv.description})` : ''}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <span className="text-gray-500 italic">Single Bill</span>
+                                      )}
+                                    </td>
+                                    <td className="p-2 text-right border-r">
+                                      {totDed > 0 ? (
+                                        <div>
+                                          <span className="font-bold text-red-700">₹{totDed.toLocaleString('en-IN')}</span>
+                                          <div className="text-[9.5px] text-gray-500">
+                                            {iTax > 0 && <span>IT: ₹{iTax.toLocaleString('en-IN')} </span>}
+                                            {gst > 0 && <span>GST: ₹{gst.toLocaleString('en-IN')}</span>}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <span className="text-gray-400">Nil (₹0)</span>
+                                      )}
+                                    </td>
+                                    <td className="p-2 text-right font-black text-emerald-900 border-r">
+                                      ₹{Math.round(Number(entry.netRtgsAmount) || 0).toLocaleString('en-IN')}
+                                    </td>
+                                    <td className="p-2 border-r font-mono text-[10px]">
+                                      <div>PAN: {entry.panNumber || 'N/A'}</div>
+                                      {entry.gstNumber && <div className="text-gray-500">GST: {entry.gstNumber}</div>}
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      <div className="flex items-center justify-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleEditPayeeEntryInForm(idx)}
+                                          className="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer"
+                                          title="Edit Row"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemovePayeeEntryFromForm(idx)}
+                                          className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                                          title="Remove Payee"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot>
+                              {(() => {
+                                const totGross = memoPayeeEntries.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0);
+                                const totIT = memoPayeeEntries.reduce((a, b) => a + (Number(b.iTaxAmount) || 0), 0);
+                                const totGST = memoPayeeEntries.reduce((a, b) => a + (Number(b.gstAmount) || 0), 0);
+                                const totNet = memoPayeeEntries.reduce((a, b) => a + (Number(b.netRtgsAmount) || 0), 0);
+                                return (
+                                  <tr className="bg-gray-100 font-extrabold text-gray-900 border-t-2 border-gray-300">
+                                    <td colSpan={4} className="p-2 text-right uppercase border-r">
+                                      Total: -
+                                    </td>
+                                    <td className="p-2 text-right text-xs text-gray-900 border-r">
+                                      ₹{Math.round(totGross).toLocaleString('en-IN')}
+                                    </td>
+                                    <td className="p-2 text-center border-r text-gray-400">-</td>
+                                    <td className="p-2 text-right text-xs text-red-700 border-r">
+                                      ₹{Math.round(totIT + totGST).toLocaleString('en-IN')}
+                                    </td>
+                                    <td className="p-2 text-right text-xs font-black text-emerald-900 border-r">
+                                      ₹{Math.round(totNet).toLocaleString('en-IN')}
+                                    </td>
+                                    <td colSpan={2}></td>
+                                  </tr>
+                                );
+                              })()}
+                            </tfoot>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 text-xs text-gray-500 space-y-1">
+                          <p className="font-semibold text-gray-700">No payees added to this memo yet.</p>
+                          <p>Fill out the form above and click <strong>"+ Add Payee to Memo"</strong> to append payees (10, 20+ allowed).</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step 4: Form Actions (Save Draft / Submit) */}
+                    <div className="border-t pt-4 flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={handleResetMemoForm}
+                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all"
+                      >
+                        Reset / Clear Form
+                      </button>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveMemo('draft')}
+                          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-1.5"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>{editingMemo ? 'Update as Draft' : 'Save as Draft'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveMemo('submitted')}
+                          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-1.5"
+                        >
+                          <Send className="w-4 h-4" />
+                          <span>Submit & Lock Memo</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Panel: Memos Summary Table / Register (5 cols) */}
+                  <div className="lg:col-span-5 bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4">
+                    <div className="border-b pb-3 flex justify-between items-center">
+                      <h4 className="text-sm font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-emerald-600" />
+                        Saved Memos ({filteredMemos.length})
+                      </h4>
+                      <span className="text-[11px] font-bold text-gray-500">FY: {selectedFY}</span>
+                    </div>
+
+                    {filteredMemos.length > 0 ? (
+                      <div className="space-y-3 max-h-[800px] overflow-y-auto pr-1">
+                        {filteredMemos.map((m) => {
+                          const isSubmitted = m.status === 'submitted';
+                          const isCorrection = m.status === 'correction';
+                          const canEdit = userRole === 'admin' || userRole === 'deo' || !isSubmitted;
+
+                          return (
+                            <div
+                              key={m.id}
+                              className={`p-4 rounded-xl border transition-all ${
+                                editingMemo?.id === m.id
+                                  ? 'border-emerald-500 ring-2 ring-emerald-200 bg-emerald-50/30'
+                                  : isSubmitted
+                                  ? 'border-gray-200 bg-gray-50/80'
+                                  : isCorrection
+                                  ? 'border-amber-300 bg-amber-50/50'
+                                  : 'border-gray-200 bg-white hover:border-gray-300'
+                              }`}
+                            >
+                              {/* Header info */}
+                              <div className="flex justify-between items-start gap-2 mb-2">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-extrabold text-xs text-gray-900">
+                                      Memo #{m.memoNo}
+                                    </span>
+                                    {isSubmitted && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                                        <Lock className="w-2.5 h-2.5" /> Submitted
+                                      </span>
+                                    )}
+                                    {isCorrection && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
+                                        Needs Correction
+                                      </span>
+                                    )}
+                                    {m.status === 'draft' && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">
+                                        Draft
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500 font-medium">
+                                    Date: {m.date ? m.date.split('-').reverse().join('/') : ''} | Month: {m.monthYear}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs font-black text-emerald-950">
+                                    ₹{Math.round(Number(m.totalNetRtgs) || Number(m.totalAmount) || 0).toLocaleString('en-IN')}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 font-medium">
+                                    {m.payeeEntries ? m.payeeEntries.length : 0} Payee(s)
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Scheme & Sector info */}
+                              <div className="text-xs text-gray-700 bg-white/70 p-2 rounded-lg border border-gray-100 mb-3 space-y-0.5">
+                                <p><strong>Scheme:</strong> {m.schemeName || 'All Schemes'}</p>
+                                {m.sectorName && <p><strong>Sector:</strong> {m.sectorName}</p>}
+                                <p className="text-[10px] text-gray-500">From: {m.rangeName} &rarr; To: {m.toAuthority || 'DCF Rajgarh'}</p>
+                              </div>
+
+                              {/* Actions Bar */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingMemo(m)}
+                                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                                  >
+                                    <Printer className="w-3 h-3" />
+                                    <span>View & Print</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadMemoPDF(m)}
+                                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                                    title="Download Memo PDF directly"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    <span>Download PDF</span>
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  {/* Send back for correction button for Admin/DEO if submitted */}
+                                  {isSubmitted && (userRole === 'admin' || userRole === 'deo') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSendBackForCorrection(m)}
+                                      className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-[11px] font-bold transition-all"
+                                      title="Return memo to user for correction"
+                                    >
+                                      Return for Correction
+                                    </button>
+                                  )}
+
+                                  {/* Edit button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditMemo(m)}
+                                    disabled={!canEdit}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                                      canEdit
+                                        ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    }`}
+                                    title={!canEdit ? 'Locked (Submitted)' : 'Edit Memo'}
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                    <span>Edit</span>
+                                  </button>
+
+                                  {/* Delete button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteMemo(m)}
+                                    disabled={!canEdit}
+                                    className={`p-1 rounded-lg text-xs font-bold transition-all ${
+                                      canEdit
+                                        ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
+                                        : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                                    }`}
+                                    title={!canEdit ? 'Locked' : 'Delete Memo'}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center border-2 border-dashed border-gray-200 rounded-xl text-gray-400 text-xs space-y-1">
+                        <FileText className="w-8 h-8 mx-auto text-gray-300" />
+                        <p className="font-semibold text-gray-600">No Memos created for FY {selectedFY}.</p>
+                        <p>Fill out the form on the left to generate a Memo for Fund.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Full-screen Printable Memo View Modal */}
+        {viewingMemo && (() => {
+          const rangeTitle = viewingMemo.rangeName
+            ? viewingMemo.rangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '')
+            : (userRangeName || 'Sarahan');
+          const totalGrossAmt = Math.round(Number(viewingMemo.totalAmount) || 0);
+          const totalITaxAmt = Math.round(Number(viewingMemo.totalITax) || 0);
+          const totalGstAmt = Math.round(Number(viewingMemo.totalGst) || 0);
+          const totalNetRtgsAmt = Math.round(Number(viewingMemo.totalNetRtgs) || totalGrossAmt);
+          const words = convertNumberToWords(totalNetRtgsAmt);
+
+          return (
+            <div
+              className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setViewingMemo(null);
+              }}
+            >
+              <div className="bg-white w-full max-w-4xl max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col my-auto relative">
+                {/* Sticky Top Modal Toolbar - Hidden in Print */}
+                <div className="no-print bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white/20 p-2 rounded-lg">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-lg">Memo for Fund - Printable View</h3>
+                      <p className="text-xs text-emerald-100">Memo Ref: {viewingMemo.memoNo} | Period: {viewingMemo.monthYear}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => downloadMemoPDF(viewingMemo)}
+                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                      title="Download PDF"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span className="hidden sm:inline">Download PDF</span>
+                    </button>
+                    <button 
+                      onClick={() => handlePrintMemo(viewingMemo)}
+                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                      title="Print"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span className="hidden sm:inline">Print Letter</span>
+                    </button>
+                    <div className="w-px h-6 bg-white/20 mx-1"></div>
+                    <button 
+                      onClick={() => setViewingMemo(null)}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                      title="Close"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable Letter Sheet */}
+                <div className="print-area overflow-y-auto flex-1 p-6 md:p-12 space-y-5 text-gray-900 bg-white font-sans">
+                  {/* Department Header */}
+                  <div className="text-center space-y-1 border-b-2 border-gray-900 pb-3">
+                    <h2 className="text-xs md:text-sm font-extrabold uppercase tracking-widest text-gray-800">
+                      H.P. FOREST DEPARTMENT
+                    </h2>
+                    <h1 className="text-base md:text-xl font-black uppercase tracking-wide text-gray-900">
+                      Office of the Range Forest Officer, {rangeTitle}
+                    </h1>
+                    <p className="text-xs text-gray-700 font-bold tracking-wide">
+                      Forest Division Rajgarh, District Sirmaur (H.P.)
+                    </p>
+                  </div>
+
+                  {/* Memo Ref & Date Header */}
+                  <div className="flex justify-between items-center text-xs font-bold text-gray-900 border-b border-gray-300 pb-2">
+                    <div>
+                      <span>No. </span>
+                      <span className="font-mono font-black text-sm">{viewingMemo.memoNo}</span>
+                    </div>
+                    <div>
+                      <span>Dated: </span>
+                      <span className="font-mono font-bold">{viewingMemo.date ? viewingMemo.date.split('-').reverse().join('.') : ''}</span>
+                    </div>
+                  </div>
+
+                  {/* Single Line From & To Header */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs font-semibold text-gray-900 border-b border-gray-200 pb-2 gap-2">
+                    <div>
+                      <strong>From:</strong> Range Forest Officer, {viewingMemo.rangeName || rangeTitle}.
+                    </div>
+                    <div className="sm:text-right">
+                      <strong>To:</strong> The Divisional Forest Officer, Rajgarh Forest Division (H.P.).
+                    </div>
+                  </div>
+
+                  {/* Subject */}
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-300 text-xs font-bold text-gray-900 leading-snug">
+                    <span>Subject: - </span>
+                    <span className="underline">
+                      Memo for Fund for the month of {viewingMemo.monthYear} under scheme {viewingMemo.schemeName || 'All Schemes'}{viewingMemo.sectorName ? ` (${viewingMemo.sectorName})` : ''}.
+                    </span>
+                  </div>
+
+                  {/* Opening Letter Body */}
+                  <div className="text-xs leading-relaxed text-gray-900 space-y-2">
+                    <p className="font-bold">Sir,</p>
+                    <p className="text-justify leading-relaxed">
+                      It is submitted that this Range wishes to make payment to the payee(s) for the execution of departmental forestry works / liabilities for the month of <strong>{viewingMemo.monthYear}</strong> as per the details tabulated below.
+                    </p>
+                    <p className="text-justify leading-relaxed">
+                      You are kindly requested to sanction and release the total expenditure amount of <strong>₹{totalGrossAmt.toLocaleString('en-IN')}</strong> (Total Net RTGS Amount: <strong>₹{totalNetRtgsAmt.toLocaleString('en-IN')}</strong>) and arrange payment through RTGS / Treasury e-Transfer mode to the respective payees at the earliest.
+                    </p>
+                  </div>
+
+                  {/* Payees & Payment Details Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse border border-gray-900 text-xs">
+                      <thead>
+                        <tr className="bg-gray-100 text-gray-900 font-bold border-b border-gray-900 text-center">
+                          <th className="p-2 border-r border-gray-900 w-8">Sr. No.</th>
+                          <th className="p-2 border-r border-gray-900 min-w-[130px]">Name & Address</th>
+                          <th className="p-2 border-r border-gray-900">Account No.</th>
+                          <th className="p-2 border-r border-gray-900">IFSC Code</th>
+                          <th className="p-2 border-r border-gray-900 text-right">Total Amount</th>
+                          <th className="p-2 border-r border-gray-900 min-w-[150px]">Sub Voucher Details</th>
+                          <th className="p-2 border-r border-gray-900 text-right">Deductions (I.Tax + GST)</th>
+                          <th className="p-2 border-r border-gray-900 text-right font-black text-emerald-950">Net Amount RTGS</th>
+                          <th className="p-2">PAN & GSTIN</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800">
+                        {viewingMemo.payeeEntries && viewingMemo.payeeEntries.length > 0 ? (
+                          viewingMemo.payeeEntries.map((entry, idx) => {
+                            const iTax = Math.round(Number(entry.iTaxAmount) || 0);
+                            const gst = Math.round(Number(entry.gstAmount) || 0);
+                            const totDed = iTax + gst;
+
+                            return (
+                              <tr key={idx} className="border-b border-gray-400">
+                                <td className="p-2 border-r border-gray-900 text-center font-medium">{idx + 1}</td>
+                                <td className="p-2 border-r border-gray-900 font-semibold">
+                                  <div>{entry.name}</div>
+                                  {entry.address && <div className="text-[10px] text-gray-600 font-normal">{entry.address}</div>}
+                                </td>
+                                <td className="p-2 border-r border-gray-900 font-mono text-[11px] font-bold">
+                                  {entry.accountNumber || '-'}
+                                </td>
+                                <td className="p-2 border-r border-gray-900 font-mono text-[11px]">
+                                  {entry.ifscCode || '-'}
+                                </td>
+                                <td className="p-2 border-r border-gray-900 text-right font-bold">
+                                  ₹{Math.round(Number(entry.totalAmount) || 0).toLocaleString('en-IN')}
+                                </td>
+                                <td className="p-2 border-r border-gray-900 text-[10.5px]">
+                                  {entry.subVouchers && entry.subVouchers.length > 0 ? (
+                                    <div className="space-y-0.5 text-emerald-900">
+                                      {entry.subVouchers.map((sv, sIdx) => (
+                                        <div key={sIdx} className="leading-tight">
+                                          <span className="font-semibold">{sIdx + 1}.</span> {sv.voucherNo ? `[${sv.voucherNo}] ` : ''}₹{Math.round(sv.amount).toLocaleString('en-IN')}{sv.description ? ` (${sv.description})` : ''}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-500 italic">Single Bill</span>
+                                  )}
+                                </td>
+                                <td className="p-2 border-r border-gray-900 text-right">
+                                  {totDed > 0 ? (
+                                    <div>
+                                      <span className="font-bold text-red-800">₹{totDed.toLocaleString('en-IN')}</span>
+                                      <div className="text-[9.5px] text-gray-600">
+                                        {iTax > 0 && <span>IT: ₹{iTax.toLocaleString('en-IN')} </span>}
+                                        {gst > 0 && <span>GST: ₹{gst.toLocaleString('en-IN')}</span>}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400">Nil (₹0)</span>
+                                  )}
+                                </td>
+                                <td className="p-2 border-r border-gray-900 text-right font-black text-emerald-950">
+                                  ₹{Math.round(Number(entry.netRtgsAmount) || 0).toLocaleString('en-IN')}
+                                </td>
+                                <td className="p-2 font-mono text-[10px]">
+                                  <div>PAN: {entry.panNumber || 'N/A'}</div>
+                                  {entry.gstNumber && <div className="text-gray-600">GST: {entry.gstNumber}</div>}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={9} className="p-4 text-center text-gray-500 italic">No payee entries recorded.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-gray-100 font-extrabold text-gray-900 border-t-2 border-gray-900">
+                          <td colSpan={4} className="p-2.5 text-right uppercase border-r border-gray-900">
+                            Total: -
+                          </td>
+                          <td className="p-2.5 text-right font-black text-xs border-r border-gray-900">
+                            ₹{totalGrossAmt.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-2.5 text-center border-r border-gray-900 text-gray-400">-</td>
+                          <td className="p-2.5 text-right font-black text-xs text-red-800 border-r border-gray-900">
+                            ₹{(totalITaxAmt + totalGstAmt).toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-2.5 text-right font-black text-sm text-emerald-950 border-r border-gray-900">
+                            ₹{totalNetRtgsAmt.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-2.5"></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  {/* Amount in words display */}
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-300 text-xs font-bold text-gray-900">
+                    <span>Total Net Amount Payable (in words): </span>
+                    <span className="italic text-emerald-950 font-black">
+                      Rupees {words} Only
+                    </span>
+                  </div>
+
+                  {/* Bottom Signature Section - Range Stamp */}
+                  <div className="pt-16 flex justify-end text-xs font-bold text-gray-900">
+                    <div className="text-center space-y-1 min-w-[220px]">
+                      <div className="h-8"></div>
+                      <p className="text-sm font-black">Range Forest Officer</p>
+                      <p className="text-xs font-bold text-gray-800">{viewingMemo.rangeName || rangeTitle}</p>
+                      <p className="text-[11px] text-gray-600 font-normal">Rajgarh Forest Division</p>
+                    </div>
+                  </div>
+
+                  {/* Bottom Close Button Bar - Hidden in Print */}
+                  <div className="no-print pt-6 pb-2 flex justify-center items-center gap-3 border-t border-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => handlePrintMemo(viewingMemo)}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4" /> Print Letter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => downloadMemoPDF(viewingMemo)}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" /> Download PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewingMemo(null)}
+                      className="px-5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+
+        {/* Sync Memo Modal */}
+        {showMemoSyncModal && (
+          <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col max-h-[85vh] animate-fade-in">
+              {/* Header */}
+              <div className="p-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <RefreshCw className="w-5 h-5 text-emerald-400" />
+                  <div>
+                    <h3 className="font-bold text-sm sm:text-base text-white">Sync Expenditure with Memo for Fund</h3>
+                    <p className="text-[11px] text-emerald-200">Select an issued Memo to auto-link and import details</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMemoSyncModal(false)}
+                  className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Body / Search */}
+              <div className="p-4 space-y-3 overflow-y-auto flex-1 bg-gray-50/50">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by Memo No, Month/Year, Scheme, or Payee..."
+                    value={memoSearchTerm}
+                    onChange={(e) => setMemoSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-gray-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 outline-none shadow-xs"
+                  />
+                </div>
+
+                {/* Memos List */}
+                {filteredMemosForSync.length === 0 ? (
+                  <div className="p-8 text-center bg-white rounded-xl border border-dashed border-gray-300">
+                    <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-gray-600">No saved memos found</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {memoSearchTerm ? 'Try adjusting your search criteria' : `No memos created for Financial Year ${selectedFY} yet`}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredMemosForSync.map((memo) => (
+                      <div
+                        key={memo.id}
+                        className="bg-white p-3.5 rounded-xl border border-gray-200 hover:border-emerald-500 hover:shadow-md transition-all space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-sm text-gray-900">Memo #{memo.memoNo}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+                                {memo.monthYear}
+                              </span>
+                              {memo.schemeName && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">
+                                  {memo.schemeName}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              Date: {memo.date ? memo.date.split('-').reverse().join('.') : 'N/A'} | Range: {memo.rangeName || userRangeName || 'N/A'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-black text-emerald-800">
+                              ₹{(memo.totalNetRtgs || memo.totalAmount || 0).toLocaleString('en-IN')}
+                            </div>
+                            <div className="text-[10px] text-gray-400">Total Net Amount</div>
+                          </div>
+                        </div>
+
+                        {/* Payees snippet */}
+                        {memo.payeeEntries && memo.payeeEntries.length > 0 && (
+                          <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 text-[11px] space-y-1">
+                            <div className="font-semibold text-gray-700 flex justify-between text-[10px] uppercase text-gray-400">
+                              <span>Payees ({memo.payeeEntries.length})</span>
+                              <span>Net Amount</span>
+                            </div>
+                            {memo.payeeEntries.map((p, pIdx) => (
+                              <div key={pIdx} className="flex justify-between items-center text-gray-800">
+                                <span className="font-medium truncate max-w-[240px]">
+                                  {pIdx + 1}. {p.name} {p.accountNumber ? `(A/C: ${p.accountNumber})` : ''}
+                                </span>
+                                <span className="font-semibold text-emerald-950">₹{(Number(p.netRtgsAmount) || Number(p.totalAmount) || 0).toLocaleString('en-IN')}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex justify-end items-center gap-2 pt-1 border-t border-gray-100">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedSyncedMemo({ memoId: memo.id, memoNo: memo.memoNo });
+
+                              if (!expenseDescription) {
+                                setExpenseDescription(`Expenditure as per Memo #${memo.memoNo} (${memo.monthYear})`);
+                              }
+
+                              const deductionsToSet: ('TDS' | 'TDS_GST')[] = [];
+                              const hasITax = (memo.totalITax || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductITax || (e.iTaxAmount && e.iTaxAmount > 0) || Number(e.totalAmount) > 30000);
+                              const hasGst = (memo.totalGst || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductGst || (e.gstAmount && e.gstAmount > 0) || (Number(e.totalAmount) > 250000 && Boolean(e.gstNumber && e.gstNumber.trim())));
+                              if (hasITax) deductionsToSet.push('TDS');
+                              if (hasGst) deductionsToSet.push('TDS_GST');
+                              setSelectedDeductions(deductionsToSet);
+
+                              if (memo.payeeEntries && memo.payeeEntries.length > 0) {
+                                const matchedPayees: { payeeId: string; amount: string }[] = [];
+                                memo.payeeEntries.forEach(entry => {
+                                  const matched = payees.find(p =>
+                                    (entry.payeeId && p.id === entry.payeeId) ||
+                                    (p.accountNumber && entry.accountNumber && p.accountNumber.trim() === entry.accountNumber.trim()) ||
+                                    (p.name && entry.name && p.name.trim().toLowerCase() === entry.name.trim().toLowerCase())
+                                  );
+                                  if (matched) {
+                                    matchedPayees.push({
+                                      payeeId: matched.id,
+                                      amount: String(entry.totalAmount || entry.netRtgsAmount || '')
+                                    });
+                                  }
+                                });
+                                if (matchedPayees.length > 0) {
+                                  setSelectedPayeesForExpense(matchedPayees);
+                                }
+                              }
+
+                              setShowMemoSyncModal(false);
+                              showAlert(`Successfully synced with Memo #${memo.memoNo}!`);
+                            }}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                          >
+                            <Check className="w-3.5 h-3.5" /> Sync Memo #{memo.memoNo}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-3 bg-gray-100 border-t flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowMemoSyncModal(false)}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Expenditure List Print Modal Overlay */}
+        {showExpenditurePrintModal && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowExpenditurePrintModal(false);
+            }}
+          >
+            <div className="bg-white w-full max-w-5xl h-[92vh] max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col my-auto relative">
+              {/* Modal Toolbar - Hidden during print */}
+              <div className="no-print bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-lg">
+                    <Printer className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg">Expenditure List Preview</h3>
+                    <p className="text-xs text-emerald-100">Total Entries: {currentExpenses.length} | Financial Year: {selectedFY}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={downloadExpenditureListPDF}
+                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                    title="Download PDF"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Download</span>
+                  </button>
+                  <button 
+                    onClick={handlePrintExpenditureReport}
+                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                    title="Print"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span className="hidden sm:inline">Print</span>
+                  </button>
+                  <div className="w-px h-6 bg-white/20 mx-1"></div>
+                  <button 
+                    onClick={() => setShowExpenditurePrintModal(false)}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Area */}
+              <div id="expenditure-print-area" className="print-area flex-1 overflow-y-auto p-6 md:p-10 space-y-6 bg-white text-gray-900 font-sans">
+                <div className="text-center space-y-1 border-b pb-4">
+                  <h1 className="text-xl font-black uppercase tracking-wide text-gray-900">Department of Forests, Himachal Pradesh</h1>
+                  <h2 className="text-base font-bold text-gray-800">Rajgarh Forest Division — Expenditure Report List</h2>
+                  <p className="text-xs text-gray-500 font-medium">Financial Year: {selectedFY} | Date Generated: {new Date().toLocaleDateString('en-GB')}</p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200">
+                  <div><span className="font-bold text-gray-600">Total Entries:</span> {currentExpenses.length}</div>
+                  <div><span className="font-bold text-gray-600">Total Amount:</span> ₹{currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toLocaleString('en-IN')}</div>
+                  <div><span className="font-bold text-gray-600">Range:</span> {ranges.find(r => r.id === userRangeId)?.name || userRangeName}</div>
+                  <div><span className="font-bold text-gray-600">Print Date:</span> {new Date().toLocaleDateString('en-GB')}</div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300 text-xs">
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-800 font-bold border-b border-gray-300">
+                        <th className="p-2 border-r border-gray-300 w-8 text-center">#</th>
+                        <th className="p-2 border-r border-gray-300 whitespace-nowrap">Date</th>
+                        <th className="p-2 border-r border-gray-300">Payee Name & Account</th>
+                        <th className="p-2 border-r border-gray-300">Unit / Range / SOE</th>
+                        <th className="p-2 border-r border-gray-300">Description / Particulars</th>
+                        <th className="p-2 border-r border-gray-300 text-right">Amount (₹)</th>
+                        <th className="p-2 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentExpenses.map((exp, idx) => {
+                        const p = payees.find(p => p.id === exp.payeeId);
+                        const payeeName = p?.name || exp.payeeName || 'N/A';
+                        const payeeAcc = p?.accountNumber ? `A/C: ${p.accountNumber}` : '';
+                        const al = allocations.find(a => a.id === exp.allocationId);
+                        const r = ranges.find(r => r.id === al?.rangeId);
+                        const s = soes.find(s => s.id === exp.soeId);
+
+                        return (
+                          <tr key={exp.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <td className="p-2 border-r border-gray-200 text-center font-medium">{idx + 1}</td>
+                            <td className="p-2 border-r border-gray-200 whitespace-nowrap">{exp.date ? exp.date.split('-').reverse().join('/') : ''}</td>
+                            <td className="p-2 border-r border-gray-200 font-medium">
+                              <div>{payeeName}</div>
+                              {payeeAcc && <div className="text-[10px] text-gray-500 font-mono">{payeeAcc}</div>}
+                            </td>
+                            <td className="p-2 border-r border-gray-200">
+                              <div className="font-semibold">{r?.name || 'N/A'} / {s?.name || 'N/A'}</div>
+                            </td>
+                            <td className="p-2 border-r border-gray-200 text-gray-700 italic">{exp.description || '-'}</td>
+                            <td className="p-2 border-r border-gray-200 text-right">
+                              {(() => {
+                                const totalAmt = Number(exp.amount) || 0;
+                                const tds = Math.round(exp.tdsAmount || 0);
+                                const gstTds = Math.round(exp.tdsGstAmount || 0);
+                                const totalDeducted = Math.round(exp.deductedAmount || (tds + gstTds));
+                                const netPayable = Math.round(exp.netAmount ?? (totalAmt - totalDeducted));
+
+                                if (totalDeducted > 0) {
+                                  return (
+                                    <div className="flex flex-col text-[11px] leading-tight text-right space-y-0.5">
+                                      <div className="font-bold text-gray-900">Total: ₹{totalAmt.toLocaleString('en-IN')}</div>
+                                      {tds > 0 && <div className="text-[10px] text-red-600 font-medium">TDS: -₹{tds.toLocaleString('en-IN')}</div>}
+                                      {gstTds > 0 && <div className="text-[10px] text-purple-600 font-medium">GST TDS: -₹{gstTds.toLocaleString('en-IN')}</div>}
+                                      {tds === 0 && gstTds === 0 && <div className="text-[10px] text-red-600 font-medium">TDS: -₹{totalDeducted.toLocaleString('en-IN')}</div>}
+                                      <div className="font-bold text-emerald-800 border-t border-gray-300 pt-0.5">Net to Pay: ₹{netPayable.toLocaleString('en-IN')}</div>
+                                    </div>
+                                  );
+                                }
+                                return <span className="font-bold text-gray-900">₹{totalAmt.toLocaleString('en-IN')}</span>;
+                              })()}
+                            </td>
+                            <td className="p-2 text-center capitalize font-semibold">{exp.status || 'pending'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
+                        <td colSpan={5} className="p-2.5 text-right uppercase border-r border-gray-300">Total Expenditure Amount:</td>
+                        <td className="p-2.5 text-right text-emerald-800 text-sm font-black border-r border-gray-300">
+                          ₹{currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toLocaleString('en-IN')}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="pt-12 flex justify-between items-end text-xs">
+                  <div>
+                    <p className="font-bold">Prepared By:</p>
+                    <p className="text-gray-500 mt-6">Dealing Assistant / Data Entry Operator</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold">Verified & Authorised By:</p>
+                    <p className="text-gray-500 mt-6">Range Forest Officer / Divisional Forest Officer</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Footer Actions (Hidden in Print) */}
+              <div className="no-print bg-gray-100 p-3 sm:p-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="text-xs text-gray-600 font-medium">
+                  Showing <span className="font-bold text-gray-900">{currentExpenses.length}</span> record(s) • Total: <span className="font-bold text-emerald-800">₹{currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrintExpenditureReport}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" /> Print Report
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadExpenditureListPDF}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" /> Export PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowExpenditurePrintModal(false)}
+                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Close Preview
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payee Directory Print / Preview Modal */}
+        {showPayeePrintModal && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowPayeePrintModal(false);
+            }}
+          >
+            <div className="bg-white w-full max-w-5xl h-[92vh] max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col my-auto relative">
+              {/* Modal Toolbar - Hidden during print */}
+              <div className="no-print bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-lg">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg">Payee Directory - Printable View</h3>
+                    <p className="text-xs text-emerald-100">Total Payees: {filteredPayeesList.length} | Range / Role: {userRangeName || userRole || 'All'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={downloadPayeesPDF}
+                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                    title="Download PDF"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Download</span>
+                  </button>
+                  <button 
+                    onClick={handlePrintPayees}
+                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                    title="Print"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span className="hidden sm:inline">Print</span>
+                  </button>
+                  <div className="w-px h-6 bg-white/20 mx-1"></div>
+                  <button 
+                    onClick={() => setShowPayeePrintModal(false)}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Payee Table Area */}
+              <div className="print-area flex-1 overflow-y-auto p-6 md:p-10 space-y-6 bg-white text-gray-900 font-sans">
+                <div className="text-center space-y-1 border-b pb-4">
+                  <h1 className="text-xl font-black uppercase tracking-wide text-gray-900">Department of Forests, Himachal Pradesh</h1>
+                  <h2 className="text-base font-bold text-gray-800">Rajgarh Forest Division — Payee Directory Details</h2>
+                  <p className="text-xs text-gray-500 font-medium">Range / Role: {userRangeName || userRole || 'All'} | Date: {new Date().toLocaleDateString('en-GB')}</p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300 text-xs">
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-800 font-bold border-b border-gray-300">
+                        <th className="p-2 border-r border-gray-300 w-8 text-center">#</th>
+                        <th className="p-2 border-r border-gray-300">Payee Name</th>
+                        <th className="p-2 border-r border-gray-300">Address</th>
+                        <th className="p-2 border-r border-gray-300">Try Code</th>
+                        <th className="p-2 border-r border-gray-300">Bank Account Details</th>
+                        <th className="p-2 border-r border-gray-300">PAN Number</th>
+                        <th className="p-2 border-r border-gray-300">GST Number</th>
+                        <th className="p-2 border-gray-300">Range</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {filteredPayeesList.map((p, index) => {
+                        const rName = ranges.find(r => r.id === p.rangeId)?.name || 'Not Specified';
+                        return (
+                          <tr key={`payee-print-${p.id}-${index}`} className="hover:bg-gray-50">
+                            <td className="p-2 border-r border-gray-300 text-center">{index + 1}</td>
+                            <td className="p-2 border-r border-gray-300 font-bold text-gray-900">{p.name}</td>
+                            <td className="p-2 border-r border-gray-300 text-gray-600">{p.address}</td>
+                            <td className="p-2 border-r border-gray-300 font-mono text-emerald-800 font-bold">{p.treasuryCode || <span className="text-gray-400 font-normal italic">N/A</span>}</td>
+                            <td className="p-2 border-r border-gray-300 font-mono text-gray-900">
+                              <div className="font-bold">{p.accountNumber}</div>
+                              <div className="text-[10px] text-gray-500">{p.ifscCode || 'N/A'}</div>
+                            </td>
+                            <td className="p-2 border-r border-gray-300 font-mono text-gray-700">{p.panNumber || 'N/A'}</td>
+                            <td className="p-2 border-r border-gray-300 font-mono text-gray-700">{p.gstNumber || 'N/A'}</td>
+                            <td className="p-2 border-gray-300 text-gray-700">{rName}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="pt-8 flex justify-between items-end text-xs font-semibold text-gray-700 border-t">
+                  <div>
+                    <p>Total Registered Payees: {filteredPayeesList.length}</p>
+                    <p className="text-[10px] text-gray-500 font-normal">Generated electronically via Forest Budget Control System</p>
+                  </div>
+                  <div className="text-right">
+                    <p>Divisional Forest Officer / Range Officer</p>
+                    <p className="text-[10px] text-gray-500 font-normal">Rajgarh Forest Division, H.P.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Treasury Code Quick Add/Edit Modal (Restricted to DEO and Admin) */}
+        {treasuryCodeModalPayee && (isAdmin() || isDEO()) && (
+          <div
+            className="fixed inset-0 z-[110] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setTreasuryCodeModalPayee(null);
+                setTreasuryCodeInput('');
+              }
+            }}
+          >
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-emerald-100 flex flex-col animate-in fade-in zoom-in duration-200">
+              <div className="bg-gradient-to-r from-emerald-800 to-teal-800 p-4 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-xl">
+                    <Building2 className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base">Treasury Code Assignment</h3>
+                    <p className="text-[11px] text-emerald-200">Government Treasury Portal Payee ID</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreasuryCodeModalPayee(null);
+                    setTreasuryCodeInput('');
+                  }}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveTreasuryCode} className="p-5 space-y-4">
+                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-xl p-3.5 space-y-1.5">
+                  <div className="text-xs font-bold text-emerald-950 flex items-center justify-between">
+                    <span>Payee Details</span>
+                    <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-mono px-1.5 py-0.5 rounded">
+                      {ranges.find(r => r.id === treasuryCodeModalPayee.rangeId)?.name || 'All Ranges'}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900">{treasuryCodeModalPayee.name}</p>
+                  <div className="text-xs text-gray-600 font-mono">
+                    A/C: <span className="font-bold text-gray-800">{treasuryCodeModalPayee.accountNumber}</span>
+                    {treasuryCodeModalPayee.ifscCode && ` • IFSC: ${treasuryCodeModalPayee.ifscCode}`}
+                  </div>
+                  {treasuryCodeModalPayee.address && (
+                    <div className="text-xs text-gray-500 truncate">{treasuryCodeModalPayee.address}</div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-gray-800">
+                    Treasury Code / Portal Payee ID <span className="text-emerald-700">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={treasuryCodeInput}
+                    onChange={(e) => setTreasuryCodeInput(e.target.value)}
+                    placeholder="e.g. TRY-90482 or HPTR-2024-001"
+                    className="w-full px-3.5 py-2.5 border-2 border-emerald-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-600 bg-white"
+                    autoFocus
+                  />
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    Enter the unique identifier assigned to this payee on the Treasury portal when generating treasury bills.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTreasuryCodeModalPayee(null);
+                      setTreasuryCodeInput('');
+                    }}
+                    className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-sm transition-colors cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save Treasury Code
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'Surrender' && renderSurrenderTab()}
+        {activeTab === 'Approved Budget' && (isAdmin() || isDEO() || userRole === 'DA') && renderBudgetFilesTab('approved')}
+        {activeTab === 'Distributed Budget' && renderBudgetFilesTab('distributed')}
+
+        {activeTab === 'Reconciliation' && renderReconciliation()}
+
+        {activeTab === 'Ledger' && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-4">
+              <div className="flex items-center gap-4 flex-1">
+                <h3 className="text-lg font-semibold whitespace-nowrap">Passbook Ledger</h3>
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by description, approval ID, hierarchy..."
+                    value={ledgerSearchTerm}
+                    onChange={(e) => setLedgerSearchTerm(e.target.value)}
+                    className="pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                  />
+                </div>
+                <button 
+                  onClick={() => setShowLedgerFilters(!showLedgerFilters)}
+                  className={`flex items-center gap-1 px-3 py-2 border rounded-lg text-sm transition-colors ${showLedgerFilters ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white hover:bg-gray-50'}`}
+                >
+                  <Filter className="w-4 h-4" />
+                  <span>Filters</span>
+                  {showLedgerFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={downloadLedgerPDF}
+                  className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                  title="Download PDF"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>PDF</span>
+                </button>
+                <button 
+                  onClick={downloadLedgerExcel}
+                  className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                  title="Download Excel"
+                >
+                  <FileBarChart className="w-4 h-4" />
+                  <span>Excel</span>
+                </button>
+                <span className="text-sm font-medium text-emerald-600">FY {fys.find(f => f.id === selectedFY)?.name || selectedFY}</span>
+              </div>
+            </div>
+
+            {showLedgerFilters && (
+              <div className="mb-6 animate-in fade-in slide-in-from-top-2">
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-t-lg border border-gray-200">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
+                    <select 
+                      value={ledgerFilters.range}
+                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, range: e.target.value, scheme: '', sector: '', activity: '', subActivity: '', soe: '' })}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Ranges</option>
+                      {uniqueRangesList.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
+                    <select 
+                      value={ledgerFilters.scheme}
+                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, scheme: e.target.value, sector: '', activity: '', subActivity: '', soe: '' })}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Schemes</option>
+                      {uniqueSchemes.filter(s => {
+                        if (!ledgerFilters.range) return true;
+                        return comprehensiveReportData.some(r => r.range === ledgerFilters.range && r.scheme === s);
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
+                    <select 
+                      value={ledgerFilters.sector}
+                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, sector: e.target.value, activity: '', subActivity: '', soe: '' })}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Sectors</option>
+                      {uniqueSectors.filter(s => {
+                        if (!ledgerFilters.range && !ledgerFilters.scheme) return true;
+                        return comprehensiveReportData.some(r => {
+                          const rangeMatch = !ledgerFilters.range || r.range === ledgerFilters.range;
+                          const schemeMatch = !ledgerFilters.scheme || r.scheme === ledgerFilters.scheme;
+                          return rangeMatch && schemeMatch && r.sector === s;
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
+                    <select 
+                      value={ledgerFilters.activity}
+                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, activity: e.target.value, subActivity: '', soe: '' })}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Activities</option>
+                      {uniqueActivities.filter(a => {
+                        if (!ledgerFilters.range && !ledgerFilters.scheme && !ledgerFilters.sector) return true;
+                        return comprehensiveReportData.some(r => {
+                          const rangeMatch = !ledgerFilters.range || r.range === ledgerFilters.range;
+                          const schemeMatch = !ledgerFilters.scheme || r.scheme === ledgerFilters.scheme;
+                          const sectorMatch = !ledgerFilters.sector || r.sector === ledgerFilters.sector;
+                          return rangeMatch && schemeMatch && sectorMatch && r.activity === a;
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
+                    <select 
+                      value={ledgerFilters.subActivity}
+                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, subActivity: e.target.value, soe: '' })}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All Sub-Activities</option>
+                      {uniqueSubActivities.filter(sa => {
+                        if (!ledgerFilters.range && !ledgerFilters.scheme && !ledgerFilters.sector && !ledgerFilters.activity) return true;
+                        return comprehensiveReportData.some(r => {
+                          const rangeMatch = !ledgerFilters.range || r.range === ledgerFilters.range;
+                          const schemeMatch = !ledgerFilters.scheme || r.scheme === ledgerFilters.scheme;
+                          const sectorMatch = !ledgerFilters.sector || r.sector === ledgerFilters.sector;
+                          const activityMatch = !ledgerFilters.activity || r.activity === ledgerFilters.activity;
+                          return rangeMatch && schemeMatch && sectorMatch && activityMatch && r.subActivity === sa;
+                        });
+                      }).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
+                    <select 
+                      value={ledgerFilters.soe}
+                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, soe: e.target.value })}
+                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
+                    >
+                      <option value="">All SOEs</option>
+                      {uniqueSoes.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div className="lg:col-span-6 flex justify-end">
+                    <button 
+                      onClick={() => {
+                        setLedgerFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '' });
+                        setLedgerSearchTerm('');
+                      }}
+                      className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" />
+                      Reset Filters
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 bg-emerald-50 rounded-b-lg border-x border-b border-gray-200">
+                  <div className="flex justify-between items-center px-2">
+                    <span className="text-[10px] font-bold text-emerald-800 uppercase">Total Credit:</span>
+                    <span className="text-sm font-bold text-emerald-700">₹{filteredLedgerData.totals.credit.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center px-2 border-x border-emerald-100">
+                    <span className="text-[10px] font-bold text-red-800 uppercase">Total Debit:</span>
+                    <span className="text-sm font-bold text-red-700">₹{filteredLedgerData.totals.debit.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center px-2">
+                    <span className="text-[10px] font-bold text-blue-800 uppercase">Net Balance:</span>
+                    <span className="text-sm font-bold text-blue-700">₹{filteredLedgerData.totals.balance.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 text-sm">
+                    <th className="p-3 border-b">Date</th>
+                    <th className="p-3 border-b">Range</th>
+                    <th className="p-3 border-b">Hierarchy & SOE</th>
+                    <th className="p-3 border-b">Description</th>
+                    <th className="p-3 border-b">Approval ID</th>
+                    <th className="p-3 border-b text-right">Credit (Allocated)</th>
+                    <th className="p-3 border-b text-right">Debit (Expense)</th>
+                    <th className="p-3 border-b text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLedgerData.allocations.map(alloc => {
+                    const r = ranges.find(r => r.id === alloc.rangeId);
+                    const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(', ') || 'Pending Funds';
+                    
+                    let hierarchy = '';
+                    if (alloc.subActivityId) {
+                      const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
+                      const act = activities.find(a => a.id === sa?.activityId);
+                      const sec = sectors.find(sec => sec.id === act?.sectorId);
+                      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+                      hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
+                    } else if (alloc.activityId) {
+                      const act = activities.find(a => a.id === alloc.activityId);
+                      const sec = sectors.find(sec => sec.id === act?.sectorId);
+                      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
+                      hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
+                    }
+                    
+                    const allocExpenses = expenses.filter(e => e.allocationId === alloc.id && e.status !== 'rejected').sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                    
+                    let currentBalance = alloc.amount;
+                    
+                    return (
+                      <React.Fragment key={`alloc-${alloc.id}`}>
+                        {/* Initial Allocation Row */}
+                        <tr className="bg-blue-50/30 border-b">
+                          <td className="p-3 text-gray-400">-</td>
+                          <td className="p-3 font-medium">{r?.name}</td>
+                          <td className="p-3 font-medium">
+                            <div className="text-xs text-gray-500">{hierarchy || 'N/A'}</div>
+                            <div>{soeNames}</div>
+                          </td>
+                          <td className="p-3 italic text-gray-600">Initial Allocation</td>
+                          <td className="p-3 text-gray-400">-</td>
+                          <td className="p-3 text-right text-emerald-600 font-bold">₹{alloc.amount.toLocaleString()}</td>
+                          <td className="p-3 text-right">-</td>
+                          <td className="p-3 text-right text-blue-600 font-bold">₹{currentBalance.toLocaleString()}</td>
+                        </tr>
+                        {/* Expense Rows */}
+                        {allocExpenses.map(exp => {
+                          currentBalance -= exp.amount;
+                          return (
+                            <tr key={`exp-${exp.id}`} className="border-b hover:bg-gray-50">
+                              <td className="p-3">{exp.date ? exp.date.split('-').reverse().join('/') : ''}</td>
+                              <td className="p-3">{r?.name}</td>
+                              <td className="p-3">
+                                <div className="text-xs text-gray-500">{hierarchy || 'N/A'}</div>
+                                <div>{soeNames}</div>
+                                {alloc.activityId && (
+                                  <div className="text-[10px] bg-blue-50 text-blue-600 px-1 rounded inline-block mt-1">
+                                    Activity: {activities.find(a => a.id === alloc.activityId)?.name}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-3">{exp.description}</td>
+                              <td className="p-3 font-mono text-xs">{exp.approvalId ? `#${exp.approvalId}` : '-'}</td>
+                              <td className="p-3 text-right">-</td>
+                              <td className="p-3 text-right text-red-600">₹{exp.amount.toLocaleString()}</td>
+                              <td className="p-3 text-right text-blue-600 font-bold">₹{currentBalance.toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+                  {filteredLedgerData.allocations.length === 0 && <tr><td colSpan={8} className="p-4 text-center text-gray-500">No allocations found for this Financial Year.</td></tr>}
+                </tbody>
+                {filteredLedgerData.allocations.length > 0 && (
+                  <tfoot className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                    <tr>
+                      <td colSpan={5} className="p-3 text-right text-gray-700">GRAND TOTAL:</td>
+                      <td className="p-3 text-right text-emerald-700">₹{filteredLedgerData.totals.credit.toLocaleString()}</td>
+                      <td className="p-3 text-right text-red-700">₹{filteredLedgerData.totals.debit.toLocaleString()}</td>
+                      <td className="p-3 text-right text-blue-700">₹{filteredLedgerData.totals.balance.toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'Reports' && renderReports()}
+        {activeTab === 'Audit Log' && (userRole === 'admin' || userRole === 'deo' || userRole === 'DA' || userRole === 'approver') && renderAuditLogTab()}
+        {activeTab === 'Users' && userRole === 'admin' && renderUserManagement()}
+
+        {renderFundingModal()}
+        {renderApprovalModal()}
+        {renderSoeExpModal()}
+
+        {/* Global Alert Modal */}
+        {alertModal.isOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
+              <div className="bg-emerald-600 p-4 text-white flex justify-between items-center">
+                <h3 className="font-bold">Notification</h3>
+                <button onClick={() => setAlertModal({ ...alertModal, isOpen: false })}><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-6">
+                <p className="text-gray-700">{alertModal.message}</p>
+                <div className="mt-6 flex justify-end">
+                  <button 
+                    onClick={() => setAlertModal({ ...alertModal, isOpen: false })}
+                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Global Confirm Modal */}
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
+              <div className="bg-amber-500 p-4 text-white flex justify-between items-center">
+                <h3 className="font-bold">Confirm Action</h3>
+                <button onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-6">
+                <p className="text-gray-700">{confirmModal.message}</p>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button 
+                    onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => {
+                      confirmModal.onConfirm();
+                      setConfirmModal({ ...confirmModal, isOpen: false });
+                    }}
+                    className="bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 transition-colors font-medium"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* PDF Viewer Modal */}
+        {viewingBillPdf && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200] p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+              <div className="bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-lg">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg">Bill PDF Viewer</h3>
+                    <p className="text-xs text-emerald-100">Bill No: {viewingBillPdf.bill.billNo} | Date: {viewingBillPdf.bill.billDate ? viewingBillPdf.bill.billDate.split('-').reverse().join('/') : 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = viewingBillPdf.url;
+                      link.download = `bill_${viewingBillPdf.bill.billNo || 'document'}.pdf`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                    title="Download PDF"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Download</span>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const frame = document.getElementById('bill-pdf-iframe') as HTMLIFrameElement;
+                      if (frame && frame.contentWindow) {
+                        try {
+                          frame.contentWindow.focus();
+                          frame.contentWindow.print();
+                        } catch (e) {
+                          window.print();
+                        }
+                      } else {
+                        window.print();
+                      }
+                    }}
+                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
+                    title="Print PDF"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span className="hidden sm:inline">Print</span>
+                  </button>
+                  <div className="w-px h-6 bg-white/20 mx-1"></div>
+                  <button 
+                    onClick={() => {
+                      URL.revokeObjectURL(viewingBillPdf.url);
+                      setViewingBillPdf(null);
+                    }}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 bg-gray-100 p-4 overflow-hidden">
+                <iframe 
+                  id="bill-pdf-iframe"
+                  src={`${viewingBillPdf.url}#toolbar=0`} 
+                  className="w-full h-full rounded-lg border border-gray-200 shadow-inner bg-white"
+                  title="Bill PDF"
+                />
+              </div>
+              <div className="bg-gray-50 p-3 border-t flex justify-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
+                Forest Budget Control System • Treasury Bill Format
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+function CascadingDropdowns({ 
+  schemes = [], sectors = [], activities = [], subActivities = [], soes = [], soeBudgets = [], allocations = [], surrenders = [], ranges = [], expenses = [],
+  editingItem, type, children, onSelectionChange, onBalanceChange, userRangeId, userRole,
+  showSector, showActivity, showSubActivity, showSoe, showRange, showConfirm
+}: any) {
+  const [schemeId, setSchemeId] = useState('');
+  const [sectorId, setSectorId] = useState('');
+  const [activityId, setActivityId] = useState('');
+  const [subActivityId, setSubActivityId] = useState('');
+  const [soeId, setSoeId] = useState('');
+  const [allocationId, setAllocationId] = useState('');
+  const [fundingSoeName, setFundingSoeName] = useState('');
+  const [rangeId, setRangeId] = useState(userRangeId || '');
+  const lastInitializedId = useRef<string | null>(null);
+  const lastSelection = useRef<any>(null);
+  const lastBalance = useRef<number | undefined>(undefined);
+
+  // Notify parent of selection changes
+  useEffect(() => {
+    if (onSelectionChange) {
+      const currentSelection = { schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId, allocationId };
+      const selectionChanged = !lastSelection.current || 
+        Object.keys(currentSelection).some(key => (currentSelection as any)[key] !== (lastSelection.current as any)[key]);
+      
+      if (selectionChanged) {
+        lastSelection.current = currentSelection;
+        onSelectionChange(currentSelection);
+      }
+    }
+  }, [schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId, allocationId, onSelectionChange]);
+
+  // Calculate and notify parent of balance changes (Expenditure only)
+  useEffect(() => {
+    if (type === 'Expenditure' && onBalanceChange) {
+      const currentAlloc = allocations.find((a: any) => a.id === allocationId);
+      const targetRangeId = currentAlloc?.rangeId || (userRangeId ? userRangeId : rangeId);
+
+      if (schemeId && targetRangeId && soeId) {
+        const selectedSoe = soes.find((s: any) => s.id === soeId);
+        const selectedName = selectedSoe?.name || 'Unnamed SOE';
+
+        // Aggregate allocation for this hierarchy and SOE Name
+        const totalAllocatedForSoe = allocations.filter((a: any) => 
+          a.rangeId === targetRangeId &&
+          a.schemeId === schemeId &&
+          (a.sectorId || null) === (sectorId || null) &&
+          (a.activityId || null) === (activityId || null) &&
+          (a.subActivityId || null) === (subActivityId || null)
+        ).reduce((sum: number, a: any) => {
+          const funded = a.fundedSOEs?.find((f: any) => {
+            const s = soes.find((soe: any) => soe.id === f.soeId);
+            return (s?.name || 'Unnamed SOE') === selectedName;
+          });
+          return sum + (funded?.amount || 0);
+        }, 0);
+
+        // Aggregate expenditure for this hierarchy and SOE Name
+        const totalSpentForSoe = expenses.filter((e: any) => {
+          const eAlloc = allocations.find((a: any) => a.id === e.allocationId);
+          const eSoeName = soes.find((s: any) => s.id === e.soeId)?.name;
+          return (
+            eAlloc &&
+            eAlloc.rangeId === targetRangeId &&
+            eAlloc.schemeId === schemeId &&
+            (eAlloc.sectorId || null) === (sectorId || null) &&
+            (eAlloc.activityId || null) === (activityId || null) &&
+            (eAlloc.subActivityId || null) === (subActivityId || null) &&
+            eSoeName === selectedName &&
+            e.status !== 'rejected' &&
+            (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true)
+          );
+        }).reduce((sum: number, e: any) => sum + e.amount, 0);
+
+        const balance = totalAllocatedForSoe - totalSpentForSoe;
+        if (balance !== lastBalance.current) {
+          lastBalance.current = balance;
+          onBalanceChange(balance);
+        }
+      } else {
+        if (lastBalance.current !== undefined) {
+          lastBalance.current = undefined;
+          onBalanceChange(undefined);
+        }
+      }
+    }
+  }, [schemeId, sectorId, activityId, subActivityId, rangeId, allocationId, soeId, allocations, expenses, type, onBalanceChange, editingItem, soes, userRangeId]);
+
+  // Initialize state based on editingItem
+  useEffect(() => {
+    if (editingItem?.item && editingItem.type === type) {
+      if (lastInitializedId.current === editingItem.item.id) return;
+      lastInitializedId.current = editingItem.item.id;
+
+      const item = editingItem.item;
+      let currentSoeId = '';
+      let currentSubActivityId = '';
+      let currentActivityId = '';
+      let currentSectorId = '';
+      let currentSchemeId = '';
+      let currentRangeId = userRangeId || '';
+
+      if (type === 'Expenditure') {
+        const alloc = allocations.find((a: any) => a.id === item.allocationId);
+        setAllocationId(item.allocationId);
+        currentSoeId = item.soeId || alloc?.soeId || '';
+        currentSubActivityId = alloc?.subActivityId || '';
+        currentActivityId = alloc?.activityId || '';
+        currentSectorId = alloc?.sectorId || '';
+        currentSchemeId = alloc?.schemeId || '';
+        currentRangeId = alloc?.rangeId || userRangeId || '';
+      } else if (type === 'Allocation') {
+        currentSoeId = item.soeId;
+        currentSubActivityId = item.subActivityId || '';
+        currentActivityId = item.activityId || '';
+        currentSectorId = item.sectorId || '';
+        currentSchemeId = item.schemeId || '';
+        currentRangeId = item.rangeId || userRangeId || '';
+        
+        // Initialize fundingSoeName if it's an allocation with funded SOEs
+        if (item.fundedSOEs && item.fundedSOEs.length > 0) {
+          const firstSoe = soes.find((s: any) => s.id === item.fundedSOEs[0].soeId);
+          if (firstSoe) {
+            setFundingSoeName(firstSoe.name);
+          }
+        }
+      } else if (type === 'Sub-Activity') {
+        currentActivityId = item.activityId;
+        const act = activities.find((a: any) => a.id === currentActivityId);
+        currentSectorId = act?.sectorId || '';
+        currentSchemeId = act?.schemeId || '';
+        if (!currentSchemeId && currentSectorId) {
+          const sec = sectors.find((s: any) => s.id === currentSectorId);
+          currentSchemeId = sec?.schemeId || '';
+        }
+      } else if (type === 'SOE Name') {
+        currentSubActivityId = item.subActivityId || '';
+        currentActivityId = item.activityId || '';
+        currentSectorId = item.sectorId || '';
+        currentSchemeId = item.schemeId || '';
+      } else if (type === 'Surrender') {
+        currentSoeId = item.soeId;
+        currentSubActivityId = item.subActivityId || '';
+        currentActivityId = item.activityId || '';
+        currentSectorId = item.sectorId || '';
+        currentSchemeId = item.schemeId || '';
+        currentRangeId = item.rangeId || userRangeId || '';
+      }
+
+      setSoeId(currentSoeId);
+      setSubActivityId(currentSubActivityId);
+      setActivityId(currentActivityId);
+      setSectorId(currentSectorId);
+      setSchemeId(currentSchemeId);
+      setRangeId(currentRangeId);
+    } else if (!editingItem && lastInitializedId.current !== null) {
+      lastInitializedId.current = null;
+      
+      // For Expenditure type, ensure everything is empty on fresh open
+      if (type === 'Expenditure') {
+        setSchemeId('');
+        setSectorId('');
+        setActivityId('');
+        setSubActivityId('');
+        setSoeId('');
+        setAllocationId('');
+        setFundingSoeName('');
+        setRangeId(userRangeId || '');
+      } else {
+        // For other types, we might want to keep some context or reset leaf nodes
+        if (type !== 'Allocation') {
+          setSoeId('');
+          setAllocationId('');
+          setFundingSoeName('');
+        }
+        
+        // If it's a fresh start (no scheme selected), reset hierarchy
+        if (!schemeId) {
+          setSectorId('');
+          setActivityId('');
+          setSubActivityId('');
+          setRangeId(userRangeId || '');
+        }
+      }
+    }
+  }, [editingItem, type]); 
+
+  const filteredSchemes = schemes;
+
+  // Deduplicate by name to remove repeated items
+  const getUniqueByName = (items: any[]) => {
+    const seen = new Set();
+    return items.filter(item => {
+      if (!item.name) return true;
+      const duplicate = seen.has(item.name);
+      seen.add(item.name);
+      return !duplicate;
+    });
+  };
+
+  const effectiveRangeFilter = userRangeId || (type === 'Expenditure' ? '' : rangeId);
+
+  const filteredSectors = useMemo(() => (sectors || []).filter((s: any) => {
+    if (!schemeId && type !== 'BudgetView') return false;
+    if (schemeId && s.schemeId !== schemeId) return false;
+    if ((type === 'Expenditure' || type === 'Surrender') && !(allocations || []).some((a: any) => 
+      a.sectorId === s.id && 
+      (!effectiveRangeFilter || a.rangeId === effectiveRangeFilter) &&
+      (!schemeId || a.schemeId === schemeId)
+    )) return false;
+    return true;
+  }), [sectors, schemeId, type, allocations, effectiveRangeFilter]);
+
+  const filteredActivities = useMemo(() => (activities || []).filter((a: any) => {
+    if (!schemeId && type !== 'BudgetView') return false;
+    if (schemeId && a.schemeId && a.schemeId !== schemeId) return false;
+    if (sectorId && a.sectorId !== sectorId) return false;
+    // If activity has no schemeId but has sectorId, check sector's scheme
+    if (!a.schemeId && a.sectorId) {
+      const sec = (sectors || []).find((s: any) => s.id === a.sectorId);
+      if (sec && schemeId && sec.schemeId !== schemeId) return false;
+    }
+    if ((type === 'Expenditure' || type === 'Surrender') && !(allocations || []).some((al: any) => 
+      al.activityId === a.id && 
+      (!effectiveRangeFilter || al.rangeId === effectiveRangeFilter) &&
+      (!schemeId || al.schemeId === schemeId) &&
+      (!sectorId || al.sectorId === sectorId)
+    )) return false;
+    return true;
+  }), [activities, schemeId, sectorId, type, allocations, effectiveRangeFilter, sectors]);
+
+  const filteredSubActivities = useMemo(() => (subActivities || []).filter((sa: any) => {
+    if (!activityId && type !== 'BudgetView') return false;
+    if (activityId && sa.activityId !== activityId) return false;
+    if ((type === 'Expenditure' || type === 'Surrender') && !(allocations || []).some((al: any) => 
+      al.subActivityId === sa.id && 
+      (!effectiveRangeFilter || al.rangeId === effectiveRangeFilter) &&
+      (!schemeId || al.schemeId === schemeId) &&
+      (!sectorId || al.sectorId === sectorId) &&
+      (!activityId || al.activityId === activityId)
+    )) return false;
+    return true;
+  }), [subActivities, activityId, type, allocations, effectiveRangeFilter, schemeId, sectorId]);
+
+  const filteredSoes = useMemo(() => (soes || []).filter((s: any) => {
+    if (!schemeId) return false;
+    // For Surrender, we want to see SOEs that have been allocated to the selected range
+    if (type === 'Surrender') {
+      const hasAlloc = (allocations || []).some((al: any) => 
+        al.rangeId === rangeId && 
+        al.schemeId === schemeId &&
+        (sectorId ? al.sectorId === sectorId : true) &&
+        (activityId ? al.activityId === activityId : true) &&
+        (subActivityId ? al.subActivityId === subActivityId : true) &&
+        al.fundedSOEs?.some((f: any) => f.soeId === s.id)
+      );
+      if (!hasAlloc) return false;
+    }
+
+    // Path matching for hierarchy
+    if (s.schemeId && s.schemeId !== schemeId) return false;
+    if (sectorId && s.sectorId && s.sectorId !== sectorId) return false;
+    if (activityId && s.activityId && s.activityId !== activityId) return false;
+    if (subActivityId && s.subActivityId && s.subActivityId !== subActivityId) return false;
+    
+    return true;
+  }), [soes, schemeId, sectorId, activityId, subActivityId, type, allocations, rangeId]);
+
+  const hierarchyAllocations = useMemo(() => (allocations || []).filter((a: any) => {
+    if (type === 'Expenditure') {
+      if (userRangeId && a.rangeId !== userRangeId) return false;
+    } else {
+      if (rangeId && a.rangeId !== rangeId) return false;
+      if (!rangeId && userRangeId && userRole !== 'admin' && a.rangeId !== userRangeId) return false;
+    }
+    if (schemeId && a.schemeId !== schemeId) return false;
+    if (sectorId && a.sectorId !== sectorId) return false;
+    if (activityId && a.activityId !== activityId) return false;
+    if (subActivityId && a.subActivityId !== subActivityId) return false;
+    return true;
+  }), [allocations, rangeId, userRangeId, userRole, schemeId, sectorId, activityId, subActivityId, type]);
+
+  const filteredAllocations = useMemo(() => hierarchyAllocations.filter((a: any) => {
+    // Add SOE filtering for Expenditure
+    if (type === 'Expenditure' && soeId) {
+      const selectedSoe = (soes || []).find((s: any) => s.id === soeId);
+      const selectedName = selectedSoe?.name;
+      if (!a.fundedSOEs?.some((f: any) => {
+        const s = (soes || []).find((soe: any) => soe.id === f.soeId);
+        return (s?.name || 'Unnamed SOE') === selectedName;
+      })) return false;
+    }
+    
+    return true;
+  }), [hierarchyAllocations, soeId, type, soes]);
+
+  // Auto-selection logic removed to keep form empty as requested
+  useEffect(() => {
+    // Removed auto-selection for sectorId
+  }, [filteredSectors, sectorId, schemeId, editingItem]);
+
+  useEffect(() => {
+    // Removed auto-selection for activityId
+  }, [filteredActivities, activityId, sectorId, editingItem]);
+
+  useEffect(() => {
+    // Removed auto-selection for subActivityId
+  }, [filteredSubActivities, subActivityId, activityId, editingItem]);
+
+  // Auto-selection for allocationId (Expenditure only)
+  useEffect(() => {
+    if (type === 'Expenditure' && filteredAllocations.length > 0 && !editingItem) {
+      if (userRangeId) {
+        if (!allocationId || !filteredAllocations.some((a: any) => a.id === allocationId)) {
+          setAllocationId(filteredAllocations[0].id);
+          setRangeId(filteredAllocations[0].rangeId);
+        }
+      } else {
+        if (allocationId && !filteredAllocations.some((a: any) => a.id === allocationId)) {
+          setAllocationId('');
+          setRangeId('');
+        }
+      }
+    }
+  }, [filteredAllocations, allocationId, type, editingItem, userRangeId]);
+
+  // Auto-selection for soeId (Expenditure only)
+  useEffect(() => {
+    if (type === 'Expenditure' && allocationId && !soeId && !editingItem) {
+      const alloc = allocations.find((a: any) => a.id === allocationId);
+      if (alloc && alloc.fundedSOEs && alloc.fundedSOEs.length === 1) {
+        setSoeId(alloc.fundedSOEs[0].soeId);
+      }
+    }
+  }, [allocationId, soeId, type, allocations, editingItem]);
+
+  return (
+    <>
+      <div className="flex gap-2">
+        <select 
+          className="w-full p-1.5 border rounded text-sm" 
+          value={schemeId} 
+          onChange={(e) => { 
+            setSchemeId(e.target.value); 
+            setSectorId(''); 
+            setActivityId(''); 
+            setSubActivityId(''); 
+            setSoeId(''); 
+            setAllocationId(''); 
+            if (!userRangeId) setRangeId(''); 
+          }}
+          required={type !== 'Activity' && type !== 'BudgetView'}
+        >
+          <option value="">{type === 'BudgetView' ? 'View All Schemes' : 'Select Scheme'}</option>
+          {filteredSchemes.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button type="button" onClick={() => document.getElementById('tab-Schemes')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Scheme">+</button>
+      </div>
+
+      {(showSector !== false && (showSector === true || type === 'Activity' || type === 'Sub-Activity' || type === 'SOE Name' || type === 'Allocation' || type === 'Expenditure' || type === 'Surrender')) && (
+        <div className="flex gap-2">
+          <select 
+            className="w-full p-1.5 border rounded text-sm" 
+            value={sectorId} 
+            onChange={(e) => { setSectorId(e.target.value); setActivityId(''); setSubActivityId(''); setSoeId(''); setAllocationId(''); }}
+          >
+            <option value="">{type === 'BudgetView' ? 'View All Sectors' : 'Select Sector (Optional)'}</option>
+            {filteredSectors.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button type="button" onClick={() => document.getElementById('tab-Sectors')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Sector">+</button>
+        </div>
+      )}
+
+      {(showActivity !== false && (showActivity === true || type === 'Sub-Activity' || type === 'SOE Name' || type === 'Allocation' || type === 'Expenditure' || type === 'Surrender')) && (
+        <div className="flex gap-2">
+          <select 
+            className="w-full p-1.5 border rounded text-sm" 
+            value={activityId} 
+            onChange={(e) => { setActivityId(e.target.value); setSubActivityId(''); setSoeId(''); setAllocationId(''); }}
+            required={type !== 'SOE Name' && type !== 'Allocation' && type !== 'Surrender' && type !== undefined}
+          >
+            <option value="">Select Activity {(type === 'SOE Name' || type === 'Allocation' || type === 'Surrender' || type === undefined) ? '(Optional)' : ''}</option>
+            {filteredActivities.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <button type="button" onClick={() => document.getElementById('tab-Activities')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Activity">+</button>
+        </div>
+      )}
+
+      {(showSubActivity !== false && (showSubActivity === true || type === 'SOE Name' || type === 'Allocation' || type === 'Expenditure' || type === 'Surrender')) && (
+        <div className="flex gap-2">
+          <select 
+            className="w-full p-1.5 border rounded text-sm" 
+            value={subActivityId} 
+            onChange={(e) => { setSubActivityId(e.target.value); setSoeId(''); setAllocationId(''); }}
+          >
+            <option value="">{type === 'BudgetView' ? 'View All Sub-Activities' : 'Select Sub-Activity (Optional)'}</option>
+            {filteredSubActivities.map((sa: any) => <option key={sa.id} value={sa.id}>{sa.name}</option>)}
+          </select>
+          <button type="button" onClick={() => document.getElementById('tab-Sub-Activities')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Sub-Activity">+</button>
+        </div>
+      )}
+      
+      {/* Hidden inputs to ensure correct fields are submitted */}
+      <input type="hidden" name="schemeId" value={schemeId} />
+      <input type="hidden" name="sectorId" value={sectorId} />
+      <input type="hidden" name="activityId" value={activityId} />
+      <input type="hidden" name="subActivityId" value={subActivityId} />
+      <input type="hidden" name="soeId" value={soeId} />
+      <input type="hidden" name="allocationId" value={allocationId} />
+      {!userRangeId && (type !== 'Surrender' && type !== 'Allocation' && type !== 'Expenditure') && <input type="hidden" name="rangeId" value={rangeId} />}
+
+      {(showSoe !== false && (showSoe === true || type === 'Surrender')) && (
+        <div className="flex gap-2">
+          <select 
+            className="w-full p-1.5 border rounded text-sm" 
+            value={soeId} 
+            onChange={(e) => setSoeId(e.target.value)}
+            required={type === 'Surrender'}
+          >
+            <option value="">{type === 'BudgetView' ? 'View All SOE Heads' : 'Select SOE Head'}</option>
+            {filteredSoes.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {(showRange !== false && (showRange === true || type === 'Surrender')) && (
+        <div className="flex gap-2">
+          {userRangeId ? (
+            <div className="w-full p-1.5 bg-gray-50 border rounded text-sm font-medium text-gray-700">
+              Range: {ranges.find((r: any) => r.id === userRangeId)?.name || 'Your Range'}
+              <input type="hidden" name="rangeId" value={userRangeId} />
+            </div>
+          ) : (
+            <select 
+              className="w-full p-1.5 border rounded text-sm" 
+              name="rangeId"
+              value={rangeId} 
+              onChange={(e) => { 
+                const val = e.target.value;
+                const proceed = () => {
+                  setRangeId(val);
+                  // Force immediate notification for range changes to avoid validation lag
+                  if (onSelectionChange) {
+                    onSelectionChange({ schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId: val, allocationId });
+                  }
+                };
+                if (editingItem?.type === 'Surrender' && val && val !== editingItem.item.rangeId && userRole === 'admin') {
+                  showConfirm("Are you sure you want to change the range for this surrender? This will shift the entry to the selected range.", proceed);
+                } else {
+                  proceed();
+                }
+              }}
+              required={type === 'Surrender'}
+            >
+              <option value="">{type === 'BudgetView' ? 'View All Ranges' : 'Select Range'}</option>
+              {ranges
+                .map((r: any) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}
+                  </option>
+                ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {type === 'Allocation' && (
+        <div className="flex flex-col gap-2">
+          <select 
+            name="fundingSoeName" 
+            className="w-full p-1.5 border rounded bg-blue-50 border-blue-200 text-blue-800 font-medium text-sm"
+            required
+            value={fundingSoeName}
+            onChange={(e) => setFundingSoeName(e.target.value)}
+          >
+            <option value="">Select SOE to Fund From</option>
+            {(() => {
+              const branchSoes = soes.filter((s: any) => {
+                if (s.schemeId !== schemeId) return false;
+                if (subActivityId && s.subActivityId && s.subActivityId !== subActivityId) return false;
+                if (activityId && s.activityId && s.activityId !== activityId) return false;
+                if (sectorId && s.sectorId && s.sectorId !== sectorId) return false;
+                return true;
+              });
+              
+              return ALLOWED_SOES.map(name => {
+                const matchedSoes = branchSoes.filter(s => s.name === name);
+                const received = matchedSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0);
+                const allocated = allocations.reduce((sum, a) => {
+                  const currentAllocId = editingItem?.type === 'Allocation' ? editingItem.item.id : null;
+                  if (a.id === currentAllocId) return sum;
+                  const fundedFromThese = a.fundedSOEs?.filter((f: any) => matchedSoes.some(s => s.id === f.soeId)) || [];
+                  return sum + fundedFromThese.reduce((s: number, f: any) => s + f.amount, 0);
+                }, 0);
+                const surrendered = (surrenders || []).filter(s => matchedSoes.some(ms => ms.id === s.soeId)).reduce((sum, s) => sum + s.amount, 0);
+                const remaining = received - (allocated - surrendered);
+                return { name, remaining };
+              }).filter(b => b.remaining > 0).map(b => (
+                <option key={b.name} value={b.name}>{b.name} (Available: ₹{b.remaining.toLocaleString()})</option>
+              ));
+            })()}
+          </select>
+
+          <div className="flex gap-2">
+            {userRangeId ? (
+              <div className="w-full p-1.5 bg-gray-50 border rounded text-sm font-medium text-gray-700">
+                Range: {ranges.find((r: any) => r.id === userRangeId)?.name || 'Your Range'}
+                <input type="hidden" name="rangeId" value={userRangeId} />
+              </div>
+            ) : (
+              <select 
+                className="w-full p-1.5 border rounded text-sm" 
+                name="rangeId"
+                value={rangeId} 
+                onChange={(e) => { 
+                  const val = e.target.value;
+                  const proceed = () => {
+                    setRangeId(val); 
+                    // Force immediate notification for range changes to avoid validation lag
+                    if (onSelectionChange) {
+                      onSelectionChange({ schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId: val, allocationId });
+                    }
+                  };
+                  if (editingItem?.type === 'Allocation' && val && val !== editingItem.item.rangeId && userRole === 'admin') {
+                    showConfirm("Are you sure you want to change the range for this allocation? This will shift the entire budget to the selected range.", proceed);
+                  } else {
+                    proceed();
+                  }
+                }}
+                required
+              >
+                <option value="">Select Range</option>
+                {ranges
+                  .map((r: any) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}
+                    </option>
+                  ))}
+              </select>
+            )}
+          </div>
+        </div>
+      )}
+
+      {type === 'Expenditure' && (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <select 
+              className="w-full p-1.5 border rounded text-sm" 
+              value={soeId} 
+              onChange={(e) => { setSoeId(e.target.value); setAllocationId(''); }}
+              required
+            >
+              <option value="">Select Funded SOE</option>
+              {(() => {
+                // Get unique SOE names available in any allocation matching the hierarchy
+                const uniqueSoeNames = new Set();
+                const availableSoes: any[] = [];
+                
+                hierarchyAllocations.forEach(a => {
+                  a.fundedSOEs?.forEach((f: any) => {
+                    const s = soes.find((soe: any) => soe.id === f.soeId);
+                    if (s && !uniqueSoeNames.has(s.name)) {
+                      uniqueSoeNames.add(s.name);
+                      availableSoes.push(s);
+                    }
+                  });
+                });
+
+                if (availableSoes.length > 0) {
+                  return availableSoes.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ));
+                }
+                
+                return filteredSoes.map((s: any) => <option key={s.id} value={s.id}>{s.name || 'Unnamed SOE'}</option>);
+              })()}
+            </select>
+            <button type="button" onClick={() => document.getElementById('tab-SOE Heads')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Manage SOE Heads">+</button>
+          </div>
+
+          {soeId && (
+            (!userRangeId || filteredAllocations.length > 1) ? (
+              <div className="flex gap-2">
+                <select 
+                  className="w-full p-1.5 border rounded text-sm" 
+                  value={allocationId} 
+                  onChange={(e) => { 
+                    const val = e.target.value;
+                    const proceed = () => {
+                      setAllocationId(val); 
+                      if (val) {
+                        const alloc = allocations.find((a: any) => a.id === val);
+                        if (alloc) setRangeId(alloc.rangeId);
+                      } else {
+                        if (!userRangeId) setRangeId('');
+                      }
+                    };
+                    if (editingItem?.type === 'Expenditure' && val && userRole === 'admin') {
+                      const newAlloc = allocations.find((a: any) => a.id === val);
+                      const originalRangeId = editingItem.item.rangeId;
+                      if (newAlloc && newAlloc.rangeId !== originalRangeId) {
+                        showConfirm("Are you sure you want to change the range for this expenditure? This will shift the entry to the selected range.", proceed);
+                      } else {
+                        proceed();
+                      }
+                    } else {
+                      proceed();
+                    }
+                  }}
+                  required
+                >
+                  <option value="">Select Allocation (Range)</option>
+                  {filteredAllocations.map((a: any) => {
+                    const r = ranges.find((r: any) => r.id === a.rangeId);
+                    const rangeDisplayName = r?.name === 'Rajgarh Forest Division' ? 'Division' : (r?.name || 'Unknown Range');
+                    const selectedSoe = soes.find(s => s.id === soeId);
+                    const selectedName = selectedSoe?.name;
+                    const funded = a.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === selectedName);
+                    const spent = expenses
+                      .filter((e: any) => e.allocationId === a.id && soes.find(s => s.id === e.soeId)?.name === selectedName && e.status !== 'rejected' && (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true))
+                      .reduce((sum: number, e: any) => sum + e.amount, 0);
+                    const available = (funded?.amount || 0) - spent;
+
+                    return <option key={a.id} value={a.id}>{rangeDisplayName} (Available: ₹{available.toLocaleString()})</option>
+                  })}
+                </select>
+                <button type="button" onClick={() => document.getElementById('tab-Allocations')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Allocation">+</button>
+              </div>
+            ) : (
+              <>
+                {allocationId && (
+                  <div className="text-[10px] text-emerald-600 font-bold bg-emerald-50 p-1.5 rounded border border-emerald-100 flex items-center justify-between">
+                    <span>Range: {ranges.find((r: any) => r.id === userRangeId)?.name}</span>
+                    <span>Limit: ₹{allocations.find((a: any) => a.id === allocationId)?.amount.toLocaleString()}</span>
+                  </div>
+                )}
+              </>
+            )
+          )}
+
+          {soeId && allocationId && (
+            <div className="text-xs text-blue-600 px-1 font-medium bg-blue-50 p-1.5 rounded border border-blue-100">
+              {(() => {
+                const alloc = allocations.find((a: any) => a.id === allocationId);
+                const selectedSoe = soes.find(s => s.id === soeId);
+                const selectedName = selectedSoe?.name;
+                const fundedSoe = alloc?.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === selectedName);
+                if (fundedSoe) {
+                  const spent = expenses
+                    .filter((e: any) => e.allocationId === allocationId && soes.find(s => s.id === e.soeId)?.name === selectedName && e.status !== 'rejected' && (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true))
+                    .reduce((sum: number, e: any) => sum + e.amount, 0);
+                  return `SOE Funding: ₹${fundedSoe.amount.toLocaleString()} | Spent: ₹${spent.toLocaleString()} | Remaining: ₹${(fundedSoe.amount - spent).toLocaleString()}`;
+                }
+                return 'Select an SOE to see balance';
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {children}
+    </>
+  );
+}
+function ActivityFormContent({ schemes, sectors, editingItem }: { schemes: any[], sectors: any[], editingItem: any }) {
+  const [selectedSchemeId, setSelectedSchemeId] = useState(editingItem?.item?.schemeId || (editingItem?.item?.sectorId ? sectors.find((s: any) => s.id === editingItem.item.sectorId)?.schemeId : ''));
+  
+  return (
+    <>
+      <div className="flex gap-2">
+        <select 
+          name="schemeId" 
+          required 
+          value={selectedSchemeId}
+          onChange={(e) => setSelectedSchemeId(e.target.value)}
+          className="w-full p-1.5 border rounded text-sm"
+        >
+          <option value="">Select Scheme</option>
+          {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button type="button" onClick={() => document.getElementById('tab-Schemes')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Scheme">+</button>
+      </div>
+      
+      <div className="flex gap-2">
+        <select name="sectorId" defaultValue={editingItem?.item?.sectorId || ''} className="w-full p-1.5 border rounded text-sm">
+          <option value="">Select Sector (Optional)</option>
+          {sectors.filter(s => s.schemeId === selectedSchemeId).map(sec => (
+            <option key={sec.id} value={sec.id}>{sec.name}</option>
+          ))}
+        </select>
+        <button type="button" onClick={() => document.getElementById('tab-Sectors')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Sector">+</button>
+      </div>
+      
+      <input name="name" required defaultValue={editingItem?.type === 'Activity' ? editingItem.item.name : ''} placeholder="Activity Name" className="w-full p-1.5 border rounded text-sm" />
+    </>
+  );
+}
+
+function Pagination({ 
+  totalEntries, 
+  totalItems,
+  currentPage, 
+  itemsPerPage, 
+  onPageChange,
+  onItemsPerPageChange
+}: { 
+  totalEntries?: number, 
+  totalItems?: number,
+  currentPage: number, 
+  itemsPerPage: number | 'All', 
+  onPageChange: (page: number) => void,
+  onItemsPerPageChange?: (val: number | 'All') => void
+}) {
+  const actualTotalEntries = totalEntries !== undefined ? totalEntries : (totalItems !== undefined ? totalItems : 0);
+  const isAll = itemsPerPage === 'All' || itemsPerPage === -1;
+  const numericItemsPerPage = isAll ? actualTotalEntries : Number(itemsPerPage);
+  const totalPages = isAll ? 1 : Math.ceil(actualTotalEntries / numericItemsPerPage);
+  
+  if (totalPages <= 1 && actualTotalEntries <= numericItemsPerPage && !isAll && !onItemsPerPageChange) return null;
+
+  const startEntry = isAll ? 1 : (currentPage - 1) * numericItemsPerPage + 1;
+  const endEntry = isAll ? actualTotalEntries : Math.min(currentPage * numericItemsPerPage, actualTotalEntries);
+
+  const pages = [];
+  const maxVisiblePages = 5;
+  
+  let startPage = Math.max(1, currentPage - 2);
+  let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+  
+  if (endPage - startPage < maxVisiblePages - 1) {
+    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+  }
+
+  for (let i = startPage; i <= endPage; i++) {
+    pages.push(i);
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t">
+      <div className="flex items-center gap-4">
+        <p className="text-sm text-gray-600">
+          Showing <span className="font-medium">{startEntry}</span> to <span className="font-medium">{endEntry}</span> of <span className="font-medium">{actualTotalEntries}</span> entries
+        </p>
+        {onItemsPerPageChange && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Show:</span>
+            <select
+              value={isAll ? 'All' : itemsPerPage}
+              onChange={(e) => {
+                const val = e.target.value;
+                onItemsPerPageChange(val === 'All' ? 'All' : Number(val));
+              }}
+              className="text-xs border rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value="All">All</option>
+            </select>
+          </div>
+        )}
+      </div>
+      {!isAll && totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button 
+            onClick={() => onPageChange(1)} 
+            disabled={currentPage === 1}
+            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="First Page"
+          >
+            <ChevronsLeft className="w-4 h-4" />
+          </button>
+          <button 
+            onClick={() => onPageChange(currentPage - 1)} 
+            disabled={currentPage === 1}
+            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Previous Page"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          
+          {startPage > 1 && <span className="px-2 text-gray-400">...</span>}
+          
+          {pages.map(page => (
+            <button
+              key={page}
+              onClick={() => onPageChange(page)}
+              className={`min-w-[32px] h-8 flex items-center justify-center rounded border text-sm font-medium transition-colors ${
+                currentPage === page 
+                  ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-sm' 
+                  : 'hover:bg-gray-50 text-gray-600 border-gray-200'
+              }`}
+            >
+              {page}
+            </button>
+          ))}
+          
+          {endPage < totalPages && <span className="px-2 text-gray-400">...</span>}
+          
+          <button 
+            onClick={() => onPageChange(currentPage + 1)} 
+            disabled={currentPage === totalPages}
+            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Next Page"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <button 
+            onClick={() => onPageChange(totalPages)} 
+            disabled={currentPage === totalPages}
+            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Last Page"
+          >
+            <ChevronsRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ title, amount, icon, color, subtitle }: { title: string, amount: number, icon: React.ReactNode, color: string, subtitle?: string }) {
+  return (
+    <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 min-w-0">
+      <div className={`p-2.5 rounded-full bg-gray-50 ${color} shrink-0`}>
+        {React.cloneElement(icon as React.ReactElement<any>, { className: 'w-4 h-4' })}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight truncate" title={title}>{title}</p>
+        <p className={`text-base font-bold ${color} truncate`}>₹{amount.toLocaleString()}</p>
+        {subtitle && <p className="text-[9px] text-gray-400 font-medium truncate">{subtitle}</p>}
+      </div>
+    </div>
+  );
+}

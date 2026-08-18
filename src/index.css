@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply antialiased text-gray-800 bg-gray-50;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-sm active:scale-95;
+  }
+  
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden;
+  }
+}
+
+/* Custom scrollbar for horizontal tables and vertical forms */
+.overflow-x-auto, .custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #10b981 #f3f4f6;
+  -webkit-overflow-scrolling: touch;
+}
+
+.overflow-x-auto::-webkit-scrollbar, .custom-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track, .custom-scrollbar::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #10b981;
+  border-radius: 20px;
+}
+
+/* Mobile specific fixes */
+@media (max-width: 640px) {
+  .xs-inline {
+    display: inline;
+  }
+  
+  .xs-hidden {
+    display: none;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Cross-browser Print Styles */
+@media print {
+  @page {
+    size: auto;
+    margin: 8mm 10mm 10mm 10mm;
+  }
+  
+  html, body {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide everything by default during print */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Explicitly hide any no-print element */
+  .no-print, .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Make printable area and its children visible */
+  .print-area, .print-area * {
+    visibility: visible !important;
+  }
+
+  /* Position print-area cleanly with static flow so pages paginate naturally without extra blank pages */
+  .print-area {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Reset fixed overlays so modal containers don't restrict page flow or block interaction */
+  .fixed, [class*="fixed"], [class*="overflow-"] {
+    position: static !important;
+    display: block !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Repeat table headers on every printed page */
+  thead, thead tr {
+    display: table-header-group !important;
+  }
+
+  tfoot, tfoot tr {
+    display: table-footer-group !important;
+  }
+
+  /* Table styling for print */
+  .print-area table, table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  .print-area th, .print-area td, th, td {
+    border: 1px solid #64748b !important;
+    color: #000000 !important;
+  }
+
+  .print-area tr, tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
