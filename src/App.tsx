@@ -6596,10 +6596,17 @@ export default function App() {
           ? `Rs. ${totDed.toLocaleString('en-IN')}${iTax > 0 ? `\n(IT: Rs. ${iTax.toLocaleString('en-IN')})` : ''}${gst > 0 ? `\n(GST: Rs. ${gst.toLocaleString('en-IN')})` : ''}`
           : 'Nil (Rs. 0)';
 
+        // Auto lookup for missing Try Code
+        const lookupPayee = payees.find(p => 
+          (e.payeeId && p.id === e.payeeId) || 
+          (p.accountNumber === e.accountNumber && p.name === e.name)
+        );
+        const displayTreasuryCode = e.treasuryCode || lookupPayee?.treasuryCode || '-';
+
         return [
           idx + 1,
           `${e.name || ''}${e.address ? '\n' + e.address : ''}`,
-          e.treasuryCode || '-',
+          displayTreasuryCode,
           `${e.accountNumber || ''}\n${e.ifscCode || ''}`,
           Math.round(Number(e.totalAmount) || 0).toLocaleString('en-IN'),
           subVouchersText,
@@ -6699,6 +6706,13 @@ export default function App() {
           ? `<strong>₹${totDed.toLocaleString('en-IN')}</strong>${iTax > 0 ? `<div style="font-size:9.5px; color:#b91c1c;">(IT: ₹${iTax.toLocaleString('en-IN')})</div>` : ''}${gst > 0 ? `<div style="font-size:9.5px; color:#6b21a8;">(GST: ₹${gst.toLocaleString('en-IN')})</div>` : ''}`
           : `<span style="color:#666; font-size:10px;">Nil (₹0)</span>`;
 
+        // Automatically look up Try Code from directory if missing in existing memo
+        const lookupPayee = payees.find(p => 
+          (e.payeeId && p.id === e.payeeId) || 
+          (p.accountNumber === e.accountNumber && p.name === e.name)
+        );
+        const displayTreasuryCode = e.treasuryCode || lookupPayee?.treasuryCode || '-';
+
         return `
           <tr>
             <td style="text-align:center; padding:5px 3px; border:1px solid #444; font-size:11px;">${idx + 1}</td>
@@ -6706,8 +6720,11 @@ export default function App() {
               <strong>${e.name || ''}</strong>
               ${e.address ? `<div style="font-size:10px; color:#555; margin-top:2px;">${e.address}</div>` : ''}
             </td>
-            <td style="padding:5px; border:1px solid #444; font-family:monospace; font-size:10.5px; font-weight:600;">${e.accountNumber || ''}</td>
-            <td style="padding:5px; border:1px solid #444; font-family:monospace; font-size:10.5px;">${e.ifscCode || ''}</td>
+            <td style="padding:5px; border:1px solid #444; font-family:monospace; font-size:10.5px; font-weight:700; color:#065f46; text-align:center;">${displayTreasuryCode}</td>
+            <td style="padding:5px; border:1px solid #444; font-family:monospace; font-size:10.5px;">
+              <div style="font-weight:bold;">${e.accountNumber || ''}</div>
+              <div style="font-size:9px; color:#666;">${e.ifscCode || ''}</div>
+            </td>
             <td style="text-align:right; padding:5px; border:1px solid #444; font-weight:bold; font-size:11px;">₹${Math.round(Number(e.totalAmount) || 0).toLocaleString('en-IN')}</td>
             <td style="padding:5px; border:1px solid #444; font-size:10.5px;">${subVouchersHtml}</td>
             <td style="text-align:right; padding:5px; border:1px solid #444; font-size:10.5px;">${dedHtml}</td>
@@ -6878,8 +6895,8 @@ export default function App() {
               <tr>
                 <th style="width: 24px;">Sr.</th>
                 <th>Name & Address</th>
-                <th style="width: 105px;">Account No.</th>
-                <th style="width: 80px;">IFSC Code</th>
+                <th style="width: 70px;">Try Code</th>
+                <th style="width: 120px;">Bank Account Details</th>
                 <th style="width: 85px;">Total Amount</th>
                 <th>Sub Voucher Details</th>
                 <th style="width: 90px;">Deductions<br/>(I.Tax / GST)</th>
@@ -13678,9 +13695,20 @@ export default function App() {
                                       <div className="font-bold text-gray-900">{entry.name}</div>
                                       {entry.address && <div className="text-[10px] text-gray-500">{entry.address}</div>}
                                     </td>
-                                    <td className="p-2 border-r font-mono text-[10px] font-bold text-emerald-800">
-                                      {entry.treasuryCode || '-'}
-                                    </td>
+                                    {(() => {
+                                      // Auto lookup for missing Try Code
+                                      const lookupPayee = payees.find(p => 
+                                        (entry.payeeId && p.id === entry.payeeId) || 
+                                        (p.accountNumber === entry.accountNumber && p.name === entry.name)
+                                      );
+                                      const displayTreasuryCode = entry.treasuryCode || lookupPayee?.treasuryCode || '-';
+                                      
+                                      return (
+                                        <td className="p-2 border-r font-mono text-[10px] font-bold text-emerald-800">
+                                          {displayTreasuryCode}
+                                        </td>
+                                      );
+                                    })()}
                                     <td className="p-2 border-r font-mono text-[10px]">
                                       <div className="font-bold text-gray-900">{entry.accountNumber || '-'}</div>
                                       <div className="text-gray-500 text-[9px]">{entry.ifscCode || '-'}</div>
@@ -14092,8 +14120,8 @@ export default function App() {
                         <tr className="bg-gray-100 text-gray-900 font-bold border-b border-gray-900 text-center">
                           <th className="p-2 border-r border-gray-900 w-8">Sr. No.</th>
                           <th className="p-2 border-r border-gray-900 min-w-[130px]">Name & Address</th>
-                          <th className="p-2 border-r border-gray-900">Account No.</th>
-                          <th className="p-2 border-r border-gray-900">IFSC Code</th>
+                          <th className="p-2 border-r border-gray-900">Try Code</th>
+                          <th className="p-2 border-r border-gray-900">Bank Account Details</th>
                           <th className="p-2 border-r border-gray-900 text-right">Total Amount</th>
                           <th className="p-2 border-r border-gray-900 min-w-[150px]">Sub Voucher Details</th>
                           <th className="p-2 border-r border-gray-900 text-right">Deductions (I.Tax + GST)</th>
@@ -14108,6 +14136,13 @@ export default function App() {
                             const gst = Math.round(Number(entry.gstAmount) || 0);
                             const totDed = iTax + gst;
 
+                            // Automatically look up Try Code from directory if missing in existing memo
+                            const lookupPayee = payees.find(p => 
+                              (entry.payeeId && p.id === entry.payeeId) || 
+                              (p.accountNumber === entry.accountNumber && p.name === entry.name)
+                            );
+                            const displayTreasuryCode = entry.treasuryCode || lookupPayee?.treasuryCode || '-';
+
                             return (
                               <tr key={idx} className="border-b border-gray-400">
                                 <td className="p-2 border-r border-gray-900 text-center font-medium">{idx + 1}</td>
@@ -14115,11 +14150,12 @@ export default function App() {
                                   <div>{entry.name}</div>
                                   {entry.address && <div className="text-[10px] text-gray-600 font-normal">{entry.address}</div>}
                                 </td>
-                                <td className="p-2 border-r border-gray-900 font-mono text-[11px] font-bold">
-                                  {entry.accountNumber || '-'}
+                                <td className="p-2 border-r border-gray-900 font-mono text-[11px] font-bold text-emerald-800 text-center">
+                                  {displayTreasuryCode}
                                 </td>
                                 <td className="p-2 border-r border-gray-900 font-mono text-[11px]">
-                                  {entry.ifscCode || '-'}
+                                  <div className="font-bold text-gray-900">{entry.accountNumber || '-'}</div>
+                                  <div className="text-[9px] text-gray-500">{entry.ifscCode || '-'}</div>
                                 </td>
                                 <td className="p-2 border-r border-gray-900 text-right font-bold">
                                   ₹{Math.round(Number(entry.totalAmount) || 0).toLocaleString('en-IN')}
