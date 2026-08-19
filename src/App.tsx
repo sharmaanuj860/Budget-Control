@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2 } from 'lucide-react';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
@@ -105,6 +105,12 @@ type Notification = {
   uploadedBy: string;
   description?: string;
   targetRanges?: string[];
+  category?: 'general' | 'budget_allocation' | 'system';
+  amount?: number;
+  schemeName?: string;
+  sectorName?: string;
+  rangeName?: string;
+  soeName?: string;
 };
 
 type Bill = {
@@ -174,6 +180,8 @@ type MemoForFund = {
   schemeName?: string;
   sectorId?: string;
   sectorName?: string;
+  soeId?: string;
+  soeName?: string;
   rangeId?: string;
   rangeName?: string;
   toAuthority?: string;
@@ -843,6 +851,7 @@ export default function App() {
   const [memoMonthYearInput, setMemoMonthYearInput] = useState<string>('08/2026');
   const [memoSchemeIdInput, setMemoSchemeIdInput] = useState<string>('');
   const [memoSectorIdInput, setMemoSectorIdInput] = useState<string>('');
+  const [memoSoeIdInput, setMemoSoeIdInput] = useState<string>('');
   const [memoFromInput, setMemoFromInput] = useState<string>('RFO Sarahan');
   const [memoToInput, setMemoToInput] = useState<string>('DCF Rajgarh');
 
@@ -2637,8 +2646,140 @@ export default function App() {
       remainingBalance: soeDashboardSummary.reduce((sum, item) => sum + item.remainingToSpend, 0)
     };
 
+    // Filter notifications relevant to current user
+    const relevantNotifs = notifications.filter(n => {
+      if (userRole !== 'admin' && userRole !== 'deo' && userRole !== 'approver' && userRole !== 'DA') {
+        if (n.targetRanges && n.targetRanges.length > 0 && !n.targetRanges.includes('All')) {
+          const userRangeObj = ranges.find(r => r.id === userRangeId);
+          const matches = n.targetRanges.includes(userRole || '') ||
+                          (userRangeId && n.targetRanges.includes(userRangeId)) ||
+                          (userRangeObj && n.targetRanges.includes(userRangeObj.name));
+          if (!matches) return false;
+        }
+      }
+      return true;
+    }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    // Get latest allocations for quick notification preview on dashboard
+    const recentAllocations = [...baseAllocations]
+      .sort((a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0))
+      .slice(0, 4)
+      .map(alloc => {
+        const r = ranges.find(rg => rg.id === alloc.rangeId);
+        const sch = currentSchemes.find(s => s.id === alloc.schemeId);
+        const sec = currentSectors.find(s => s.id === alloc.sectorId);
+        const soeNames = alloc.fundedSOEs?.map(f => {
+          const soeObj = soes.find(s => s.id === f.soeId);
+          return soeObj ? `${soeObj.name} (₹${(Number(f.amount) || 0).toLocaleString('en-IN')})` : '';
+        }).filter(Boolean).join(', ');
+        return {
+          id: alloc.id,
+          rangeName: r?.name || 'N/A',
+          schemeName: sch?.name || 'N/A',
+          sectorName: sec?.name || 'General',
+          amount: alloc.amount,
+          soeNames: soeNames || 'Direct Head',
+          date: alloc.createdAt ? new Date(alloc.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Recently',
+          status: alloc.status || 'Funded'
+        };
+      });
+
     return (
       <div className="space-y-6">
+        {/* Recent Updates & Budget Allocation Notifications Alert Bar */}
+        {(relevantNotifs.length > 0 || recentAllocations.length > 0) && (
+          <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50/60 p-4 rounded-xl border border-emerald-200/80 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2.5 border-b border-emerald-200/60">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-emerald-600 text-white rounded-lg shadow-xs animate-bounce">
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-emerald-950 uppercase tracking-wide flex items-center gap-2">
+                    <span>Recent Updates & Budget Allocation Notifications</span>
+                    <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {relevantNotifs.length + recentAllocations.length} New
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-emerald-800 font-medium">
+                    Live notifications for new budget allocations, scheme fund releases, and official updates.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('notifications')}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>View All Notifications</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Notification items carousel / grid */}
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {/* Latest Budget Allocation Cards */}
+              {recentAllocations.slice(0, 2).map((al) => (
+                <div
+                  key={`dash-alloc-${al.id}`}
+                  className="bg-white/95 p-3 rounded-lg border border-emerald-200 shadow-2xs hover:border-emerald-400 transition-all flex flex-col justify-between text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="font-extrabold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                      <DollarSign className="w-3 h-3 text-emerald-700" />
+                      Budget Allotted: ₹{al.amount.toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-[10px] text-gray-500 font-medium">{al.date}</span>
+                  </div>
+                  <div className="space-y-0.5 text-gray-700">
+                    <div className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <MapPin className="w-3 h-3 text-indigo-600 shrink-0" />
+                      <span>{al.rangeName}</span>
+                      <span className="text-gray-400 font-normal">|</span>
+                      <span className="text-emerald-800 font-semibold">{al.schemeName}</span>
+                    </div>
+                    <div className="text-[11px] text-gray-600 truncate">
+                      <span className="font-semibold text-gray-700">Sector:</span> {al.sectorName} 
+                      {al.soeNames && <span className="ml-1 text-emerald-950 font-medium">({al.soeNames})</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Latest Official Notifications */}
+              {relevantNotifs.slice(0, 2).map((nf) => (
+                <div
+                  key={`dash-notif-${nf.id}`}
+                  className="bg-white/95 p-3 rounded-lg border border-indigo-200 shadow-2xs hover:border-indigo-400 transition-all flex flex-col justify-between text-xs cursor-pointer"
+                  onClick={() => setActiveTab('notifications')}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="font-extrabold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                      <FileText className="w-3 h-3 text-indigo-700" />
+                      {nf.category === 'budget_allocation' ? 'Allocation Alert' : 'Notice / Circular'}
+                    </span>
+                    <span className="text-[10px] text-gray-500 font-medium">
+                      {nf.createdAt ? new Date(nf.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Recent'}
+                    </span>
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-gray-900 truncate" title={nf.name}>
+                      {nf.name}
+                    </div>
+                    {nf.description && (
+                      <div className="text-[11px] text-gray-600 truncate" title={nf.description}>
+                        {nf.description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 ${userRangeId ? 'lg:grid-cols-3' : 'xl:grid-cols-6 lg:grid-cols-3'} gap-2 sm:gap-3`}>
           {!userRangeId && <StatCard title="Total Approved Budget" amount={dashboardStats.totalBudget} icon={<Wallet />} color="text-blue-600" />}
           {!userRangeId && <StatCard title="Total Received (Try)" amount={dashboardStats.totalReceivedInTry} icon={<Landmark />} color="text-indigo-500" />}
@@ -5967,6 +6108,9 @@ export default function App() {
       let status = 'Pending SOE Funds';
       
       const rangeName = ranges.find(r => r.id === rangeId)?.name || rangeId;
+      const schemeName = schemes.find(s => s.id === schemeId)?.name || 'General';
+      const sectorName = sectors.find(s => s.id === sectorId)?.name || 'General';
+      const activityName = activities.find(a => a.id === activityId)?.name || 'General';
 
       if (fundingSoeName) {
         const matchedSoes = branchSoes.filter(s => s.name === fundingSoeName);
@@ -6003,6 +6147,27 @@ export default function App() {
           updatedAt: Date.now()
         });
         logAuditAction('Allocation Updated', `Range: ${rangeName}, Amount: ₹${amount.toLocaleString()}, SOE: ${fundingSoeName || 'Multiple'}`);
+        
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            name: `Budget Allocation Updated: ₹${amount.toLocaleString('en-IN')} to ${rangeName}`,
+            description: `Scheme: ${schemeName} | Sector: ${sectorName || 'General'} | Activity: ${activityName} | SOE: ${fundingSoeName || 'Multiple'} | FY: ${targetFyId}`,
+            url: '',
+            type: 'system/allocation',
+            category: 'budget_allocation',
+            amount: amount,
+            rangeName: rangeName,
+            schemeName: schemeName,
+            sectorName: sectorName || '',
+            soeName: fundingSoeName || '',
+            targetRanges: [rangeName, 'All'],
+            createdAt: Date.now(),
+            uploadedBy: user?.uid || 'Admin'
+          });
+        } catch (notifErr) {
+          console.warn('Could not post notification for allocation update:', notifErr);
+        }
+
         setEditingItem(null);
       } else {
         // Always create a new entry for every allocation as requested
@@ -6014,6 +6179,26 @@ export default function App() {
           updatedAt: Date.now()
         });
         logAuditAction('Allocation Created', `Range: ${rangeName}, Amount: ₹${amount.toLocaleString()}, SOE: ${fundingSoeName || 'Multiple'}`);
+        
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            name: `New Budget Allocation: ₹${amount.toLocaleString('en-IN')} to ${rangeName}`,
+            description: `Scheme: ${schemeName} | Sector: ${sectorName || 'General'} | Activity: ${activityName} | SOE: ${fundingSoeName || 'Multiple'} | FY: ${targetFyId}`,
+            url: '',
+            type: 'system/allocation',
+            category: 'budget_allocation',
+            amount: amount,
+            rangeName: rangeName,
+            schemeName: schemeName,
+            sectorName: sectorName || '',
+            soeName: fundingSoeName || '',
+            targetRanges: [rangeName, 'All'],
+            createdAt: Date.now(),
+            uploadedBy: user?.uid || 'Admin'
+          });
+        } catch (notifErr) {
+          console.warn('Could not post notification for allocation create:', notifErr);
+        }
       }
       e.target.reset();
       setAllocationAmount('');
@@ -6559,7 +6744,8 @@ export default function App() {
       doc.text("Subject:", 12, 44);
       const schemeText = memo.schemeName || 'All Schemes';
       const sectorText = memo.sectorName ? ` (${memo.sectorName})` : '';
-      const subjStr = `Memo for Fund for the month of ${memo.monthYear} under scheme ${schemeText}${sectorText}.`;
+      const soeText = memo.soeName ? ` [SOE: ${memo.soeName}]` : '';
+      const subjStr = `Memo for Fund for the month of ${memo.monthYear} under scheme ${schemeText}${sectorText}${soeText}.`;
       doc.text(subjStr, 28, 44, { maxWidth: 255 });
 
       doc.text("Sir,", 12, 50);
@@ -6877,7 +7063,7 @@ export default function App() {
           </div>
 
           <div class="subject-box">
-            Subject: - <u>Memo for Fund for the month of ${memoToPrint.monthYear} under scheme ${memoToPrint.schemeName || 'All Schemes'}${memoToPrint.sectorName ? ` (${memoToPrint.sectorName})` : ''}.</u>
+            Subject: - <u>Memo for Fund for the month of ${memoToPrint.monthYear} under scheme ${memoToPrint.schemeName || 'All Schemes'}${memoToPrint.sectorName ? ` (${memoToPrint.sectorName})` : ''}${memoToPrint.soeName ? ` [SOE: ${memoToPrint.soeName}]` : ''}.</u>
           </div>
 
           <div class="letter-text">
@@ -7548,40 +7734,336 @@ export default function App() {
     return 'RFO Sarahan';
   }, [userRole, userRangeName]);
 
-  const autoMemoNo = useMemo(() => {
-    if (editingMemo) return editingMemo.memoNo;
+  // Helper to extract range key and 3-letter range code from string
+  const getRangeCodeInfo = (fromAuthorityStr: string) => {
+    const fromStr = (fromAuthorityStr || 'Sarahan').toLowerCase();
+    if (fromStr.includes('narag') || fromStr.includes('nrg')) {
+      return { rangeKey: 'Narag', code: 'NRG' };
+    } else if (fromStr.includes('habban') || fromStr.includes('hbn')) {
+      return { rangeKey: 'Habban', code: 'HBN' };
+    } else if (fromStr.includes('rajgarh') || fromStr.includes('rjg')) {
+      return { rangeKey: 'Rajgarh', code: 'RJG' };
+    } else if (fromStr.includes('division') || fromStr.includes('div')) {
+      return { rangeKey: 'Division', code: 'DIV' };
+    } else {
+      return { rangeKey: 'Sarahan', code: 'SRH' };
+    }
+  };
 
-    const rangeKey = userRole && ['Sarahan', 'Narag', 'Habban', 'Rajgarh', 'Division'].find(r => r.toLowerCase() === (userRole || '').toLowerCase())
-      || (userRangeName ? userRangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '') : 'Sarahan');
+  // Helper to compute fresh next sequential memo number starting from 100
+  const getNextSequentialMemoNo = useCallback((fromAuthorityStr: string, fy: string, allMemos: MemoForFund[]) => {
+    const { rangeKey, code } = getRangeCodeInfo(fromAuthorityStr);
+    const currentFY = fy || '2026-27';
 
-    const codeMap: Record<string, string> = {
-      Sarahan: 'SRH',
-      Narag: 'NRG',
-      Habban: 'HBN',
-      Rajgarh: 'RJG',
-      Division: 'DIV',
-    };
-    const code = codeMap[rangeKey] || 'RNG';
+    const fyRangeMemos = allMemos.filter(m => {
+      const memoFY = m.financialYear || m.fyId;
+      if (memoFY && memoFY !== currentFY) return false;
 
-    // Count existing memos for this range
-    const rangeCount = memos.filter(m => {
       if (m.createdByRole && m.createdByRole.toLowerCase() === rangeKey.toLowerCase()) return true;
       if (m.rangeName && m.rangeName.toLowerCase().includes(rangeKey.toLowerCase())) return true;
       if (m.memoNo && m.memoNo.toUpperCase().includes(`/${code}/`)) return true;
       return false;
-    }).length;
+    });
 
-    const nextNum = 100 + rangeCount;
+    const existingNums = fyRangeMemos
+      .map(m => {
+        if (!m.memoNo) return null;
+        const match = m.memoNo.match(/Memo\/(\d+)/i) || m.memoNo.match(/(\d+)$/);
+        return match ? parseInt(match[1], 10) : null;
+      })
+      .filter((n): n is number => n !== null && !isNaN(n));
+
+    // Sequence counting begins at 100 for each Financial Year
+    const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : 99;
+    const nextNum = Math.max(100, maxNum + 1);
+
     return `RFO/${code}/Memo/${nextNum}`;
-  }, [memos, editingMemo, userRole, userRangeName]);
+  }, []);
+
+  const autoMemoNo = useMemo(() => {
+    if (editingMemo) return editingMemo.memoNo;
+    const fromStr = memoFromInput || defaultFromAuthority || userRole || userRangeName || 'Sarahan';
+    return getNextSequentialMemoNo(fromStr, selectedFY || '2026-27', memos);
+  }, [memos, editingMemo, userRole, userRangeName, memoFromInput, defaultFromAuthority, selectedFY, getNextSequentialMemoNo]);
+
+  useEffect(() => {
+    if (!editingMemo) {
+      setMemoNoInput(autoMemoNo);
+    }
+  }, [autoMemoNo, editingMemo]);
 
   useEffect(() => {
     if (!editingMemo) {
       setMemoFromInput(defaultFromAuthority);
       setMemoToInput('DCF Rajgarh');
-      setMemoNoInput(autoMemoNo);
     }
-  }, [defaultFromAuthority, autoMemoNo, editingMemo]);
+  }, [defaultFromAuthority, editingMemo]);
+
+  // Automatic self-healing effect: Detect and re-sequence duplicate or collided memo numbers in existing Firestore database
+  const isRepairingMemosRef = useRef(false);
+  const resequenceDuplicateMemos = useCallback(async (manualAlert = false) => {
+    if (isRepairingMemosRef.current || memos.length === 0) return;
+
+    // Group memos by (FY + RangeCode)
+    const groups: Record<string, MemoForFund[]> = {};
+    memos.forEach(m => {
+      const fy = m.financialYear || m.fyId || '2026-27';
+      const { code } = getRangeCodeInfo(m.rangeName || m.createdByRole || m.memoNo || '');
+      const key = `${fy}__${code}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(m);
+    });
+
+    let repairedCount = 0;
+
+    for (const [key, memoList] of Object.entries(groups)) {
+      const [fy, code] = key.split('__');
+
+      // Sort chronologically (earliest created or dated first)
+      const sorted = [...memoList].sort((a, b) => {
+        const timeA = a.createdAt || (a.date ? new Date(a.date).getTime() : 0);
+        const timeB = b.createdAt || (b.date ? new Date(b.date).getTime() : 0);
+        if (timeA !== timeB) return timeA - timeB;
+        return a.id.localeCompare(b.id);
+      });
+
+      // Check if duplicate memo numbers exist
+      const seenNos = new Set<string>();
+      let hasDuplicates = false;
+      for (const m of sorted) {
+        if (seenNos.has(m.memoNo)) {
+          hasDuplicates = true;
+          break;
+        }
+        seenNos.add(m.memoNo);
+      }
+
+      // If duplicate found or manual repair triggered, assign strict sequential numbers (100, 101, 102...)
+      if (hasDuplicates || manualAlert) {
+        isRepairingMemosRef.current = true;
+        for (let i = 0; i < sorted.length; i++) {
+          const m = sorted[i];
+          const correctMemoNo = `RFO/${code}/Memo/${100 + i}`;
+          if (m.memoNo !== correctMemoNo) {
+            try {
+              await updateDoc(doc(db, 'memos', m.id), {
+                memoNo: correctMemoNo,
+                updatedAt: Date.now()
+              });
+              repairedCount++;
+              logAuditAction('Memo Re-sequencing', `Repaired Memo ${m.id} to ${correctMemoNo} (FY: ${fy})`);
+            } catch (err) {
+              console.error('Error auto-repairing memo number:', err);
+            }
+          }
+        }
+        isRepairingMemosRef.current = false;
+      }
+    }
+
+    if (manualAlert) {
+      if (repairedCount > 0) {
+        showAlert(`Successfully re-sequenced and repaired ${repairedCount} memo reference number(s) (100, 101, 102...).`);
+      } else {
+        showAlert('All memo reference numbers are already strictly sequential with no duplicates.');
+      }
+    }
+  }, [memos]);
+
+  // Run auto-deduplication check when memos update
+  useEffect(() => {
+    resequenceDuplicateMemos(false);
+  }, [resequenceDuplicateMemos]);
+
+  // --- SOE Available Options & Live Budget Monitor for Memo for Fund ---
+  const memoAvailableSoes = useMemo(() => {
+    let targetRangeId = userRangeId;
+    if (!targetRangeId) {
+      const fromStr = (memoFromInput || userRole || userRangeName || '').toLowerCase();
+      if (fromStr.includes('narag') || fromStr.includes('nrg')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('narag'))?.id;
+      } else if (fromStr.includes('habban') || fromStr.includes('hbn')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('habban'))?.id;
+      } else if (fromStr.includes('division') || fromStr.includes('div')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('division'))?.id;
+      } else if (fromStr.includes('rajgarh') || fromStr.includes('rjg')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('rajgarh') && !r.name.toLowerCase().includes('division'))?.id 
+          || ranges.find(r => r.name.toLowerCase().includes('rajgarh'))?.id;
+      } else if (fromStr.includes('sarahan') || fromStr.includes('srh')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('sarahan'))?.id;
+      }
+    }
+
+    // Filter allocations for target range, FY, scheme, sector
+    const relevantAllocs = allocations.filter(a => {
+      if (targetRangeId && a.rangeId !== targetRangeId) return false;
+      const aFY = a.financialYear || a.fyId;
+      if (selectedFY && aFY && aFY !== selectedFY) return false;
+      if (memoSchemeIdInput && a.schemeId !== memoSchemeIdInput) return false;
+      if (memoSectorIdInput && a.sectorId && a.sectorId !== memoSectorIdInput) return false;
+      return true;
+    });
+
+    const soeAllocMap: Record<string, { id: string; name: string; allocatedAmount: number; spentAmount: number; availableAmount: number }> = {};
+
+    // 1. Collect from allocations' funded SOEs
+    relevantAllocs.forEach(a => {
+      if (Array.isArray(a.fundedSOEs) && a.fundedSOEs.length > 0) {
+        a.fundedSOEs.forEach((f: any) => {
+          const s = soes.find(soe => soe.id === f.soeId);
+          const name = s?.name || 'Provisional';
+          const id = f.soeId || s?.id || name;
+          if (!soeAllocMap[id]) {
+            soeAllocMap[id] = { id, name, allocatedAmount: 0, spentAmount: 0, availableAmount: 0 };
+          }
+          soeAllocMap[id].allocatedAmount += Number(f.amount) || 0;
+        });
+      } else if ((a as any).soeId) {
+        const legacySoeId = (a as any).soeId;
+        const s = soes.find(soe => soe.id === legacySoeId);
+        const name = s?.name || 'Provisional';
+        const id = legacySoeId;
+        if (!soeAllocMap[id]) {
+          soeAllocMap[id] = { id, name, allocatedAmount: 0, spentAmount: 0, availableAmount: 0 };
+        }
+        soeAllocMap[id].allocatedAmount += Number(a.amount) || 0;
+      }
+    });
+
+    // 2. Compute spent and available for each SOE with allocated amount
+    const relevantAllocIds = relevantAllocs.map(a => a.id);
+    Object.keys(soeAllocMap).forEach(soeId => {
+      const targetSoe = soes.find(s => s.id === soeId);
+      const targetSoeName = targetSoe?.name || soeAllocMap[soeId].name;
+      let spent = 0;
+      expenses.forEach(e => {
+        if (e.status === 'rejected') return;
+        const isMatchAlloc = targetRangeId ? (relevantAllocIds.includes(e.allocationId) || allocations.find(a => a.id === e.allocationId)?.rangeId === targetRangeId) : true;
+        const eSoe = soes.find(s => s.id === e.soeId);
+        const isMatchSoe = e.soeId === soeId || eSoe?.name === targetSoeName;
+        if (isMatchAlloc && isMatchSoe) {
+          spent += Number(e.amount) || 0;
+        }
+      });
+      soeAllocMap[soeId].spentAmount = spent;
+      soeAllocMap[soeId].availableAmount = Math.max(0, soeAllocMap[soeId].allocatedAmount - spent);
+    });
+
+    // ONLY return SOEs in which budget is allotted (allocatedAmount > 0)
+    return Object.values(soeAllocMap)
+      .filter(s => s.allocatedAmount > 0)
+      .sort((a, b) => b.allocatedAmount - a.allocatedAmount || a.name.localeCompare(b.name));
+  }, [allocations, expenses, soes, userRangeId, ranges, memoFromInput, userRole, userRangeName, selectedFY, memoSchemeIdInput, memoSectorIdInput]);
+
+  const memoBudgetInfo = useMemo(() => {
+    let targetRangeId = userRangeId;
+    if (!targetRangeId) {
+      const fromStr = (memoFromInput || userRole || userRangeName || '').toLowerCase();
+      if (fromStr.includes('narag') || fromStr.includes('nrg')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('narag'))?.id;
+      } else if (fromStr.includes('habban') || fromStr.includes('hbn')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('habban'))?.id;
+      } else if (fromStr.includes('division') || fromStr.includes('div')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('division'))?.id;
+      } else if (fromStr.includes('rajgarh') || fromStr.includes('rjg')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('rajgarh') && !r.name.toLowerCase().includes('division'))?.id 
+          || ranges.find(r => r.name.toLowerCase().includes('rajgarh'))?.id;
+      } else if (fromStr.includes('sarahan') || fromStr.includes('srh')) {
+        targetRangeId = ranges.find(r => r.name.toLowerCase().includes('sarahan'))?.id;
+      }
+    }
+
+    const relevantAllocs = allocations.filter(a => {
+      if (targetRangeId && a.rangeId !== targetRangeId) return false;
+      const aFY = a.financialYear || a.fyId;
+      if (selectedFY && aFY && aFY !== selectedFY) return false;
+      if (memoSchemeIdInput && a.schemeId !== memoSchemeIdInput) return false;
+      if (memoSectorIdInput && a.sectorId && a.sectorId !== memoSectorIdInput) return false;
+      return true;
+    });
+
+    let allocatedBudget = 0;
+    let totalSpent = 0;
+
+    if (memoSoeIdInput) {
+      const targetSoe = soes.find(s => s.id === memoSoeIdInput);
+      const targetSoeName = targetSoe?.name;
+
+      relevantAllocs.forEach(a => {
+        const funded = a.fundedSOEs?.find(f => {
+          if (f.soeId === memoSoeIdInput) return true;
+          const s = soes.find(soe => soe.id === f.soeId);
+          return s?.name === targetSoeName;
+        });
+        if (funded) {
+          allocatedBudget += Number(funded.amount) || 0;
+        }
+      });
+
+      const relevantAllocIds = relevantAllocs.map(a => a.id);
+      expenses.forEach(e => {
+        if (e.status === 'rejected') return;
+        const isMatchAlloc = targetRangeId ? (relevantAllocIds.includes(e.allocationId) || allocations.find(a => a.id === e.allocationId)?.rangeId === targetRangeId) : true;
+        const eSoe = soes.find(s => s.id === e.soeId);
+        const isMatchSoe = e.soeId === memoSoeIdInput || eSoe?.name === targetSoeName;
+        if (isMatchAlloc && isMatchSoe) {
+          totalSpent += Number(e.amount) || 0;
+        }
+      });
+    } else if (memoSchemeIdInput || memoSectorIdInput) {
+      relevantAllocs.forEach(a => {
+        allocatedBudget += Number(a.amount) || 0;
+      });
+      const relevantAllocIds = relevantAllocs.map(a => a.id);
+      expenses.forEach(e => {
+        if (e.status === 'rejected') return;
+        if (relevantAllocIds.includes(e.allocationId)) {
+          totalSpent += Number(e.amount) || 0;
+        }
+      });
+    }
+
+    const availableBudget = Math.max(0, allocatedBudget - totalSpent);
+    
+    // Sum of payees currently added in memo table
+    const currentMemoTotal = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.totalAmount)) || 0), 0);
+    
+    // If editing a specific row, exclude its previous amount to compute remaining available allowance for this row
+    const editingOldAmount = (editingEntryIndex !== null && memoPayeeEntries[editingEntryIndex]) ? (Math.round(Number(memoPayeeEntries[editingEntryIndex].totalAmount)) || 0) : 0;
+    const memoTotalWithoutEditingRow = Math.max(0, currentMemoTotal - editingOldAmount);
+    
+    // Available balance specifically for this next/edited payee entry
+    const availableForCurrentPayee = Math.max(0, availableBudget - memoTotalWithoutEditingRow);
+
+    // Current amount typed in the input field
+    const typedAmount = Math.round(parseFloat(entryTotalAmount) || 0);
+
+    // Live remaining balance of SOE after subtracting typed amount
+    const liveRemainingAfterTyping = availableForCurrentPayee - typedAmount;
+
+    // Projected total of memo if current payee amount is added
+    const projectedMemoTotal = memoTotalWithoutEditingRow + typedAmount;
+
+    // Status flags
+    const isExceeded = memoSoeIdInput ? (allocatedBudget > 0 && currentMemoTotal > availableBudget) : false;
+    const isTypingExceeded = memoSoeIdInput ? (allocatedBudget > 0 && typedAmount > availableForCurrentPayee) : false;
+    const remainingAfterMemo = availableBudget - currentMemoTotal;
+
+    return {
+      allocatedBudget,
+      totalSpent,
+      availableBudget,
+      currentMemoTotal,
+      memoTotalWithoutEditingRow,
+      availableForCurrentPayee,
+      typedAmount,
+      liveRemainingAfterTyping,
+      projectedMemoTotal,
+      isExceeded,
+      isTypingExceeded,
+      remainingAfterMemo
+    };
+  }, [allocations, expenses, userRangeId, ranges, memoFromInput, userRole, userRangeName, selectedFY, memoSchemeIdInput, memoSectorIdInput, memoSoeIdInput, soes, memoPayeeEntries, editingEntryIndex, entryTotalAmount]);
 
   // --- Memo for Fund Handlers ---
   const handleSelectPayeeForMemoEntry = (payeeId: string) => {
@@ -7625,6 +8107,22 @@ export default function App() {
       showAlert('Please enter a valid Sub-voucher Amount.');
       return;
     }
+
+    const currentSubSum = entrySubVouchers.reduce((s, v) => s + v.amount, 0);
+    const newTotalSum = currentSubSum + Math.round(amt);
+
+    // Enforce SOE Budget Restriction if SOE is selected
+    if (memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0) {
+      const availableForThis = memoBudgetInfo.availableForCurrentPayee;
+      if (newTotalSum > availableForThis) {
+        const soeName = soes.find(s => s.id === memoSoeIdInput)?.name || 'Selected SOE';
+        showAlert(
+          `Cannot add Sub-voucher: Total amount (₹${newTotalSum.toLocaleString('en-IN')}) will exceed the available SOE budget balance of ₹${Math.max(0, availableForThis).toLocaleString('en-IN')} for ${soeName}.`
+        );
+        return;
+      }
+    }
+
     const newSubVoucher: MemoSubVoucher = {
       id: Math.random().toString(36).substring(2, 9),
       voucherNo: subVoucherNoInput.trim() || undefined,
@@ -7664,6 +8162,18 @@ export default function App() {
     if (isNaN(tot) || tot <= 0) {
       showAlert('Please enter a valid Total Amount.');
       return;
+    }
+
+    // STRICT BUDGET RESTRICTION: Do not allow exceeding remaining available budget under selected SOE
+    if (memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0) {
+      const availableForThis = memoBudgetInfo.availableForCurrentPayee;
+      if (Math.round(tot) > availableForThis) {
+        const soeName = soes.find(s => s.id === memoSoeIdInput)?.name || 'Selected SOE';
+        showAlert(
+          `Cannot add Payee: Amount (₹${Math.round(tot).toLocaleString('en-IN')}) exceeds the remaining available SOE budget of ₹${Math.max(0, availableForThis).toLocaleString('en-IN')} for ${soeName}.\n\nTotal Allotted: ₹${memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')} | Already Spent: ₹${memoBudgetInfo.totalSpent.toLocaleString('en-IN')} | Added in Memo: ₹${memoBudgetInfo.memoTotalWithoutEditingRow.toLocaleString('en-IN')} | Remaining: ₹${Math.max(0, availableForThis).toLocaleString('en-IN')}`
+        );
+        return;
+      }
     }
 
     const isITaxApplicable = entryDeductITax && tot > 30000;
@@ -7790,20 +8300,43 @@ export default function App() {
 
     const schemeObj = currentSchemes.find(s => s.id === memoSchemeIdInput);
     const sectorObj = currentSectors.find(s => s.id === memoSectorIdInput);
+    const soeObj = soes.find(s => s.id === memoSoeIdInput);
 
     const totalGross = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.totalAmount)) || 0), 0);
     const totalITax = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.iTaxAmount)) || 0), 0);
     const totalGst = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.gstAmount)) || 0), 0);
     const totalNetRtgs = memoPayeeEntries.reduce((sum, e) => sum + (Math.round(Number(e.netRtgsAmount)) || 0), 0);
 
+    // Budget check: If SOE is selected and budget is allotted, prevent saving if memo total exceeds available budget
+    if (memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && memoBudgetInfo.isExceeded) {
+      const soeName = soeObj?.name || 'the selected SOE';
+      showAlert(`Cannot save Memo: Total memo amount (₹${totalGross.toLocaleString('en-IN')}) exceeds the available allocated budget balance (₹${memoBudgetInfo.availableBudget.toLocaleString('en-IN')}) for ${soeName}. Please adjust payee amounts or choose appropriate head.`);
+      return;
+    }
+
+    // Determine final guaranteed unique reference number
+    let finalMemoNo = editingMemo ? editingMemo.memoNo : (memoNoInput.trim() || autoMemoNo);
+    if (!editingMemo) {
+      const freshNextNo = getNextSequentialMemoNo(memoFromInput || defaultFromAuthority, selectedFY || '2026-27', memos);
+      const isColliding = memos.some(m => {
+        const mFY = m.financialYear || m.fyId;
+        return (mFY === (selectedFY || '2026-27')) && m.memoNo === finalMemoNo;
+      });
+      if (isColliding) {
+        finalMemoNo = freshNextNo;
+      }
+    }
+
     const memoData = {
-      memoNo: memoNoInput.trim(),
+      memoNo: finalMemoNo,
       date: memoDateInput,
       monthYear: memoMonthYearInput.trim(),
       schemeId: memoSchemeIdInput || '',
       schemeName: schemeObj ? schemeObj.name : 'All Schemes',
       sectorId: memoSectorIdInput || '',
       sectorName: sectorObj ? sectorObj.name : '',
+      soeId: memoSoeIdInput || '',
+      soeName: soeObj ? soeObj.name : '',
       rangeId: userRangeId || '',
       rangeName: memoFromInput || defaultFromAuthority,
       toAuthority: memoToInput || 'DCF Rajgarh',
@@ -7814,23 +8347,26 @@ export default function App() {
       totalGst: totalGst,
       totalNetRtgs: totalNetRtgs,
       payeeEntries: memoPayeeEntries,
-      createdBy: user?.uid || '',
-      createdByRole: userRole || '',
-      createdByName: user?.email || '',
+      createdBy: editingMemo?.createdBy || user?.uid || '',
+      createdByRole: editingMemo?.createdByRole || userRole || '',
+      createdByName: editingMemo?.createdByName || user?.email || '',
       updatedAt: Date.now()
     };
 
     try {
       if (editingMemo) {
-        await updateDoc(doc(db, 'memos', editingMemo.id), memoData);
-        logAuditAction('Memo Updated', `Memo No: ${memoNoInput.trim()}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: ₹${totalGross}`);
+        await updateDoc(doc(db, 'memos', editingMemo.id), {
+          ...memoData,
+          memoNo: editingMemo.memoNo // Strictly maintain original reference number when editing / submitting to admin
+        });
+        logAuditAction('Memo Updated', `Memo No: ${editingMemo.memoNo}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: ₹${totalGross}`);
         showAlert(`Memo for Fund ${status === 'submitted' ? 'submitted and locked' : 'updated as draft'} successfully.`);
       } else {
         await addDoc(collection(db, 'memos'), {
           ...memoData,
           createdAt: Date.now()
         });
-        logAuditAction('Memo Created', `Memo No: ${memoNoInput.trim()}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: ₹${totalGross}`);
+        logAuditAction('Memo Created', `Memo No: ${finalMemoNo}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: ₹${totalGross}`);
         showAlert(`Memo for Fund ${status === 'submitted' ? 'submitted and locked' : 'saved as draft'} successfully.`);
       }
       handleResetMemoForm();
@@ -7846,6 +8382,7 @@ export default function App() {
     setMemoMonthYearInput(memo.monthYear || '');
     setMemoSchemeIdInput(memo.schemeId || '');
     setMemoSectorIdInput(memo.sectorId || '');
+    setMemoSoeIdInput(memo.soeId || '');
     setMemoFromInput(memo.rangeName || defaultFromAuthority);
     setMemoToInput(memo.toAuthority || 'DCF Rajgarh');
     setMemoPayeeEntries(memo.payeeEntries || []);
@@ -7895,6 +8432,7 @@ export default function App() {
     setMemoMonthYearInput('08/2026');
     setMemoSchemeIdInput('');
     setMemoSectorIdInput('');
+    setMemoSoeIdInput('');
     setMemoFromInput(defaultFromAuthority);
     setMemoToInput('DCF Rajgarh');
     setMemoPayeeEntries([]);
@@ -13278,8 +13816,9 @@ export default function App() {
                           onChange={(e) => {
                             setMemoSchemeIdInput(e.target.value);
                             setMemoSectorIdInput('');
+                            setMemoSoeIdInput('');
                           }}
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
                         >
                           <option value="">-- All / Select Scheme --</option>
                           {currentSchemes.map(s => (
@@ -13292,8 +13831,11 @@ export default function App() {
                         <label className="block font-bold text-gray-700">Select Sector (Optional)</label>
                         <select
                           value={memoSectorIdInput}
-                          onChange={(e) => setMemoSectorIdInput(e.target.value)}
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                          onChange={(e) => {
+                            setMemoSectorIdInput(e.target.value);
+                            setMemoSoeIdInput('');
+                          }}
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
                         >
                           <option value="">-- All Sectors --</option>
                           {currentSectors
@@ -13307,15 +13849,54 @@ export default function App() {
 
                       <div className="space-y-1">
                         <label className="block font-bold text-gray-700 flex items-center justify-between">
-                          <span>From Authority</span>
-                          <span className="text-gray-400 font-normal text-[10px]">(Auto-locked)</span>
+                          <span>Select SOE Head</span>
+                          <span className="text-gray-400 font-normal text-[10px]">(Allotted heads only)</span>
                         </label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={memoFromInput}
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 font-bold text-gray-800 cursor-not-allowed outline-none"
-                        />
+                        <select
+                          value={memoSoeIdInput}
+                          onChange={(e) => setMemoSoeIdInput(e.target.value)}
+                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
+                        >
+                          <option value="">-- All / Select SOE (Optional) --</option>
+                          {memoAvailableSoes.length === 0 ? (
+                            <option disabled value="">No SOE heads have budget allotted for selected Scheme/Sector</option>
+                          ) : (
+                            memoAvailableSoes.map(s => (
+                              <option key={s.id} value={s.id}>
+                                {s.name} — SOE Funding: ₹{s.allocatedAmount.toLocaleString('en-IN')} | Spent: ₹{s.spentAmount.toLocaleString('en-IN')} | Remaining: ₹{s.availableAmount.toLocaleString('en-IN')}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block font-bold text-gray-700 flex items-center justify-between">
+                          <span>From Authority</span>
+                          <span className="text-gray-400 font-normal text-[10px]">
+                            {userRole === 'admin' || userRole === 'deo' ? '(Select Range)' : '(Auto-locked)'}
+                          </span>
+                        </label>
+                        {userRole === 'admin' || userRole === 'deo' ? (
+                          <select
+                            value={memoFromInput}
+                            onChange={(e) => setMemoFromInput(e.target.value)}
+                            className="w-full p-2 border border-gray-300 rounded-lg bg-white font-bold text-gray-800 focus:ring-2 focus:ring-emerald-500 outline-none"
+                          >
+                            <option value="RFO Sarahan">RFO Sarahan (SRH)</option>
+                            <option value="RFO Narag">RFO Narag (NRG)</option>
+                            <option value="RFO Habban">RFO Habban (HBN)</option>
+                            <option value="RFO Rajgarh">RFO Rajgarh (RJG)</option>
+                            <option value="Division Office">Division Office (DIV)</option>
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            readOnly
+                            value={memoFromInput}
+                            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 font-bold text-gray-800 cursor-not-allowed outline-none"
+                          />
+                        )}
                       </div>
 
                       <div className="sm:col-span-2 space-y-1">
@@ -13328,6 +13909,56 @@ export default function App() {
                           className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
                         />
                       </div>
+
+                      {/* Live Budget Allocation Monitor for Memo for Fund */}
+                      {memoBudgetInfo.allocatedBudget > 0 && (
+                        <div className="sm:col-span-2 mt-1 p-3 rounded-xl border transition-all text-xs bg-slate-50 border-slate-200 shadow-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2 mb-2">
+                            <div className="flex flex-wrap items-center gap-1.5 font-bold text-gray-800">
+                              <DollarSign className="w-4 h-4 text-emerald-600" />
+                              <span>SOE Budget:</span>
+                              <span className="text-emerald-950 bg-emerald-100/80 px-2 py-0.5 rounded text-[11px] font-extrabold">
+                                {memoSoeIdInput ? (soes.find(s => s.id === memoSoeIdInput)?.name || 'Selected SOE') : (memoSectorIdInput ? 'Selected Sector' : 'Selected Scheme')}
+                              </span>
+                              <span className="text-emerald-900 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                                SOE Funding: ₹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')} | Spent: ₹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')} | Remaining: ₹{memoBudgetInfo.availableBudget.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            {memoBudgetInfo.isExceeded ? (
+                              <span className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                                Budget Exceeded by ₹{(memoBudgetInfo.currentMemoTotal - memoBudgetInfo.availableBudget).toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                Within Budget (₹{memoBudgetInfo.remainingAfterMemo.toLocaleString('en-IN')} balance remaining)
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                            <div className="bg-white p-2 rounded-lg border border-slate-200">
+                              <span className="text-[10px] text-gray-500 block font-semibold">SOE Funding</span>
+                              <span className="font-extrabold text-gray-900 text-xs">₹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200">
+                              <span className="text-[10px] text-gray-500 block font-semibold">Spent</span>
+                              <span className="font-extrabold text-amber-900 text-xs">₹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200">
+                              <span className="text-[10px] text-gray-500 block font-semibold">Remaining</span>
+                              <span className="font-extrabold text-blue-900 text-xs">₹{memoBudgetInfo.availableBudget.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className={`p-2 rounded-lg border ${memoBudgetInfo.isExceeded ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-300'}`}>
+                              <span className="text-[10px] text-gray-500 block font-semibold">Current Memo Total</span>
+                              <span className={`font-black text-xs ${memoBudgetInfo.isExceeded ? 'text-red-700' : 'text-emerald-950'}`}>
+                                ₹{memoBudgetInfo.currentMemoTotal.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Step 2: Payee Row Input Section */}
@@ -13343,6 +13974,73 @@ export default function App() {
                           </span>
                         )}
                       </div>
+
+                      {/* Live SOE Budget Meter directly above Payee Details */}
+                      {memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && (
+                        <div className={`p-3 rounded-xl border transition-all text-xs shadow-sm ${
+                          memoBudgetInfo.isTypingExceeded 
+                            ? 'bg-red-50/95 border-red-300 ring-2 ring-red-400' 
+                            : 'bg-gradient-to-r from-slate-50 via-emerald-50/40 to-slate-50 border-emerald-200'
+                        }`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-gray-200">
+                            <div className="flex flex-wrap items-center gap-1.5 font-bold text-gray-800">
+                              <DollarSign className="w-4 h-4 text-emerald-600" />
+                              <span>Live SOE Budget Meter:</span>
+                              <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-extrabold text-[11px]">
+                                {soes.find(s => s.id === memoSoeIdInput)?.name || 'Selected SOE'}
+                              </span>
+                              <span className="text-emerald-900 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                                SOE Funding: ₹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')} | Spent: ₹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')} | Remaining: ₹{memoBudgetInfo.availableBudget.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            {memoBudgetInfo.isTypingExceeded ? (
+                              <span className="px-2.5 py-1 rounded-md text-[11px] font-black bg-red-600 text-white flex items-center gap-1 shadow-sm animate-pulse">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                Budget Exhausted! Over limit by ₹{(-memoBudgetInfo.liveRemainingAfterTyping).toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-700" />
+                                Max Available for This Payee: ₹{memoBudgetInfo.availableForCurrentPayee.toLocaleString('en-IN')}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                            <div className="bg-white/90 p-2 rounded-lg border border-gray-200">
+                              <span className="text-[10px] text-gray-500 block font-semibold">SOE Funding</span>
+                              <span className="font-extrabold text-gray-900 text-xs">₹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className="bg-white/90 p-2 rounded-lg border border-gray-200">
+                              <span className="text-[10px] text-gray-500 block font-semibold">Spent (Actuals)</span>
+                              <span className="font-extrabold text-amber-900 text-xs">₹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className="bg-white/90 p-2 rounded-lg border border-gray-200">
+                              <span className="text-[10px] text-gray-500 block font-semibold">Other Payees in Memo</span>
+                              <span className="font-extrabold text-indigo-900 text-xs">₹{memoBudgetInfo.memoTotalWithoutEditingRow.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className={`p-2 rounded-lg border font-bold ${
+                              memoBudgetInfo.liveRemainingAfterTyping < 0 
+                                ? 'bg-red-100 border-red-300 text-red-900' 
+                                : 'bg-emerald-100 border-emerald-300 text-emerald-950'
+                            }`}>
+                              <span className="text-[10px] text-gray-600 block font-semibold">Live Remaining Balance</span>
+                              <span className="font-black text-xs">
+                                {memoBudgetInfo.liveRemainingAfterTyping < 0 ? '-' : ''}₹{Math.abs(memoBudgetInfo.liveRemainingAfterTyping).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                          </div>
+
+                          {memoBudgetInfo.isTypingExceeded && (
+                            <div className="mt-2.5 p-2 bg-red-100/90 border border-red-300 rounded-lg text-red-800 text-[11px] font-bold flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                              <span>
+                                Cannot add payee: Amount ₹{memoBudgetInfo.typedAmount.toLocaleString('en-IN')} exceeds remaining available SOE balance of ₹{Math.max(0, memoBudgetInfo.availableForCurrentPayee).toLocaleString('en-IN')} by ₹{(-memoBudgetInfo.liveRemainingAfterTyping).toLocaleString('en-IN')}.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Select existing payee directory drop-down */}
                       <div className="space-y-1 text-xs">
@@ -13650,10 +14348,20 @@ export default function App() {
                           })()}
                           <button
                             type="submit"
-                            className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-1.5 active:scale-95 shrink-0"
+                            disabled={Boolean(memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && memoBudgetInfo.isTypingExceeded)}
+                            className={`w-full sm:w-auto px-5 py-2.5 rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-1.5 shrink-0 ${
+                              memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && memoBudgetInfo.isTypingExceeded
+                                ? 'bg-gray-300 text-gray-600 cursor-not-allowed border border-gray-400 opacity-80'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95 cursor-pointer'
+                            }`}
+                            title={memoBudgetInfo.isTypingExceeded ? `Exceeds available balance of ₹${memoBudgetInfo.availableForCurrentPayee.toLocaleString('en-IN')}` : undefined}
                           >
                             <Plus className="w-4 h-4" />
-                            <span>{editingEntryIndex !== null ? 'Update Payee Row' : '+ Add Payee to Memo'}</span>
+                            <span>
+                              {memoBudgetInfo.isTypingExceeded
+                                ? `Exceeds SOE Balance (Max: ₹${memoBudgetInfo.availableForCurrentPayee.toLocaleString('en-IN')})`
+                                : (editingEntryIndex !== null ? 'Update Payee Row' : '+ Add Payee to Memo')}
+                            </span>
                           </button>
                         </div>
                       </form>
@@ -13842,12 +14550,23 @@ export default function App() {
 
                   {/* Right Panel: Memos Summary Table / Register (5 cols) */}
                   <div className="lg:col-span-5 bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4">
-                    <div className="border-b pb-3 flex justify-between items-center">
-                      <h4 className="text-sm font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-emerald-600" />
-                        Saved Memos ({filteredMemos.length})
-                      </h4>
-                      <span className="text-[11px] font-bold text-gray-500">FY: {selectedFY}</span>
+                    <div className="border-b pb-3 flex flex-wrap justify-between items-center gap-2">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-emerald-600" />
+                          Saved Memos ({filteredMemos.length})
+                        </h4>
+                        <span className="text-[11px] font-bold text-gray-500">FY: {selectedFY}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => resequenceDuplicateMemos(true)}
+                        className="px-2.5 py-1 bg-gray-50 hover:bg-emerald-50 text-gray-600 hover:text-emerald-700 rounded-lg text-[10px] font-bold border border-gray-200 hover:border-emerald-300 flex items-center gap-1 transition-all cursor-pointer"
+                        title="Check and re-sequence duplicate memo numbers chronologically (100, 101, 102...)"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Re-sequence Numbers</span>
+                      </button>
                     </div>
 
                     {filteredMemos.length > 0 ? (
@@ -13907,10 +14626,15 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* Scheme & Sector info */}
+                              {/* Scheme, Sector & SOE info */}
                               <div className="text-xs text-gray-700 bg-white/70 p-2 rounded-lg border border-gray-100 mb-3 space-y-0.5">
                                 <p><strong>Scheme:</strong> {m.schemeName || 'All Schemes'}</p>
                                 {m.sectorName && <p><strong>Sector:</strong> {m.sectorName}</p>}
+                                {m.soeName && (
+                                  <p>
+                                    <strong>SOE:</strong> <span className="font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">{m.soeName}</span>
+                                  </p>
+                                )}
                                 <p className="text-[10px] text-gray-500">From: {m.rangeName} &rarr; To: {m.toAuthority || 'DCF Rajgarh'}</p>
                               </div>
 
@@ -14098,7 +14822,7 @@ export default function App() {
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-300 text-xs font-bold text-gray-900 leading-snug">
                     <span>Subject: - </span>
                     <span className="underline">
-                      Memo for Fund for the month of {viewingMemo.monthYear} under scheme {viewingMemo.schemeName || 'All Schemes'}{viewingMemo.sectorName ? ` (${viewingMemo.sectorName})` : ''}.
+                      Memo for Fund for the month of {viewingMemo.monthYear} under scheme {viewingMemo.schemeName || 'All Schemes'}{viewingMemo.sectorName ? ` (${viewingMemo.sectorName})` : ''}{viewingMemo.soeName ? ` [SOE: ${viewingMemo.soeName}]` : ''}.
                     </span>
                   </div>
 

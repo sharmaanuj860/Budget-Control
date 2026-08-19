@@ -1,5 +1,6 @@
 {
   "name": "Forest Budget Control",
-  "description": "all financial control",
-  "requestFramePermissions": []
+  "description": "Comprehensive financial and budget control system for Forest Division operations",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
