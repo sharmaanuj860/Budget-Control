@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, ArrowRight, Clock, ArrowUpRight } from 'lucide-react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
@@ -2689,6 +2689,84 @@ export default function App() {
         };
       });
 
+    // 10 Most Recent Actions (Expenditures added, Allocations updated/added) sorted by date descending
+    const expenseActivities = baseExpenses.map(exp => {
+      const alloc = allocations.find(a => a.id === exp.allocationId);
+      const range = ranges.find(r => r.id === (alloc?.rangeId || (exp as any).rangeId));
+      const sch = schemes.find(s => s.id === (alloc?.schemeId || exp.schemeId));
+      const sec = sectors.find(s => s.id === (alloc?.sectorId || exp.sectorId));
+      const soe = soes.find(s => s.id === exp.soeId);
+
+      let ts = exp.createdAt || exp.updatedAt || 0;
+      if (!ts && exp.date) {
+        const parsed = new Date(exp.date).getTime();
+        if (!isNaN(parsed)) ts = parsed;
+      }
+
+      const dateStr = ts > 0 
+        ? new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : (exp.date ? exp.date.split('-').reverse().join('/') : 'Recently');
+
+      return {
+        id: `exp-${exp.id}`,
+        rawId: exp.id,
+        type: 'expenditure' as const,
+        actionName: 'Expenditure Added',
+        amount: exp.amount,
+        dateStr,
+        timestamp: ts,
+        rangeName: range?.name || 'Division',
+        schemeName: sch?.name || 'N/A',
+        sectorName: sec?.name || '',
+        soeName: soe?.name || 'SOE Head',
+        details: exp.description || (exp.payeeName ? `Payee: ${exp.payeeName}` : '') || (exp.approvalId ? `Approval #${exp.approvalId}` : ''),
+        status: exp.status || 'approved',
+        statusLabel: exp.status === 'pending' ? 'Pending' : exp.status === 'rejected' ? 'Rejected' : 'Approved',
+        statusColor: exp.status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : exp.status === 'rejected' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      };
+    });
+
+    const allocationActivities = baseAllocations.map(alloc => {
+      const range = ranges.find(r => r.id === alloc.rangeId);
+      const sch = schemes.find(s => s.id === alloc.schemeId);
+      const sec = sectors.find(s => s.id === alloc.sectorId);
+      const act = activities.find(a => a.id === alloc.activityId);
+
+      let ts = alloc.updatedAt || alloc.createdAt || 0;
+      const isUpdate = alloc.updatedAt && alloc.createdAt && alloc.updatedAt > alloc.createdAt;
+
+      const dateStr = ts > 0 
+        ? new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'Recently';
+
+      const soeNames = alloc.fundedSOEs?.map(f => {
+        const soeObj = soes.find(s => s.id === f.soeId);
+        return soeObj ? soeObj.name : '';
+      }).filter(Boolean).join(', ');
+
+      return {
+        id: `alloc-${alloc.id}`,
+        rawId: alloc.id,
+        type: 'allocation' as const,
+        actionName: isUpdate ? 'Allocation Updated' : 'Allocation Added',
+        amount: alloc.amount,
+        dateStr,
+        timestamp: ts,
+        rangeName: range?.name || 'Division',
+        schemeName: sch?.name || 'N/A',
+        sectorName: sec?.name || '',
+        soeName: soeNames || (act?.name || 'Budget Allocation'),
+        details: alloc.remarks || (act?.name ? `Activity: ${act.name}` : ''),
+        status: alloc.status || 'Funded',
+        statusLabel: alloc.status === 'Pending SOE Funds' ? 'Pending Funds' : 'Funded',
+        statusColor: alloc.status === 'Pending SOE Funds' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-blue-100 text-blue-800 border-blue-200',
+      };
+    });
+
+    const recentActivitiesList = [...expenseActivities, ...allocationActivities]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 10);
+
     return (
       <div className="space-y-6">
         {/* Recent Updates & Budget Allocation Notifications Alert Bar */}
@@ -3136,6 +3214,130 @@ export default function App() {
                 >
                   {showAllRange ? 'Show Less' : `View All (${rangeAllocationSummary.length})`}
                 </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recent Activities Section */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-50 text-emerald-700 rounded-lg">
+                <History className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <span>Recent Activities</span>
+                  <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Latest 10 Actions
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Real-time timeline of recent expenditures recorded and budget allocations updated.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-medium text-gray-500 self-start sm:self-auto">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 rounded-md border border-gray-200 text-gray-600">
+                <Clock className="w-3.5 h-3.5 text-gray-400" />
+                <span>Sorted by Date (Descending)</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Vertical list of 10 items */}
+          <div className="divide-y divide-gray-100">
+            {recentActivitiesList.length > 0 ? (
+              recentActivitiesList.map((item, idx) => (
+                <div
+                  key={item.id || idx}
+                  onClick={() => {
+                    if (item.type === 'expenditure') {
+                      setActiveTab('Expenditures');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else {
+                      setActiveTab('Allocations');
+                      if (item.schemeName && item.schemeName !== 'N/A') {
+                        setSearchTerm(item.schemeName);
+                      }
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  }}
+                  className="py-3 px-2 sm:px-3 hover:bg-gray-50/90 rounded-lg transition-colors cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    {/* Action Icon Badge */}
+                    <div className={`p-2 rounded-lg shrink-0 mt-0.5 sm:mt-0 ${
+                      item.type === 'expenditure' ? 'bg-red-50 text-red-600' : 'bg-indigo-50 text-indigo-600'
+                    }`}>
+                      {item.type === 'expenditure' ? (
+                        <TrendingDown className="w-4 h-4" />
+                      ) : (
+                        <MapPin className="w-4 h-4" />
+                      )}
+                    </div>
+
+                    {/* Action Details */}
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm text-gray-900 group-hover:text-emerald-700 transition-colors">
+                          {item.actionName}
+                        </span>
+                        <span className="font-extrabold text-sm text-gray-900 font-mono">
+                          ₹{item.amount.toLocaleString('en-IN')}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${item.statusColor}`}>
+                          {item.statusLabel}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-gray-800 flex items-center gap-1">
+                          <Building2 className="w-3 h-3 text-gray-400" />
+                          {item.rangeName}
+                        </span>
+                        <span className="text-gray-300">•</span>
+                        <span className="text-emerald-800 font-medium">{item.schemeName}</span>
+                        {item.sectorName && (
+                          <>
+                            <span className="text-gray-300">•</span>
+                            <span className="text-gray-600">{item.sectorName}</span>
+                          </>
+                        )}
+                        {item.soeName && (
+                          <>
+                            <span className="text-gray-300">•</span>
+                            <span className="text-gray-500 italic">({item.soeName})</span>
+                          </>
+                        )}
+                        {item.details && (
+                          <>
+                            <span className="text-gray-300">•</span>
+                            <span className="text-gray-500 truncate max-w-xs">{item.details}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Timestamp and Arrow */}
+                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pl-11 sm:pl-0">
+                    <div className="text-left sm:text-right">
+                      <span className="text-[11px] font-mono text-gray-500 block">
+                        {item.dateStr}
+                      </span>
+                      <span className="text-[10px] text-gray-400 capitalize">
+                        {item.type}
+                      </span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="py-8 text-center text-gray-400 text-sm italic">
+                No recent activities recorded yet.
               </div>
             )}
           </div>
