@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
@@ -100,17 +100,20 @@ type Notification = {
   id: string;
   name: string;
   url: string;
+  fileData?: string;
   type: string;
   createdAt: number;
   uploadedBy: string;
   description?: string;
   targetRanges?: string[];
-  category?: 'general' | 'budget_allocation' | 'system';
+  category?: 'general' | 'budget_allocation' | 'budget_distribution' | 'system';
   amount?: number;
   schemeName?: string;
   sectorName?: string;
   rangeName?: string;
   soeName?: string;
+  targetTab?: string;
+  targetId?: string;
 };
 
 type Bill = {
@@ -878,6 +881,7 @@ export default function App() {
   const [subVoucherNoInput, setSubVoucherNoInput] = useState<string>('');
   const [subVoucherDescInput, setSubVoucherDescInput] = useState<string>('');
   const [subVoucherAmountInput, setSubVoucherAmountInput] = useState<string>('');
+  const [duplicatePayeeModalData, setDuplicatePayeeModalData] = useState<{ existingPayee: Payee; enteredName: string; enteredAccountNo: string } | null>(null);
 
   const [selectedMemoPayeeId, setSelectedMemoPayeeId] = useState<string>('');
   const [selectedMemoSchemeId, setSelectedMemoSchemeId] = useState<string>('');
@@ -898,6 +902,7 @@ export default function App() {
   const [notifSearchTerm, setNotifSearchTerm] = useState('');
   const [notifPage, setNotifPage] = useState(1);
   const [notifItemsPerPage, setNotifItemsPerPage] = useState<number | 'All'>(25);
+  const [notifCategoryFilter, setNotifCategoryFilter] = useState<'All' | 'general' | 'budget_allocation' | 'budget_distribution'>('All');
 
   const [budgetSearchTerm, setBudgetSearchTerm] = useState('');
   const [budgetPage, setBudgetPage] = useState(1);
@@ -2709,8 +2714,11 @@ export default function App() {
               <div className="flex items-center gap-2 self-end sm:self-auto">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('notifications')}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition-all flex items-center gap-1 cursor-pointer"
+                  onClick={() => {
+                    setActiveTab('Notifications');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   <span>View All Notifications</span>
@@ -2724,7 +2732,13 @@ export default function App() {
               {recentAllocations.slice(0, 2).map((al) => (
                 <div
                   key={`dash-alloc-${al.id}`}
-                  className="bg-white/95 p-3 rounded-lg border border-emerald-200 shadow-2xs hover:border-emerald-400 transition-all flex flex-col justify-between text-xs"
+                  onClick={() => {
+                    setActiveTab('Allocations');
+                    setSearchTerm(al.schemeName !== 'N/A' ? al.schemeName : '');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="bg-white/95 p-3 rounded-lg border border-emerald-200 shadow-2xs hover:border-emerald-500 hover:shadow-sm transition-all flex flex-col justify-between text-xs cursor-pointer group"
+                  title="Click to view this budget allocation details"
                 >
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <span className="font-extrabold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
@@ -2734,11 +2748,16 @@ export default function App() {
                     <span className="text-[10px] text-gray-500 font-medium">{al.date}</span>
                   </div>
                   <div className="space-y-0.5 text-gray-700">
-                    <div className="font-bold text-gray-900 flex items-center gap-1.5">
-                      <MapPin className="w-3 h-3 text-indigo-600 shrink-0" />
-                      <span>{al.rangeName}</span>
-                      <span className="text-gray-400 font-normal">|</span>
-                      <span className="text-emerald-800 font-semibold">{al.schemeName}</span>
+                    <div className="font-bold text-gray-900 flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <MapPin className="w-3 h-3 text-indigo-600 shrink-0" />
+                        <span>{al.rangeName}</span>
+                        <span className="text-gray-400 font-normal">|</span>
+                        <span className="text-emerald-800 font-semibold">{al.schemeName}</span>
+                      </div>
+                      <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        View <ChevronRight className="w-3 h-3" />
+                      </span>
                     </div>
                     <div className="text-[11px] text-gray-600 truncate">
                       <span className="font-semibold text-gray-700">Sector:</span> {al.sectorName} 
@@ -2752,21 +2771,46 @@ export default function App() {
               {relevantNotifs.slice(0, 2).map((nf) => (
                 <div
                   key={`dash-notif-${nf.id}`}
-                  className="bg-white/95 p-3 rounded-lg border border-indigo-200 shadow-2xs hover:border-indigo-400 transition-all flex flex-col justify-between text-xs cursor-pointer"
-                  onClick={() => setActiveTab('notifications')}
+                  className="bg-white/95 p-3 rounded-lg border border-indigo-200 shadow-2xs hover:border-indigo-500 hover:shadow-sm transition-all flex flex-col justify-between text-xs cursor-pointer group"
+                  onClick={() => {
+                    if (nf.url || nf.fileData) {
+                      handleViewFile(nf);
+                    } else if (nf.category === 'budget_allocation' || nf.type?.includes('allocation')) {
+                      setActiveTab('Allocations');
+                      setSearchTerm(nf.schemeName || '');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else if (nf.category === 'budget_distribution') {
+                      setActiveTab('Distributed Budget');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else {
+                      setActiveTab('Notifications');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  }}
+                  title={nf.url || nf.fileData ? "Click to open document directly" : "Click to view details"}
                 >
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <span className="font-extrabold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
                       <FileText className="w-3 h-3 text-indigo-700" />
-                      {nf.category === 'budget_allocation' ? 'Allocation Alert' : 'Notice / Circular'}
+                      {nf.category === 'budget_allocation' ? 'Allocation Alert' : nf.category === 'budget_distribution' ? 'Distribution Allotment' : 'Notice / Circular'}
                     </span>
-                    <span className="text-[10px] text-gray-500 font-medium">
-                      {nf.createdAt ? new Date(nf.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Recent'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500 font-medium">
+                        {nf.createdAt ? new Date(nf.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Recent'}
+                      </span>
+                      {(nf.url || nf.fileData) && (
+                        <span className="p-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors" title="Open PDF">
+                          <Eye className="w-3 h-3" />
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-0.5">
-                    <div className="font-bold text-gray-900 truncate" title={nf.name}>
-                      {nf.name}
+                    <div className="font-bold text-gray-900 truncate flex items-center justify-between gap-1.5" title={nf.name}>
+                      <span className="truncate">{nf.name}</span>
+                      <span className="text-[10px] text-indigo-600 font-bold flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        {nf.url || nf.fileData ? 'Open PDF' : 'View'} <ChevronRight className="w-3 h-3" />
+                      </span>
                     </div>
                     {nf.description && (
                       <div className="text-[11px] text-gray-600 truncate" title={nf.description}>
@@ -4114,6 +4158,32 @@ export default function App() {
         } else {
           fileRecord.rangeId = budgetFileSelection.rangeId || '';
           await addDoc(collection(db, 'distributedBudgetFiles'), fileRecord);
+        }
+
+        // Live notification sync for newly uploaded budget distribution / approved budget document
+        try {
+          const schObj = schemes.find(s => s.id === budgetFileSelection.schemeId);
+          const secObj = sectors.find(s => s.id === budgetFileSelection.sectorId);
+          const rgObj = ranges.find(r => r.id === budgetFileSelection.rangeId);
+          const rangeNameLabel = rgObj?.name || (type === 'distributed' ? 'All Ranges' : 'All');
+
+          await addDoc(collection(db, 'notifications'), {
+            name: `${type === 'approved' ? 'Approved Budget Document' : 'Budget Allotment Distribution'}: ${file.name}`,
+            description: `Scheme: ${schObj?.name || 'All'} | Sector: ${secObj?.name || 'General'} | Range: ${rangeNameLabel} | FY: ${activeFy.name}`,
+            url: downloadURL,
+            fileData: savedFileData,
+            type: 'application/pdf',
+            category: type === 'distributed' ? 'budget_distribution' : 'budget_allocation',
+            schemeName: schObj?.name || '',
+            sectorName: secObj?.name || '',
+            rangeName: rangeNameLabel,
+            targetTab: type === 'distributed' ? 'Distributed Budget' : 'Approved Budget',
+            targetRanges: budgetFileSelection.rangeId && rgObj ? [rgObj.name, 'All'] : ['All'],
+            createdAt: Date.now(),
+            uploadedBy: user?.uid || 'Admin'
+          });
+        } catch (notifErr) {
+          console.warn("Could not create notification for budget file upload:", notifErr);
         }
         
         setUploadStatus(prev => ({
@@ -6642,6 +6712,24 @@ export default function App() {
     const treasuryCode = (isAdmin() || isDEO()) ? (e.target.treasuryCode?.value || '') : (editingItem?.type === 'Payee' ? (editingItem.item.treasuryCode || '') : '');
     const rangeId = e.target.rangeId?.value || null;
 
+    // Check duplicate account number
+    const cleanAcc = (accountNumber || '').trim().replace(/\s+/g, '').toLowerCase();
+    const duplicate = payees.find(p => {
+      if (editingItem?.type === 'Payee' && p.id === editingItem.item.id) return false;
+      const pAcc = (p.accountNumber || '').trim().replace(/\s+/g, '').toLowerCase();
+      if (!pAcc || !cleanAcc) return false;
+      return pAcc === cleanAcc;
+    });
+
+    if (duplicate) {
+      setDuplicatePayeeModalData({
+        existingPayee: duplicate,
+        enteredName: (name || '').trim(),
+        enteredAccountNo: (accountNumber || '').trim()
+      });
+      return;
+    }
+
     try {
       if (editingItem?.type === 'Payee') {
         await updateDoc(doc(db, 'payees', editingItem.item.id), {
@@ -8158,9 +8246,33 @@ export default function App() {
       showAlert('Please enter Payee Name.');
       return;
     }
+    if (!entryAccountNo.trim()) {
+      showAlert('Please enter Payee Bank Account Number.');
+      return;
+    }
+
+    // Check duplicate account number in current memo list
+    const cleanAcc = entryAccountNo.trim().replace(/\s+/g, '').toLowerCase();
+    const duplicateInMemo = memoPayeeEntries.find((p, idx) => {
+      if (editingEntryIndex !== null && idx === editingEntryIndex) return false;
+      const pAcc = (p.accountNumber || '').trim().replace(/\s+/g, '').toLowerCase();
+      return Boolean(pAcc && pAcc === cleanAcc);
+    });
+
+    if (duplicateInMemo) {
+      showAlert(`Payee with Account Number "${entryAccountNo.trim()}" (${duplicateInMemo.name}) is already added in this Memo.`);
+      return;
+    }
+
+    // Must have at least one sub-voucher added
+    if (entrySubVouchers.length === 0) {
+      showAlert('Please add at least one Sub-Voucher / Bill in the breakdown form below to calculate the Expenditure Amount.');
+      return;
+    }
+
     const tot = parseFloat(entryTotalAmount);
     if (isNaN(tot) || tot <= 0) {
-      showAlert('Please enter a valid Total Amount.');
+      showAlert('Please enter a valid Total Amount through the Sub-Vouchers breakdown below.');
       return;
     }
 
@@ -8253,8 +8365,20 @@ export default function App() {
     setEntryITaxPercent(entry.iTaxPercent !== undefined ? String(entry.iTaxPercent) : '1');
     setEntryDeductGst(entry.deductGst !== undefined ? entry.deductGst : ((entry.gstAmount || 0) > 0));
     setEntryGstPercent(entry.gstPercent !== undefined ? String(entry.gstPercent) : '2');
-    setEntrySubVouchers(entry.subVouchers || []);
-    setShowSubVoucherSection(Boolean(entry.subVouchers && entry.subVouchers.length > 0));
+    
+    if (entry.subVouchers && entry.subVouchers.length > 0) {
+      setEntrySubVouchers(entry.subVouchers);
+    } else if (entry.totalAmount && entry.totalAmount > 0) {
+      setEntrySubVouchers([{
+        id: Math.random().toString(36).substring(2, 9),
+        voucherNo: 'V-01',
+        description: 'Expenditure Voucher',
+        amount: entry.totalAmount
+      }]);
+    } else {
+      setEntrySubVouchers([]);
+    }
+    setShowSubVoucherSection(true);
     setSubVoucherNoInput('');
     setSubVoucherDescInput('');
     setSubVoucherAmountInput('');
@@ -8531,7 +8655,10 @@ export default function App() {
           name: file.name,
           url: downloadURL,
           fileData: savedFileData,
-          type: file.type,
+          type: file.type || 'application/pdf',
+          category: 'general',
+          description: 'Official Notification / Circular Document',
+          targetRanges: ['All'],
           createdAt: Date.now(),
           uploadedBy: user?.uid
         });
@@ -8582,40 +8709,66 @@ export default function App() {
           if (!matches) return false;
         }
       }
-      return n.name.toLowerCase().includes(notifSearchTerm.toLowerCase()) ||
-             (n.description || '').toLowerCase().includes(notifSearchTerm.toLowerCase());
+
+      // Category filter check
+      if (notifCategoryFilter !== 'All') {
+        if (notifCategoryFilter === 'general' && n.category && n.category !== 'general') return false;
+        if (notifCategoryFilter === 'budget_allocation' && n.category !== 'budget_allocation') return false;
+        if (notifCategoryFilter === 'budget_distribution' && n.category !== 'budget_distribution') return false;
+      }
+
+      const query = notifSearchTerm.toLowerCase();
+      return n.name.toLowerCase().includes(query) ||
+             (n.description || '').toLowerCase().includes(query) ||
+             (n.schemeName || '').toLowerCase().includes(query) ||
+             (n.sectorName || '').toLowerCase().includes(query) ||
+             (n.rangeName || '').toLowerCase().includes(query);
     });
 
     const paginatedNotifications = notifItemsPerPage === 'All' 
       ? filteredNotifications 
       : filteredNotifications.slice((notifPage - 1) * notifItemsPerPage, notifPage * notifItemsPerPage);
 
+    const countAll = notifications.length;
+    const countCirculars = notifications.filter(n => !n.category || n.category === 'general').length;
+    const countAllocations = notifications.filter(n => n.category === 'budget_allocation').length;
+    const countDistributions = notifications.filter(n => n.category === 'budget_distribution').length;
+
     return (
       <div className="space-y-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Notifications</h2>
-              <p className="text-sm text-gray-500">View and manage official notifications and documents.</p>
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-600 text-white rounded-lg shadow-xs">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Notifications & Circulars Hub</h2>
+                  <p className="text-xs text-gray-500">Live notifications for budget distributions, allocations, and official departmental circulars.</p>
+                </div>
+              </div>
             </div>
-            <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
               <div className="flex items-center gap-1 w-full sm:w-auto">
                 <div className="relative w-full sm:w-64">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Search notifications..."
+                    placeholder="Search notifications, schemes..."
                     value={notifSearchTerm}
                     onChange={(e) => { setNotifSearchTerm(e.target.value); setNotifPage(1); }}
                     className="pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
                   />
+                  {notifSearchTerm && (
+                    <button
+                      onClick={() => setNotifSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-                <button 
-                  className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-                  title="Search"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
               </div>
               {isAdmin() && (
                 <div className="flex items-center gap-4 w-full sm:w-auto">
@@ -8630,16 +8783,16 @@ export default function App() {
                       </div>
                       <button 
                         onClick={() => uploadTasks['notification']?.cancel()}
-                        className="p-1 hover:bg-emerald-100 rounded-full text-emerald-600"
+                        className="p-1 hover:bg-emerald-100 rounded-full text-emerald-600 cursor-pointer"
                         title="Cancel Upload"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   )}
-                  <label className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-all cursor-pointer shadow-sm w-full sm:w-auto">
+                  <label className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-all cursor-pointer shadow-sm w-full sm:w-auto active:scale-95 text-sm">
                     <Plus className="w-4 h-4" />
-                    Upload
+                    Upload Notice / Circular
                     <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleNotificationUpload} />
                   </label>
                 </div>
@@ -8647,114 +8800,301 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {/* Category Filter Chips */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-gray-100">
+            <button
+              onClick={() => { setNotifCategoryFilter('All'); setNotifPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                notifCategoryFilter === 'All'
+                  ? 'bg-gray-900 text-white shadow-xs'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>All Notifications</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${notifCategoryFilter === 'All' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`}>
+                {countAll}
+              </span>
+            </button>
+
+            <button
+              onClick={() => { setNotifCategoryFilter('general'); setNotifPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                notifCategoryFilter === 'general'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Notices & Circulars</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${notifCategoryFilter === 'general' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'}`}>
+                {countCirculars}
+              </span>
+            </button>
+
+            <button
+              onClick={() => { setNotifCategoryFilter('budget_allocation'); setNotifPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                notifCategoryFilter === 'budget_allocation'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              }`}
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>Budget Allocations</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${notifCategoryFilter === 'budget_allocation' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'}`}>
+                {countAllocations}
+              </span>
+            </button>
+
+            <button
+              onClick={() => { setNotifCategoryFilter('budget_distribution'); setNotifPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                notifCategoryFilter === 'budget_distribution'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+              }`}
+            >
+              <FileBarChart className="w-3.5 h-3.5" />
+              <span>Budget Distribution Allotments</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${notifCategoryFilter === 'budget_distribution' ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-800'}`}>
+                {countDistributions}
+              </span>
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-2xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-gray-50/50">
-                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">File Name</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">Upload Date</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b">Visible To (Ranges)</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b text-right">Actions</th>
+                  <tr className="bg-gray-50/75 border-b border-gray-200">
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Document / Update Details</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Category</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Visible To</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider text-right">Quick Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {paginatedNotifications.length > 0 ? (
-                    paginatedNotifications.map((notif) => (
-                      <tr key={notif.id} className="hover:bg-gray-50 transition-colors group">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-                              {notif.type?.includes('pdf') ? <FileText className="w-4 h-4" /> : <PieChartIcon className="w-4 h-4" />}
+                    paginatedNotifications.map((notif) => {
+                      const isPdfOrFile = Boolean(notif.url || notif.fileData);
+                      const isAllocation = notif.category === 'budget_allocation' || notif.type?.includes('allocation');
+                      const isDistribution = notif.category === 'budget_distribution';
+
+                      return (
+                        <tr 
+                          key={notif.id} 
+                          className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
+                          onClick={() => {
+                            if (isPdfOrFile) {
+                              handleViewFile(notif);
+                            } else if (isAllocation) {
+                              setActiveTab('Allocations');
+                              setSearchTerm(notif.schemeName || '');
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            } else if (isDistribution) {
+                              setActiveTab('Distributed Budget');
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }
+                          }}
+                        >
+                          <td className="px-4 py-3">
+                            <div className="flex items-start gap-3">
+                              <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${
+                                isAllocation 
+                                  ? 'bg-emerald-100 text-emerald-700' 
+                                  : isDistribution 
+                                  ? 'bg-indigo-100 text-indigo-700' 
+                                  : 'bg-blue-100 text-blue-700'
+                              }`}>
+                                {isAllocation ? (
+                                  <DollarSign className="w-4 h-4" />
+                                ) : isDistribution ? (
+                                  <FileBarChart className="w-4 h-4" />
+                                ) : (
+                                  <FileText className="w-4 h-4" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors flex items-center gap-2">
+                                  <span>{notif.name}</span>
+                                  {isPdfOrFile && (
+                                    <span className="text-[9px] bg-red-50 text-red-700 border border-red-200 px-1 py-0.2 rounded font-bold uppercase">
+                                      PDF
+                                    </span>
+                                  )}
+                                </div>
+                                {notif.description && (
+                                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{notif.description}</p>
+                                )}
+                                {(notif.schemeName || notif.amount) && (
+                                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-gray-600">
+                                    {notif.amount && (
+                                      <span className="font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                        Amount: ₹{Number(notif.amount).toLocaleString('en-IN')}
+                                      </span>
+                                    )}
+                                    {notif.schemeName && (
+                                      <span className="font-medium bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">
+                                        Scheme: {notif.schemeName}
+                                      </span>
+                                    )}
+                                    {notif.rangeName && (
+                                      <span className="font-medium bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100">
+                                        Range: {notif.rangeName}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{notif.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">
-                          {new Date(notif.createdAt).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isAdmin() ? (
-                            <div className="flex flex-wrap gap-1 max-w-xs">
-                              {['All', 'Narag', 'Sarahan', 'Rajgarh', 'Habban', 'Division'].map(rangeName => {
-                                const currentRanges = notif.targetRanges || ['All'];
-                                const isChecked = currentRanges.includes(rangeName);
-                                return (
-                                  <button
-                                    key={rangeName}
-                                    type="button"
-                                    onClick={async () => {
-                                      let updated: string[];
-                                      if (rangeName === 'All') {
-                                        updated = isChecked ? [] : ['All'];
-                                      } else {
-                                        let filtered = currentRanges.filter(r => r !== 'All');
-                                        if (isChecked) {
-                                          updated = filtered.filter(r => r !== rangeName);
-                                        } else {
-                                          updated = [...filtered, rangeName];
-                                        }
-                                        if (updated.length === 0) updated = ['All'];
-                                      }
-                                      try {
-                                        await updateDoc(doc(db, 'notifications', notif.id), { targetRanges: updated });
-                                      } catch (e) {
-                                        console.error("Error updating notification target ranges:", e);
-                                      }
-                                    }}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border ${
-                                      isChecked 
-                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
-                                        : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200'
-                                    }`}
-                                    title={`Click to toggle visibility for ${rangeName}`}
-                                  >
-                                    {rangeName}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <span className="text-xs font-semibold text-emerald-700">
-                              {(notif.targetRanges && notif.targetRanges.length > 0) ? notif.targetRanges.join(', ') : 'All Ranges'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex justify-end gap-2">
-                            <button 
-                              type="button"
-                              onClick={() => handleViewFile(notif)}
-                              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                              title="View"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button 
-                              type="button"
-                              onClick={() => handleDownloadFile(notif)}
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                              title="Download"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            {isAdmin() && (
-                              <button 
-                                onClick={() => handleDeleteNotification(notif)}
-                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                          </td>
+
+                          <td className="px-4 py-3">
+                            {isAllocation ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <DollarSign className="w-3 h-3" /> Allocation
+                              </span>
+                            ) : isDistribution ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                <FileBarChart className="w-3 h-3" /> Distribution
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                <FileText className="w-3 h-3" /> Notice / Circular
+                              </span>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                            {notif.createdAt ? new Date(notif.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                          </td>
+
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            {isAdmin() ? (
+                              <div className="flex flex-wrap gap-1 max-w-xs">
+                                {['All', 'Narag', 'Sarahan', 'Rajgarh', 'Habban', 'Division'].map(rangeName => {
+                                  const currentRanges = notif.targetRanges || ['All'];
+                                  const isChecked = currentRanges.includes(rangeName);
+                                  return (
+                                    <button
+                                      key={rangeName}
+                                      type="button"
+                                      onClick={async () => {
+                                        let updated: string[];
+                                        if (rangeName === 'All') {
+                                          updated = isChecked ? [] : ['All'];
+                                        } else {
+                                          let filtered = currentRanges.filter(r => r !== 'All');
+                                          if (isChecked) {
+                                            updated = filtered.filter(r => r !== rangeName);
+                                          } else {
+                                            updated = [...filtered, rangeName];
+                                          }
+                                          if (updated.length === 0) updated = ['All'];
+                                        }
+                                        try {
+                                          await updateDoc(doc(db, 'notifications', notif.id), { targetRanges: updated });
+                                        } catch (e) {
+                                          console.error("Error updating notification target ranges:", e);
+                                        }
+                                      }}
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border cursor-pointer ${
+                                        isChecked 
+                                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                                          : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200'
+                                      }`}
+                                      title={`Click to toggle visibility for ${rangeName}`}
+                                    >
+                                      {rangeName}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                                {(notif.targetRanges && notif.targetRanges.length > 0) ? notif.targetRanges.join(', ') : 'All Ranges'}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-end items-center gap-1.5">
+                              {isPdfOrFile && (
+                                <>
+                                  <button 
+                                    type="button"
+                                    onClick={() => handleViewFile(notif)}
+                                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border border-emerald-200"
+                                    title="View PDF Document"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>View PDF</span>
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    onClick={() => handleDownloadFile(notif)}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-blue-200"
+                                    title="Download File"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+
+                              {isAllocation && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveTab('Allocations');
+                                    setSearchTerm(notif.schemeName || '');
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  }}
+                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                                  title="Go to Budget Allocation Tab"
+                                >
+                                  <span>View in Allocation</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {isDistribution && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveTab('Distributed Budget');
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  }}
+                                  className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                                  title="Go to Distributed Budget Tab"
+                                >
+                                  <span>Go to Distribution</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {isAdmin() && (
+                                <button 
+                                  onClick={() => handleDeleteNotification(notif)}
+                                  className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Notification"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
-                      <td colSpan={3} className="px-4 py-12 text-center text-gray-400 italic text-sm">
-                        No notifications found.
+                      <td colSpan={5} className="px-4 py-12 text-center text-gray-400 italic text-sm">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Bell className="w-8 h-8 text-gray-300" />
+                          <p>No notifications found matching your filter criteria.</p>
+                        </div>
                       </td>
                     </tr>
                   )}
@@ -12068,7 +12408,7 @@ export default function App() {
 
         {/* Tab Content */}
         {activeTab === 'Dashboard' && renderDashboard()}
-        {activeTab === 'Notifications' && renderNotificationsTab()}
+        {(activeTab === 'Notifications' || activeTab === 'notifications') && renderNotificationsTab()}
         
         {/* Scroll to Top Button */}
         {showScrollTop && (
@@ -14138,146 +14478,146 @@ export default function App() {
                         </div>
 
                         {/* Expenditure Amount & Sub-Vouchers Breakdown */}
-                        <div className="space-y-2 sm:col-span-2 bg-white p-3 rounded-xl border border-gray-200">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                            <label className="block font-bold text-gray-800">
-                              Total Expenditure Amount (₹) <span className="text-red-500">*</span>
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => setShowSubVoucherSection(!showSubVoucherSection)}
-                              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 self-start sm:self-auto cursor-pointer ${
-                                showSubVoucherSection || entrySubVouchers.length > 0
-                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200'
-                              }`}
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>
-                                {entrySubVouchers.length > 0
-                                  ? `Sub-Vouchers Active (${entrySubVouchers.length})`
-                                  : '+ Breakdown into Sub-Vouchers / Bills'}
+                        <div className="space-y-2 sm:col-span-2 bg-gradient-to-br from-slate-50 to-gray-100 p-3.5 rounded-xl border border-slate-300 shadow-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                            <label className="block font-bold text-gray-800 flex items-center gap-1.5 text-xs">
+                              <Lock className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Total Expenditure Amount (₹)</span>
+                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                                Locked (Read-Only)
                               </span>
-                            </button>
+                            </label>
+                            <span className="text-[10px] text-gray-500 font-medium">
+                              Auto-calculated from Sub-Vouchers Breakdown below
+                            </span>
                           </div>
 
-                          <input
-                            type="number"
-                            required
-                            step="1"
-                            value={entryTotalAmount}
-                            onChange={(e) => handleTotalAmountInputChange(e.target.value)}
-                            placeholder="e.g. 35000"
-                            className="w-full p-2.5 border rounded-lg font-black text-lg bg-emerald-50/40 border-emerald-300 focus:ring-2 focus:ring-emerald-500 outline-none text-emerald-950"
-                          />
-
-                          {/* Sub-Vouchers Breakdown Box */}
-                          {(showSubVoucherSection || entrySubVouchers.length > 0) && (
-                            <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1">
-                                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                                  Sub-Vouchers / Bill Breakdown
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-medium">
-                                  Sum auto-populates Total Amount
-                                </span>
-                              </div>
-
-                              {/* Sub-voucher inline adder */}
-                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-white p-2.5 rounded-lg border border-slate-200 items-end">
-                                <div className="sm:col-span-3 space-y-1">
-                                  <label className="block text-[10px] font-bold text-gray-600">Voucher / Bill No.</label>
-                                  <input
-                                    type="text"
-                                    value={subVoucherNoInput}
-                                    onChange={(e) => setSubVoucherNoInput(e.target.value)}
-                                    placeholder="e.g. V-01 / Bill-104"
-                                    className="w-full p-1.5 border rounded text-xs bg-gray-50 focus:bg-white outline-none"
-                                  />
-                                </div>
-                                <div className="sm:col-span-5 space-y-1">
-                                  <label className="block text-[10px] font-bold text-gray-600">Work Description / Purpose</label>
-                                  <input
-                                    type="text"
-                                    value={subVoucherDescInput}
-                                    onChange={(e) => setSubVoucherDescInput(e.target.value)}
-                                    placeholder="e.g. Nursery labour / Soil works"
-                                    className="w-full p-1.5 border rounded text-xs bg-gray-50 focus:bg-white outline-none"
-                                  />
-                                </div>
-                                <div className="sm:col-span-2 space-y-1">
-                                  <label className="block text-[10px] font-bold text-gray-600">Amount (₹)</label>
-                                  <input
-                                    type="number"
-                                    step="1"
-                                    value={subVoucherAmountInput}
-                                    onChange={(e) => setSubVoucherAmountInput(e.target.value)}
-                                    placeholder="e.g. 5000"
-                                    className="w-full p-1.5 border rounded text-xs font-bold bg-gray-50 focus:bg-white outline-none"
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleAddSubVoucher();
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                <div className="sm:col-span-2">
-                                  <button
-                                    type="button"
-                                    onClick={handleAddSubVoucher}
-                                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                  >
-                                    <Plus className="w-3 h-3" /> Add
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* List of added sub-vouchers */}
-                              {entrySubVouchers.length > 0 && (
-                                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                                  {entrySubVouchers.map((sv, idx) => (
-                                    <div
-                                      key={sv.id}
-                                      className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-bold text-slate-400 text-[10px]">#{idx + 1}</span>
-                                        <span className="font-bold text-slate-800 font-mono">
-                                          {sv.voucherNo || 'Sub-voucher'}
-                                        </span>
-                                        {sv.description && (
-                                          <span className="text-slate-500 text-[11px] italic">
-                                            ({sv.description})
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-black text-emerald-800">
-                                          ₹{Math.round(sv.amount).toLocaleString('en-IN')}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemoveSubVoucher(sv.id)}
-                                          className="text-red-500 hover:text-red-700 p-0.5 rounded cursor-pointer"
-                                          title="Remove sub-voucher"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                  <div className="flex justify-between items-center px-2 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 rounded">
-                                    <span>Total Sub-Vouchers Sum:</span>
-                                    <span className="text-emerald-900 font-black">
-                                      ₹{entrySubVouchers.reduce((s, v) => s + v.amount, 0).toLocaleString('en-IN')}
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
+                          <div className="relative">
+                            <input
+                              type="text"
+                              readOnly
+                              value={entryTotalAmount ? `₹ ${Number(entryTotalAmount).toLocaleString('en-IN')}` : '₹ 0 (Add sub-vouchers below)'}
+                              placeholder="₹ 0 (Auto-calculated)"
+                              className="w-full p-2.5 pl-3 border border-slate-300 rounded-lg font-black text-lg bg-gray-100 text-slate-900 cursor-not-allowed select-none shadow-inner outline-none"
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-slate-400">
+                              <Lock className="w-4 h-4 text-slate-400" />
                             </div>
-                          )}
+                          </div>
+
+                          {/* Sub-Vouchers Breakdown Box - Always Open and Prominent */}
+                          <div className="mt-3 p-3.5 bg-white border border-emerald-200 rounded-xl space-y-3 shadow-sm">
+                            <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
+                              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wide flex items-center gap-1.5">
+                                <FileText className="w-4 h-4 text-emerald-700" />
+                                Voucher / Bill Breakup Form
+                                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                  {entrySubVouchers.length} {entrySubVouchers.length === 1 ? 'Voucher' : 'Vouchers'} Added
+                                </span>
+                              </span>
+                              <span className="text-[11px] text-emerald-800 font-bold">
+                                Total Sum: ₹{entrySubVouchers.reduce((s, v) => s + v.amount, 0).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+
+                            {/* Sub-voucher input row */}
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-200 items-end">
+                              <div className="sm:col-span-3 space-y-1">
+                                <label className="block text-[10px] font-bold text-gray-700">Voucher / Bill No. <span className="text-red-500">*</span></label>
+                                <input
+                                  type="text"
+                                  value={subVoucherNoInput}
+                                  onChange={(e) => setSubVoucherNoInput(e.target.value)}
+                                  placeholder="e.g. V-01 / Bill-104"
+                                  className="w-full p-2 border border-gray-300 rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                              </div>
+                              <div className="sm:col-span-5 space-y-1">
+                                <label className="block text-[10px] font-bold text-gray-700">Work Description / Purpose</label>
+                                <input
+                                  type="text"
+                                  value={subVoucherDescInput}
+                                  onChange={(e) => setSubVoucherDescInput(e.target.value)}
+                                  placeholder="e.g. Nursery labour / Soil works"
+                                  className="w-full p-2 border border-gray-300 rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                              </div>
+                              <div className="sm:col-span-2 space-y-1">
+                                <label className="block text-[10px] font-bold text-gray-700">Amount (₹) <span className="text-red-500">*</span></label>
+                                <input
+                                  type="number"
+                                  step="1"
+                                  value={subVoucherAmountInput}
+                                  onChange={(e) => setSubVoucherAmountInput(e.target.value)}
+                                  placeholder="e.g. 5000"
+                                  className="w-full p-2 border border-gray-300 rounded text-xs font-bold bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddSubVoucher();
+                                    }
+                                  }}
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <button
+                                  type="button"
+                                  onClick={handleAddSubVoucher}
+                                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                                >
+                                  <Plus className="w-3.5 h-3.5" /> Add Voucher
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* List of added sub-vouchers */}
+                            {entrySubVouchers.length > 0 ? (
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                {entrySubVouchers.map((sv, idx) => (
+                                  <div
+                                    key={sv.id}
+                                    className="flex items-center justify-between bg-slate-50 hover:bg-emerald-50/40 px-3 py-2 rounded-lg border border-slate-200 text-xs transition-colors"
+                                  >
+                                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                      <span className="font-bold text-slate-400 text-[10px] w-5">#{idx + 1}</span>
+                                      <span className="font-bold text-slate-800 font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
+                                        {sv.voucherNo || 'Sub-voucher'}
+                                      </span>
+                                      {sv.description && (
+                                        <span className="text-slate-600 text-[11px] truncate">
+                                          {sv.description}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0 ml-2">
+                                      <span className="font-black text-emerald-800 text-xs">
+                                        ₹{Math.round(sv.amount).toLocaleString('en-IN')}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveSubVoucher(sv.id)}
+                                        className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded cursor-pointer transition-colors"
+                                        title="Remove sub-voucher"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between items-center px-3 py-2 text-xs font-bold text-slate-800 bg-emerald-50 rounded-lg border border-emerald-200">
+                                  <span>Total Auto-Calculated Expenditure:</span>
+                                  <span className="text-emerald-900 font-black text-sm">
+                                    ₹{entrySubVouchers.reduce((s, v) => s + v.amount, 0).toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3 text-center bg-slate-50 border border-dashed border-slate-300 rounded-lg text-slate-500 text-xs">
+                                <p className="font-semibold text-slate-600">No vouchers added yet for this payee.</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">Enter Voucher / Bill No. and Amount above and click "+ Add Voucher" to populate expenditure.</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {/* Deductions Checkboxes */}
@@ -15946,6 +16286,69 @@ export default function App() {
               </div>
               <div className="bg-gray-50 p-3 border-t flex justify-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
                 Forest Budget Control System • Treasury Bill Format
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Duplicate Payee Popup Alert Modal */}
+        {duplicatePayeeModalData && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-red-100 transform transition-all">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-red-100 text-red-700 rounded-full shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-bold text-gray-900 leading-snug">
+                    Payee Already Exists
+                  </h3>
+                  <p className="text-xs text-gray-600 mt-1">
+                    A payee with this Bank Account Number is already registered in the Payee List. You cannot add the same account number again.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Existing Registered Payee:</div>
+                <div className="flex justify-between items-center py-0.5">
+                  <span className="text-gray-500 font-medium">Payee Name:</span>
+                  <span className="font-bold text-gray-900">{duplicatePayeeModalData.existingPayee.name}</span>
+                </div>
+                <div className="flex justify-between items-center py-0.5">
+                  <span className="text-gray-500 font-medium">Account Number:</span>
+                  <span className="font-mono font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
+                    {duplicatePayeeModalData.existingPayee.accountNumber}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-0.5">
+                  <span className="text-gray-500 font-medium">IFSC Code:</span>
+                  <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.ifscCode || 'N/A'}</span>
+                </div>
+                {duplicatePayeeModalData.existingPayee.treasuryCode && (
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-gray-500 font-medium">Treasury Code:</span>
+                    <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.treasuryCode}</span>
+                  </div>
+                )}
+                {duplicatePayeeModalData.existingPayee.rangeId && (
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-gray-500 font-medium">Assigned Range:</span>
+                    <span className="font-medium text-gray-800">
+                      {ranges.find(r => r.id === duplicatePayeeModalData.existingPayee.rangeId)?.name || 'General'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDuplicatePayeeModalData(null)}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  OK, Understood
+                </button>
               </div>
             </div>
           </div>
