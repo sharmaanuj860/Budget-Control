@@ -33,20 +33,21 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAuthenticated();
+      allow read, write: if isAuthenticated();
     }
 
     match /test/connection {
-      allow get: if true;
+      allow read, write: if true;
     }
 
     match /financialYears/{id} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /ranges/{id} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /schemes/{id} {
@@ -66,7 +67,8 @@ service cloud.firestore {
     }
 
     match /soeHeads/{id} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /approvedBudgets/{id} {
@@ -86,7 +88,8 @@ service cloud.firestore {
     }
 
     match /expenditures/{id} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /appSettings/{id} {
@@ -94,7 +97,8 @@ service cloud.firestore {
     }
 
     match /bills/{id} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /surrenders/{id} {
@@ -102,7 +106,8 @@ service cloud.firestore {
     }
 
     match /payees/{id} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /featureLocks/{id} {
