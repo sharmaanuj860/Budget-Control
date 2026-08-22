@@ -465,7 +465,7 @@ const PayeeSelector = ({
       const pAmt = parseFloat(sp.amount) || 0;
       const pGst = p?.gstNumber || gstNumber;
       const pTds = (selectedDeductions.includes('TDS') && pAmt > 30000) ? Math.round(pAmt * 0.01) : 0;
-      const pGstTds = (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) ? Math.round(pAmt * 0.02) : 0;
+      const pGstTds = (selectedDeductions.includes('TDS_GST') && pAmt > 250000) ? Math.round(pAmt * 0.02) : 0;
       totalDeductions += (pTds + pGstTds);
     });
     return totalDeductions;
@@ -574,7 +574,7 @@ const PayeeSelector = ({
             const pAmt = parseFloat(sp.amount) || 0;
             const pGst = p?.gstNumber || gstNumber;
             const pTds = (selectedDeductions.includes('TDS') && pAmt > 30000) ? Math.round(pAmt * 0.01) : 0;
-            const pGstTds = (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) ? Math.round(pAmt * 0.02) : 0;
+            const pGstTds = (selectedDeductions.includes('TDS_GST') && pAmt > 250000) ? Math.round(pAmt * 0.02) : 0;
             const pTax = pTds + pGstTds;
             const pNet = pAmt - pTax;
 
@@ -1274,14 +1274,18 @@ export default function App() {
           let userData = userDoc.exists() ? userDoc.data() as AppUser : null;
 
           // Hardcode roles for specific emails
-          if (!userData) {
-            if (email === 'admin@rajgarhforest.app' || email === 'sharmaanuj860@gmail.com') {
-              userData = { id: currentUser.uid, email: currentUser.email!, role: 'admin', maxSessions: 999999, activeSessions: [] };
+          if (email === 'admin@rajgarhforest.app' || email === 'sharmaanuj860@gmail.com') {
+            if (!userData || userData.role !== 'admin') {
+              userData = { ...(userData || {}), id: currentUser.uid, email: currentUser.email!, role: 'admin', maxSessions: 999999, activeSessions: userData?.activeSessions || [] };
               await setDoc(doc(db, 'users', currentUser.uid), userData, { merge: true });
-            } else if (email === 'da123@rajgarhforest.app') {
+            }
+          } else if (email === 'da123@rajgarhforest.app') {
+            if (!userData) {
               userData = { id: currentUser.uid, email: currentUser.email!, role: 'deo', maxSessions: 999999, activeSessions: [] };
               await setDoc(doc(db, 'users', currentUser.uid), userData, { merge: true });
-            } else if (email === 'da789@rajgarhforest.app') {
+            }
+          } else if (email === 'da789@rajgarhforest.app') {
+            if (!userData) {
               userData = { id: currentUser.uid, email: currentUser.email!, role: 'approver', maxSessions: 999999, activeSessions: [] };
               await setDoc(doc(db, 'users', currentUser.uid), userData, { merge: true });
             }
@@ -1842,7 +1846,7 @@ export default function App() {
     );
   }, [payees, userRole, userRangeId, user?.uid]);
 
-  const isAdmin = () => userRole === 'admin';
+  const isAdmin = () => userRole === 'admin' || user?.email?.toLowerCase() === 'admin@rajgarhforest.app' || user?.email?.toLowerCase() === 'sharmaanuj860@gmail.com';
   const isDEO = () => userRole === 'deo';
 
   // --- Real-time Access Control Enforcement ---
@@ -6838,7 +6842,7 @@ export default function App() {
           if (selectedDeductions.includes('TDS') && pAmt > 30000) {
             pTdsAmt = Math.round(pAmt * 0.01);
           }
-          if (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) {
+          if (selectedDeductions.includes('TDS_GST') && pAmt > 250000) {
             pTdsGstAmt = Math.round(pAmt * 0.02);
           }
           
@@ -6904,7 +6908,7 @@ export default function App() {
     if (selectedDeductions.includes('TDS') && amt > 30000) {
       tdsAmt = Math.round(amt * 0.01);
     }
-    if (selectedDeductions.includes('TDS_GST') && amt > 250000 && hasGst) {
+    if (selectedDeductions.includes('TDS_GST') && amt > 250000) {
       tdsGstAmt = Math.round(amt * 0.02);
     }
     
@@ -8523,7 +8527,7 @@ export default function App() {
       } else {
         setEntryDeductITax(false);
       }
-      if (tot > 250000 && Boolean(entryGst && entryGst.trim())) {
+      if (tot > 250000) {
         setEntryDeductGst(true);
       } else {
         setEntryDeductGst(false);
@@ -8634,7 +8638,7 @@ export default function App() {
     }
 
     const isITaxApplicable = entryDeductITax && tot > 30000;
-    const isGstApplicable = entryDeductGst && tot > 250000 && Boolean(entryGst && entryGst.trim());
+    const isGstApplicable = entryDeductGst && tot > 250000;
 
     const iTaxP = isITaxApplicable ? (parseFloat(entryITaxPercent) || 0) : 0;
     const gstP = isGstApplicable ? (parseFloat(entryGstPercent) || 0) : 0;
@@ -13732,7 +13736,29 @@ export default function App() {
                           selectedPayees={selectedPayeesForExpense}
                           onSelect={(payeeId) => setSelectedPayeesForExpense([...selectedPayeesForExpense, { payeeId, amount: '' }])}
                           onRemove={(payeeId) => setSelectedPayeesForExpense(selectedPayeesForExpense.filter(p => p.payeeId !== payeeId))}
-                          onAmountChange={(payeeId, amount) => setSelectedPayeesForExpense(selectedPayeesForExpense.map(p => p.payeeId === payeeId ? { ...p, amount } : p))}
+                          onAmountChange={(payeeId, amount) => {
+                            const updated = selectedPayeesForExpense.map(p => p.payeeId === payeeId ? { ...p, amount } : p);
+                            setSelectedPayeesForExpense(updated);
+                            
+                            // Auto-sync deduction checkboxes based on amounts entered
+                            const anyAbove30k = updated.some(p => (parseFloat(p.amount) || 0) > 30000);
+                            const anyAbove250k = updated.some(p => (parseFloat(p.amount) || 0) > 250000);
+                            
+                            setSelectedDeductions(prev => {
+                              const next = [...prev];
+                              if (anyAbove30k && !next.includes('TDS')) next.push('TDS');
+                              if (!anyAbove30k && next.includes('TDS')) {
+                                const idx = next.indexOf('TDS');
+                                if (idx !== -1) next.splice(idx, 1);
+                              }
+                              if (anyAbove250k && !next.includes('TDS_GST')) next.push('TDS_GST');
+                              if (!anyAbove250k && next.includes('TDS_GST')) {
+                                const idx = next.indexOf('TDS_GST');
+                                if (idx !== -1) next.splice(idx, 1);
+                              }
+                              return next;
+                            });
+                          }}
                           ranges={ranges}
                           availableBalance={currentSoeBalance}
                           selectedDeductions={selectedDeductions}
@@ -13768,7 +13794,25 @@ export default function App() {
                             type="number" 
                             required={editingItem?.type === 'Expenditure'} 
                             value={expenseAmount}
-                            onChange={(e) => setExpenseAmount(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setExpenseAmount(val);
+                              const num = parseFloat(val) || 0;
+                              setSelectedDeductions(prev => {
+                                const next = [...prev];
+                                if (num > 30000 && !next.includes('TDS')) next.push('TDS');
+                                if (num <= 30000 && next.includes('TDS')) {
+                                  const idx = next.indexOf('TDS');
+                                  if (idx !== -1) next.splice(idx, 1);
+                                }
+                                if (num > 250000 && !next.includes('TDS_GST')) next.push('TDS_GST');
+                                if (num <= 250000 && next.includes('TDS_GST')) {
+                                  const idx = next.indexOf('TDS_GST');
+                                  if (idx !== -1) next.splice(idx, 1);
+                                }
+                                return next;
+                              });
+                            }}
                             placeholder="0.00" 
                             className={`w-full p-2 border rounded text-sm ${isExpenseInvalid ? 'border-red-500 bg-red-50' : ''}`} 
                           />
@@ -13831,7 +13875,7 @@ export default function App() {
                                     if (selectedDeductions.includes('TDS') && pAmt > 30000) {
                                       totalTds += Math.round(pAmt * 0.01);
                                     }
-                                    if (selectedDeductions.includes('TDS_GST') && pAmt > 250000 && Boolean(pGst && pGst.trim())) {
+                                    if (selectedDeductions.includes('TDS_GST') && pAmt > 250000) {
                                       totalGstTds += Math.round(pAmt * 0.02);
                                     }
                                   });
@@ -13842,7 +13886,7 @@ export default function App() {
                                   if (selectedDeductions.includes('TDS') && amt > 30000) {
                                     totalTds = Math.round(amt * 0.01);
                                   }
-                                  if (selectedDeductions.includes('TDS_GST') && amt > 250000 && hasGst) {
+                                  if (selectedDeductions.includes('TDS_GST') && amt > 250000) {
                                     totalGstTds = Math.round(amt * 0.02);
                                   }
                                 }
@@ -16342,7 +16386,7 @@ export default function App() {
 
                               const deductionsToSet: ('TDS' | 'TDS_GST')[] = [];
                               const hasITax = (memo.totalITax || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductITax || (e.iTaxAmount && e.iTaxAmount > 0) || Number(e.totalAmount) > 30000);
-                              const hasGst = (memo.totalGst || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductGst || (e.gstAmount && e.gstAmount > 0) || (Number(e.totalAmount) > 250000 && Boolean(e.gstNumber && e.gstNumber.trim())));
+                              const hasGst = (memo.totalGst || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductGst || (e.gstAmount && e.gstAmount > 0) || Number(e.totalAmount) > 250000);
                               if (hasITax) deductionsToSet.push('TDS');
                               if (hasGst) deductionsToSet.push('TDS_GST');
                               setSelectedDeductions(deductionsToSet);
