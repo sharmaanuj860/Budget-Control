@@ -234,6 +234,8 @@
         "gstNumber": { "type": "string", "description": "GST number of the payee" },
         "treasuryCode": { "type": "string", "description": "Treasury portal payee ID / code" },
         "rangeId": { "type": "string", "description": "ID of the range (optional)" },
+        "mappedUserIds": { "type": "array", "items": { "type": "string" }, "description": "List of user UIDs mapped to this payee" },
+        "mappedRangeIds": { "type": "array", "items": { "type": "string" }, "description": "List of range IDs mapped to this payee" },
         "createdBy": { "type": "string", "description": "UID of the user who created the payee" },
         "createdAt": { "type": "number", "description": "Timestamp of creation" },
         "updatedAt": { "type": "number", "description": "Timestamp of last update" }
@@ -298,7 +300,11 @@
         "createdBy": { "type": "string", "description": "Creator UID" },
         "createdByRole": { "type": "string", "description": "Creator role" },
         "createdAt": { "type": "number", "description": "Creation timestamp" },
-        "updatedAt": { "type": "number", "description": "Update timestamp" }
+        "updatedAt": { "type": "number", "description": "Update timestamp" },
+        "remarks": { "type": "string", "description": "General remarks or notes" },
+        "correctionRemarks": { "type": "string", "description": "Specific remarks by Admin or DEO explaining reasons for returning memo for correction" },
+        "correctionRemarksBy": { "type": "string", "description": "Role/Name of user who requested correction" },
+        "correctionRemarksAt": { "type": "number", "description": "Timestamp when memo was returned for correction" }
       },
       "required": ["memoNo", "date", "monthYear", "status", "totalAmount", "payeeEntries", "createdBy"]
     }

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, ArrowRight, Clock, ArrowUpRight } from 'lucide-react';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, UserCheck, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, ArrowRight, Clock, ArrowUpRight, QrCode, Smartphone, Copy, ExternalLink, Share2, Scan } from 'lucide-react';
+import QRCode from 'qrcode';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
@@ -140,6 +141,8 @@ type Payee = {
   gstNumber?: string;
   treasuryCode?: string;
   rangeId?: string;
+  mappedUserIds?: string[];
+  mappedRangeIds?: string[];
   createdAt: number;
   updatedAt: number;
   createdBy: string;
@@ -202,6 +205,9 @@ type MemoForFund = {
   createdAt: number;
   updatedAt: number;
   remarks?: string;
+  correctionRemarks?: string;
+  correctionRemarksBy?: string;
+  correctionRemarksAt?: number;
 };
 
 type BudgetFile = {
@@ -831,8 +837,61 @@ export default function App() {
   const [viewingMemo, setViewingMemo] = useState<MemoForFund | null>(null);
 
   const [viewingBillPdf, setViewingBillPdf] = useState<{ url: string; bill: any } | null>(null);
+  // Bill QR Code & Mobile Verification State
+  const [viewingBillQR, setViewingBillQR] = useState<{ bill: Bill; qrDataUrl: string } | null>(null);
+  const [verifyingBillId, setVerifyingBillId] = useState<string | null>(null);
+  const [verifyingBillData, setVerifyingBillData] = useState<Bill | null>(null);
+  const [isVerifyingLoading, setIsVerifyingLoading] = useState<boolean>(false);
+  const [verifySearchInput, setVerifySearchInput] = useState<string>('');
+  const [copiedQRLink, setCopiedQRLink] = useState<boolean>(false);
+
   const [allocFilters, setAllocFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
   const [soeFilters, setSoeFilters] = useState({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeName: '' });
+
+  // Detect URL parameter for mobile QR code verification
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const verifyParam = urlParams.get('verifyBill') || urlParams.get('billVerification') || urlParams.get('verify');
+      if (verifyParam) {
+        setVerifyingBillId(verifyParam.trim());
+      }
+    } catch (e) {
+      console.error('Error parsing verifyBill URL param:', e);
+    }
+  }, []);
+
+  // Fetch or resolve bill data for verification modal
+  useEffect(() => {
+    if (!verifyingBillId) {
+      setVerifyingBillData(null);
+      return;
+    }
+    const foundInState = bills.find(b => b.id === verifyingBillId || b.billNo.trim().toLowerCase() === verifyingBillId.trim().toLowerCase());
+    if (foundInState) {
+      setVerifyingBillData(foundInState);
+      return;
+    }
+
+    setIsVerifyingLoading(true);
+    getDoc(doc(db, 'bills', verifyingBillId)).then(snap => {
+      if (snap.exists()) {
+        setVerifyingBillData({ id: snap.id, ...snap.data() } as Bill);
+      } else {
+        getDocs(query(collection(db, 'bills'), where('billNo', '==', verifyingBillId))).then(qSnap => {
+          if (!qSnap.empty) {
+            const docData = qSnap.docs[0];
+            setVerifyingBillData({ id: docData.id, ...docData.data() } as Bill);
+          } else {
+            setVerifyingBillData(null);
+          }
+        }).catch(() => setVerifyingBillData(null))
+        .finally(() => setIsVerifyingLoading(false));
+        return;
+      }
+    }).catch(() => setVerifyingBillData(null))
+    .finally(() => setIsVerifyingLoading(false));
+  }, [verifyingBillId, bills]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -842,11 +901,13 @@ export default function App() {
         if (viewingMemo) setViewingMemo(null);
         if (showMemoSyncModal) setShowMemoSyncModal(false);
         if (viewingBillPdf) setViewingBillPdf(null);
+        if (viewingBillQR) setViewingBillQR(null);
+        if (verifyingBillId) setVerifyingBillId(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showExpenditurePrintModal, showPayeePrintModal, viewingMemo, showMemoSyncModal, viewingBillPdf]);
+  }, [showExpenditurePrintModal, showPayeePrintModal, viewingMemo, showMemoSyncModal, viewingBillPdf, viewingBillQR, verifyingBillId]);
 
   // Form Header State
   const [memoNoInput, setMemoNoInput] = useState<string>('');
@@ -881,7 +942,11 @@ export default function App() {
   const [subVoucherNoInput, setSubVoucherNoInput] = useState<string>('');
   const [subVoucherDescInput, setSubVoucherDescInput] = useState<string>('');
   const [subVoucherAmountInput, setSubVoucherAmountInput] = useState<string>('');
+  const [memoPayeeSearchTerm, setMemoPayeeSearchTerm] = useState<string>('');
+  const [showMemoPayeeDropdown, setShowMemoPayeeDropdown] = useState<boolean>(false);
   const [duplicatePayeeModalData, setDuplicatePayeeModalData] = useState<{ existingPayee: Payee; enteredName: string; enteredAccountNo: string } | null>(null);
+  const [memoCorrectionModalData, setMemoCorrectionModalData] = useState<{ memo: MemoForFund; remarks: string } | null>(null);
+  const [isSendingCorrection, setIsSendingCorrection] = useState<boolean>(false);
 
   const [selectedMemoPayeeId, setSelectedMemoPayeeId] = useState<string>('');
   const [selectedMemoSchemeId, setSelectedMemoSchemeId] = useState<string>('');
@@ -1762,9 +1827,19 @@ export default function App() {
       return uniquePayees;
     }
     if (userRangeId) {
-      return uniquePayees.filter(p => !p.rangeId || p.rangeId === userRangeId || p.createdBy === user?.uid);
+      return uniquePayees.filter(p => 
+        !p.rangeId || 
+        p.rangeId === userRangeId || 
+        p.createdBy === user?.uid ||
+        (p.mappedUserIds && p.mappedUserIds.includes(user?.uid)) ||
+        (p.mappedRangeIds && p.mappedRangeIds.includes(userRangeId))
+      );
     }
-    return uniquePayees;
+    return uniquePayees.filter(p => 
+      !p.rangeId || 
+      p.createdBy === user?.uid || 
+      (p.mappedUserIds && p.mappedUserIds.includes(user?.uid))
+    );
   }, [payees, userRole, userRangeId, user?.uid]);
 
   const isAdmin = () => userRole === 'admin';
@@ -6957,6 +7032,38 @@ export default function App() {
     }
   };
 
+  const handleMapPayeeToUser = async (existingPayee: Payee) => {
+    if (!user) return;
+    try {
+      const currentMappedUserIds = existingPayee.mappedUserIds || [];
+      const currentMappedRangeIds = existingPayee.mappedRangeIds || [];
+
+      const newMappedUserIds = currentMappedUserIds.includes(user.uid)
+        ? currentMappedUserIds
+        : [...currentMappedUserIds, user.uid];
+
+      const newMappedRangeIds = (userRangeId && !currentMappedRangeIds.includes(userRangeId))
+        ? [...currentMappedRangeIds, userRangeId]
+        : currentMappedRangeIds;
+
+      await updateDoc(doc(db, 'payees', existingPayee.id), {
+        mappedUserIds: newMappedUserIds,
+        mappedRangeIds: newMappedRangeIds,
+        updatedAt: Date.now()
+      });
+
+      logAuditAction(
+        'Payee Mapped',
+        `Mapped Payee ${existingPayee.name} (${existingPayee.accountNumber}) to User ${user.email || user.uid} / Range ${userRangeName || userRole || 'N/A'}`
+      );
+
+      setDuplicatePayeeModalData(null);
+      showAlert(`Payee "${existingPayee.name}" has been mapped to your account (${userRangeName || userRole || 'your range'}) successfully! It is now available in your Payee Directory and Memo for Fund.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `payees/${existingPayee.id}`);
+    }
+  };
+
   const downloadPayeesPDF = () => {
     try {
       const doc = new jsPDF('landscape');
@@ -8356,9 +8463,44 @@ export default function App() {
   }, [allocations, expenses, userRangeId, ranges, memoFromInput, userRole, userRangeName, selectedFY, memoSchemeIdInput, memoSectorIdInput, memoSoeIdInput, soes, memoPayeeEntries, editingEntryIndex, entryTotalAmount]);
 
   // --- Memo for Fund Handlers ---
+  const searchedMemoPayees = useMemo(() => {
+    if (!memoPayeeSearchTerm.trim()) return filteredPayeesList;
+    const term = memoPayeeSearchTerm.toLowerCase().trim();
+    return filteredPayeesList.filter(p => {
+      const name = (p.name || '').toLowerCase();
+      const acc = (p.accountNumber || '').toLowerCase();
+      const ifsc = (p.ifscCode || '').toLowerCase();
+      const pan = (p.panNumber || '').toLowerCase();
+      const gst = (p.gstNumber || '').toLowerCase();
+      const tryCode = (p.treasuryCode || '').toLowerCase();
+      const rangeName = (ranges.find(r => r.id === p.rangeId)?.name || '').toLowerCase();
+      const address = (p.address || '').toLowerCase();
+      return (
+        name.includes(term) ||
+        acc.includes(term) ||
+        ifsc.includes(term) ||
+        pan.includes(term) ||
+        gst.includes(term) ||
+        tryCode.includes(term) ||
+        rangeName.includes(term) ||
+        address.includes(term)
+      );
+    });
+  }, [filteredPayeesList, memoPayeeSearchTerm, ranges]);
+
   const handleSelectPayeeForMemoEntry = (payeeId: string) => {
     setEntryPayeeId(payeeId);
-    if (!payeeId) return;
+    setShowMemoPayeeDropdown(false);
+    if (!payeeId) {
+      setEntryName('');
+      setEntryAddress('');
+      setEntryAccountNo('');
+      setEntryIfsc('');
+      setEntryTreasuryCode('');
+      setEntryPan('');
+      setEntryGst('');
+      return;
+    }
     const p = payees.find(item => item.id === payeeId);
     if (p) {
       setEntryName(p.name || '');
@@ -8368,6 +8510,7 @@ export default function App() {
       setEntryTreasuryCode(p.treasuryCode || '');
       setEntryPan(p.panNumber || '');
       setEntryGst(p.gstNumber || '');
+      setMemoPayeeSearchTerm('');
     }
   };
 
@@ -8733,22 +8876,48 @@ export default function App() {
     });
   };
 
-  const handleSendBackForCorrection = (memo: MemoForFund) => {
+  const handleOpenSendBackModal = (memo: MemoForFund) => {
     if (userRole !== 'admin' && userRole !== 'deo') {
       showAlert('Only Admin or Data Entry Operator can send back memo for correction.');
       return;
     }
-    showConfirm(`Send Memo No. ${memo.memoNo} back to user for correction?`, async () => {
-      try {
-        await updateDoc(doc(db, 'memos', memo.id), {
-          status: 'correction',
-          updatedAt: Date.now()
-        });
-        showAlert('Memo sent back for correction successfully.');
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
-      }
-    });
+    setMemoCorrectionModalData({ memo, remarks: memo.correctionRemarks || memo.remarks || '' });
+  };
+
+  const handleConfirmSendBackForCorrection = async () => {
+    if (!memoCorrectionModalData) return;
+    const { memo, remarks } = memoCorrectionModalData;
+    if (!remarks.trim()) {
+      showAlert('Please enter correction remarks / reason so the user knows what errors need to be fixed in the memo.');
+      return;
+    }
+
+    try {
+      setIsSendingCorrection(true);
+      const roleLabel = userRole === 'admin' ? 'Admin' : (userRole === 'deo' ? 'DEO' : (userRole || 'User'));
+      const authorLabel = user?.displayName ? `${roleLabel} (${user.displayName})` : roleLabel;
+
+      await updateDoc(doc(db, 'memos', memo.id), {
+        status: 'correction',
+        correctionRemarks: remarks.trim(),
+        remarks: remarks.trim(),
+        correctionRemarksBy: authorLabel,
+        correctionRemarksAt: Date.now(),
+        updatedAt: Date.now()
+      });
+
+      logAuditAction(
+        'Memo Returned for Correction',
+        `Memo No: ${memo.memoNo} returned by ${authorLabel} with remarks: "${remarks.trim()}"`
+      );
+
+      showAlert(`Memo No. ${memo.memoNo} has been returned to ${memo.rangeName || 'the user'} for correction.`);
+      setMemoCorrectionModalData(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
+    } finally {
+      setIsSendingCorrection(false);
+    }
   };
 
   const handleResetMemoForm = () => {
@@ -9433,21 +9602,49 @@ export default function App() {
     }
   };
 
-  const generateBillPdf = (bill: Bill) => {
+  const generateBillPdf = async (bill: Bill) => {
     const doc = new jsPDF();
     const activeFy = fys.find(f => f.id === bill.fyId || f.name === bill.financialYear);
     
+    // Generate QR Code data URL for the bill
+    const verificationUrl = `${window.location.origin}${window.location.pathname}?verifyBill=${encodeURIComponent(bill.id)}`;
+    let qrDataUrl = '';
+    try {
+      qrDataUrl = await QRCode.toDataURL(verificationUrl, {
+        margin: 1,
+        width: 140,
+        color: {
+          dark: '#064e3b',
+          light: '#ffffff'
+        }
+      });
+    } catch (e) {
+      console.error('Error creating QR for bill PDF:', e);
+    }
+
     // Header
     doc.setFontSize(16);
-    doc.text('TREASURY BILL', 105, 15, { align: 'center' });
-    doc.setFontSize(10);
-    doc.text(`Financial Year: ${activeFy?.name || bill.financialYear}`, 105, 22, { align: 'center' });
+    doc.text('TREASURY BILL', 105, 14, { align: 'center' });
+    doc.setFontSize(9.5);
+    doc.text(`Financial Year: ${activeFy?.name || bill.financialYear}`, 105, 20, { align: 'center' });
+    doc.setFontSize(9);
+    doc.text('H.P. Forest Department • Rajgarh Forest Division', 105, 25, { align: 'center' });
+
+    // Place QR Code at top right if generated
+    if (qrDataUrl) {
+      doc.addImage(qrDataUrl, 'PNG', 165, 8, 28, 28);
+      doc.setFontSize(6.5);
+      doc.setTextColor(5, 150, 105);
+      doc.text('Scan for Live Status', 179, 39, { align: 'center' });
+      doc.setTextColor(0, 0, 0);
+    }
     
-    doc.setFontSize(11);
-    doc.text(`Bill No: ${bill.billNo}`, 15, 35);
-    doc.text(`Bill Date: ${bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}`, 15, 42);
+    doc.setFontSize(10.5);
+    doc.text(`Bill No: ${bill.billNo}`, 15, 33);
+    doc.text(`Bill Date: ${bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}`, 15, 39);
+    doc.text(`Status: ${bill.status.toUpperCase()}`, 15, 45);
     if (bill.remarks) {
-      doc.text(`Remarks: ${bill.remarks}`, 15, 49);
+      doc.text(`Remarks: ${bill.remarks}`, 15, 51);
     }
 
     const billExpenses = expenses.filter(e => bill.expenseIds.includes(e.id));
@@ -9483,7 +9680,7 @@ export default function App() {
     });
 
     autoTable(doc, {
-      startY: 55,
+      startY: bill.remarks ? 56 : 50,
       head: [['SrNo', 'Date', 'Range', 'SOE', 'Hierarchy', 'Description', 'Amount']],
       body: tableData,
       theme: 'grid',
@@ -9495,22 +9692,176 @@ export default function App() {
     });
 
     const finalY = (doc as any).lastAutoTable.finalY || 70;
-    doc.setFontSize(12);
-    doc.text(`Total Amount: Rs. ${bill.totalAmount.toLocaleString()}`, 195, finalY + 10, { align: 'right' });
+    doc.setFontSize(11);
+    doc.text(`Total Amount: Rs. ${bill.totalAmount.toLocaleString()}`, 195, finalY + 8, { align: 'right' });
+
+    // Official Security verification footer
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Official Digital Record • Rajgarh Forest Division • Verified with Live QR System • Printed on ${new Date().toLocaleDateString('en-IN')}`, 105, finalY + 18, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
 
     return doc;
   };
 
   const handleDownloadBill = async (bill: Bill) => {
-    const doc = generateBillPdf(bill);
-    doc.save(`bill_${bill.billNo}.pdf`);
+    try {
+      const doc = await generateBillPdf(bill);
+      doc.save(`bill_${bill.billNo}.pdf`);
+    } catch (err) {
+      console.error('Error downloading bill PDF:', err);
+      showAlert('Failed to generate PDF for download.');
+    }
   };
 
-  const handleViewBill = (bill: Bill) => {
-    const doc = generateBillPdf(bill);
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    setViewingBillPdf({ url, bill });
+  const handleViewBill = async (bill: Bill) => {
+    try {
+      const doc = await generateBillPdf(bill);
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      setViewingBillPdf({ url, bill });
+    } catch (err) {
+      console.error('Error viewing bill PDF:', err);
+      showAlert('Failed to open PDF preview.');
+    }
+  };
+
+  // Open Bill QR Code Dialog for Field Officers
+  const handleOpenBillQR = async (bill: Bill) => {
+    try {
+      const verificationUrl = `${window.location.origin}${window.location.pathname}?verifyBill=${encodeURIComponent(bill.id)}`;
+      const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
+        width: 360,
+        margin: 1,
+        color: {
+          dark: '#064e3b',
+          light: '#ffffff'
+        },
+        errorCorrectionLevel: 'M'
+      });
+      setViewingBillQR({ bill, qrDataUrl });
+      setCopiedQRLink(false);
+    } catch (err) {
+      console.error('Error generating bill QR code:', err);
+      showAlert('Failed to generate QR code for this bill.');
+    }
+  };
+
+  // Download Bill QR Image
+  const handleDownloadBillQR = (bill: Bill, qrDataUrl: string) => {
+    const link = document.createElement('a');
+    link.href = qrDataUrl;
+    link.download = `Bill_QR_${bill.billNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Copy Bill Mobile Verification URL
+  const handleCopyBillVerificationLink = (bill: Bill) => {
+    const url = `${window.location.origin}${window.location.pathname}?verifyBill=${encodeURIComponent(bill.id)}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        setCopiedQRLink(true);
+        setTimeout(() => setCopiedQRLink(false), 2500);
+      }).catch(() => {
+        showAlert(`Verification Link:\n${url}`);
+      });
+    } else {
+      showAlert(`Verification Link:\n${url}`);
+    }
+  };
+
+  // Print Bill QR Verification Pass / Slip
+  const handlePrintBillQRPad = (bill: Bill, qrDataUrl: string) => {
+    const printWin = window.open('', '_blank');
+    if (!printWin) {
+      showAlert('Please allow popups to print the QR verification slip.');
+      return;
+    }
+    const billExpenses = expenses.filter(e => bill.expenseIds.includes(e.id));
+    const firstExp = billExpenses[0];
+    const al = allocations.find(a => a.id === firstExp?.allocationId);
+    const rangeObj = ranges.find(r => r.id === al?.rangeId);
+    const soeObj = soes.find(s => s.id === firstExp?.soeId);
+
+    printWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Bill Verification QR Slip - ${bill.billNo}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; color: #111; background: #fff; }
+            .ticket { border: 2px dashed #059669; border-radius: 14px; padding: 24px; max-width: 400px; margin: 0 auto; text-align: center; background: #fcfdfd; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .dept { font-size: 11px; font-weight: 800; color: #047857; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 2px; }
+            .title { font-size: 16px; font-weight: 800; color: #111827; margin-bottom: 12px; }
+            .qr-wrap { background: #fff; padding: 8px; border: 2px solid #e5e7eb; border-radius: 12px; display: inline-block; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+            .qr-img { width: 170px; height: 170px; display: block; }
+            .badge { display: inline-block; padding: 3px 12px; border-radius: 9999px; font-size: 11px; font-weight: 800; text-transform: uppercase; margin: 10px 0 6px; }
+            .badge-finalized { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+            .badge-draft { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+            .info-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; margin-top: 10px; background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb; }
+            .info-table td { padding: 6px 10px; border-bottom: 1px solid #f3f4f6; }
+            .info-table td.label { font-weight: bold; color: #4b5563; width: 42%; }
+            .info-table td.val { font-weight: 600; color: #111827; }
+            .footer { font-size: 9.5px; color: #6b7280; margin-top: 14px; line-height: 1.4; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+            @media print {
+              body { padding: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="ticket">
+            <div class="dept">H.P. Forest Department • Rajgarh Division</div>
+            <div class="title">Bill Verification QR Pass</div>
+            <div class="qr-wrap">
+              <img src="${qrDataUrl}" class="qr-img" alt="QR Code" />
+            </div>
+            <div>
+              <span class="badge badge-${bill.status}">${bill.status}</span>
+            </div>
+            <div style="font-size: 10.5px; font-weight: bold; color: #047857; margin-bottom: 6px;">Scan with any mobile camera to verify details</div>
+            <table class="info-table">
+              <tr>
+                <td class="label">Bill Number:</td>
+                <td class="val" style="font-family: monospace; font-size: 13px; color: #047857;">${bill.billNo}</td>
+              </tr>
+              <tr>
+                <td class="label">Bill Date:</td>
+                <td class="val">${bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td class="label">Range / Office:</td>
+                <td class="val">${rangeObj?.name || 'Division'}</td>
+              </tr>
+              <tr>
+                <td class="label">SOE Head:</td>
+                <td class="val">${soeObj?.name || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td class="label">Total Amount:</td>
+                <td class="val" style="font-size: 13px; color: #059669; font-weight: 800;">₹${bill.totalAmount.toLocaleString('en-IN')}</td>
+              </tr>
+              <tr>
+                <td class="label">Voucher Count:</td>
+                <td class="val">${billExpenses.length} entries</td>
+              </tr>
+            </table>
+            <div class="footer">
+              Forest Budget Control System • Live Field Verification<br/>
+              Printed on: ${new Date().toLocaleString('en-IN')}
+            </div>
+          </div>
+          <script>
+            window.onload = function() {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWin.document.close();
   };
 
   const handleUserRoleChange = async (userId: string, newRole: 'admin' | 'deo' | 'approver' | 'Sarahan' | 'Narag' | 'Habban' | 'Division' | 'Rajgarh') => {
@@ -13139,10 +13490,26 @@ export default function App() {
                     },
                     render: (_, item) => {
                       const bill = bills.find(b => b.expenseIds.includes(item.id));
+                      if (!bill) {
+                        return (
+                          <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-gray-100 text-gray-800">
+                            No
+                          </span>
+                        );
+                      }
                       return (
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${bill ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
-                          {bill ? `Yes (${bill.billNo})` : 'No'}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenBillQR(bill);
+                          }}
+                          className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                          title={`Bill #${bill.billNo} • Click to View QR Verification Pass`}
+                        >
+                          <QrCode className="w-3 h-3 text-emerald-600 shrink-0" />
+                          <span>{bill.billNo}</span>
+                        </button>
                       );
                     }
                   },
@@ -13819,6 +14186,17 @@ export default function App() {
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${val === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
                       {val}
                     </span>
+                  )},
+                  {key: 'qrVerify', label: 'QR Verify', render: (_, item: Bill) => (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBillQR(item)}
+                      className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                      title="Generate & View QR Code for Mobile Verification"
+                    >
+                      <QrCode className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>QR Pass</span>
+                    </button>
                   )}
                 ],
                 handleCreateBill,
@@ -14019,30 +14397,91 @@ export default function App() {
                   setSelectedExpensesForBill(item.expenseIds);
                 },
                 (item) => isAdmin() || (isDEO() && item.status === 'draft') || (userRangeId && item.rangeId === userRangeId && item.status === 'draft'),
-                undefined,
+                (
+                  <div className="bg-gradient-to-r from-emerald-900 to-teal-900 rounded-2xl p-4 text-white shadow-md border border-emerald-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-emerald-800/80 border border-emerald-600/50 rounded-xl text-emerald-200 shrink-0">
+                        <QrCode className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <span>Mobile QR Code Verification System</span>
+                          <span className="text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Field Ready</span>
+                        </h4>
+                        <p className="text-xs text-emerald-100/80 mt-0.5">
+                          Every treasury bill includes a secure QR code on PDFs and verification passes. Field officers can scan on any smartphone to verify official status, SOE, and items without manual entry.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                      <div className="relative flex-1 sm:w-56">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-300" />
+                        <input
+                          type="text"
+                          placeholder="Verify Bill No or ID..."
+                          value={verifySearchInput}
+                          onChange={(e) => setVerifySearchInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && verifySearchInput.trim()) {
+                              setVerifyingBillId(verifySearchInput.trim());
+                              setVerifySearchInput('');
+                            }
+                          }}
+                          className="w-full pl-8 pr-3 py-1.5 bg-emerald-950/60 border border-emerald-700/60 rounded-xl text-xs text-white placeholder-emerald-300/60 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (verifySearchInput.trim()) {
+                            setVerifyingBillId(verifySearchInput.trim());
+                            setVerifySearchInput('');
+                          } else if (filteredBills.length > 0) {
+                            handleOpenBillQR(filteredBills[0]);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+                      >
+                        <Scan className="w-3.5 h-3.5" />
+                        <span>Verify</span>
+                      </button>
+                    </div>
+                  </div>
+                ),
                 (item) => (
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 items-center">
                     <button 
+                      type="button"
+                      onClick={() => handleOpenBillQR(item)}
+                      className="p-1 border border-emerald-300 rounded text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors"
+                      title="Generate & View QR Code for Mobile Verification"
+                    >
+                      <QrCode className="w-4 h-4" />
+                    </button>
+                    <button 
+                      type="button"
                       onClick={() => handleViewBill(item)}
-                      className="p-1 border border-gray-200 rounded text-emerald-600 hover:bg-emerald-50"
+                      className="p-1 border border-gray-200 rounded text-emerald-600 hover:bg-emerald-50 transition-colors"
                       title="View Bill PDF"
                     >
                       <Eye className="w-4 h-4" />
                     </button>
                     <button 
+                      type="button"
                       onClick={() => handleDownloadBill(item)}
-                      className="p-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+                      className="p-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50 transition-colors"
                       title="Download Bill PDF"
                     >
                       <Download className="w-4 h-4" />
                     </button>
                     {(userRole === 'admin' || userRole === 'deo' || (userRangeId && item.rangeId === userRangeId)) && (
                       <button 
+                        type="button"
                         onClick={() => {
                           const newStatus = item.status === 'draft' ? 'finalized' : 'draft';
                           updateDoc(doc(db, 'bills', item.id), { status: newStatus, updatedAt: Date.now() });
                         }}
-                        className={`p-1 border rounded ${item.status === 'finalized' ? 'text-blue-600 border-blue-100 bg-blue-50' : 'text-emerald-600 border-emerald-100 bg-emerald-50'}`}
+                        className={`p-1 border rounded transition-colors ${item.status === 'finalized' ? 'text-blue-600 border-blue-100 bg-blue-50' : 'text-emerald-600 border-emerald-100 bg-emerald-50'}`}
                         title={item.status === 'finalized' ? 'Mark as Draft' : 'Finalize Bill'}
                       >
                         {item.status === 'finalized' ? <RefreshCcw className="w-4 h-4" /> : <Check className="w-4 h-4" />}
@@ -14311,6 +14750,30 @@ export default function App() {
                       </h4>
                       <span className="text-xs text-gray-400 font-medium">* Required fields</span>
                     </div>
+
+                    {/* Correction Remarks Banner if editing a returned memo */}
+                    {editingMemo && (editingMemo.status === 'correction' || editingMemo.correctionRemarks) && (
+                      <div className="p-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 rounded-xl border-2 border-amber-300 text-xs shadow-xs space-y-2 animate-in fade-in">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 font-black text-amber-950">
+                            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                            <span>Correction Remarks from {editingMemo.correctionRemarksBy || 'Admin / DEO'}:</span>
+                          </div>
+                          {editingMemo.correctionRemarksAt && (
+                            <span className="text-[10px] text-amber-800 font-bold bg-amber-200/70 px-2 py-0.5 rounded">
+                              Returned: {new Date(editingMemo.correctionRemarksAt).toLocaleDateString('en-GB')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-3 bg-white/95 rounded-lg border border-amber-300 text-amber-950 font-semibold leading-relaxed shadow-2xs whitespace-pre-wrap">
+                          "{editingMemo.correctionRemarks || editingMemo.remarks}"
+                        </div>
+                        <p className="text-[11px] text-amber-800 font-medium flex items-center gap-1.5">
+                          <CheckCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span>Make the necessary corrections to payees, amounts, or SOE heads below, then click <strong>"Submit & Lock Memo"</strong> to re-submit.</span>
+                        </p>
+                      </div>
+                    )}
 
                     {/* Step 1: Letter Header Configuration */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200 text-xs">
@@ -14584,98 +15047,308 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Select existing payee directory drop-down */}
-                      <div className="space-y-1 text-xs">
-                        <label className="block font-bold text-gray-600">Quick Select Payee Directory (Optional)</label>
-                        <select
-                          value={entryPayeeId}
-                          onChange={(e) => handleSelectPayeeForMemoEntry(e.target.value)}
-                          className="w-full p-2 border border-emerald-300 rounded-lg bg-emerald-50/50 font-semibold text-emerald-950 focus:ring-2 focus:ring-emerald-500 outline-none"
-                        >
-                          <option value="">-- Choose Payee from Directory or Fill Form Below --</option>
-                          {filteredPayeesList.map((p, idx) => (
-                            <option key={`memo-p-${p.id}-${idx}`} value={p.id}>
-                              {p.name} (A/C: {p.accountNumber} - IFSC: {p.ifscCode || 'N/A'})
-                            </option>
-                          ))}
-                        </select>
+                      {/* Option to choose payee already added with Instant Search Results List */}
+                      <div className="bg-gradient-to-r from-emerald-50/70 via-slate-50 to-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2.5 text-xs shadow-xs">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                          <label className="font-bold text-emerald-950 flex items-center gap-1.5 text-xs">
+                            <Search className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Quick Search & Select Payee from Directory</span>
+                            <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                              {filteredPayeesList.length} Registered Payees
+                            </span>
+                          </label>
+                          <div className="flex items-center gap-2">
+                            {filteredPayeesList.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setShowMemoPayeeDropdown(!showMemoPayeeDropdown)}
+                                className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer bg-white px-2 py-0.5 rounded border border-emerald-200 shadow-2xs hover:bg-emerald-50 transition-colors"
+                              >
+                                {showMemoPayeeDropdown ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                <span>{showMemoPayeeDropdown ? 'Hide Directory List' : 'Browse All Payees'}</span>
+                              </button>
+                            )}
+                            {entryPayeeId && (
+                              <button
+                                type="button"
+                                onClick={() => handleSelectPayeeForMemoEntry('')}
+                                className="text-[11px] font-bold text-red-600 hover:text-red-800 flex items-center gap-1 hover:underline cursor-pointer"
+                              >
+                                <X className="w-3 h-3" /> Clear / Custom Payee
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Search Input Box */}
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={memoPayeeSearchTerm}
+                            onChange={(e) => {
+                              setMemoPayeeSearchTerm(e.target.value);
+                              if (!showMemoPayeeDropdown && e.target.value.trim().length > 0) {
+                                setShowMemoPayeeDropdown(true);
+                              }
+                            }}
+                            onFocus={() => {
+                              if (filteredPayeesList.length > 0) {
+                                setShowMemoPayeeDropdown(true);
+                              }
+                            }}
+                            placeholder="Type to search: e.g. Laxmi, Account No, IFSC, Try Code, PAN, Range..."
+                            className="w-full pl-8 pr-8 py-2 border border-emerald-300 rounded-lg bg-white text-xs font-semibold text-gray-900 focus:ring-2 focus:ring-emerald-500 outline-none shadow-xs placeholder:font-normal placeholder:text-gray-400"
+                          />
+                          <Search className="w-4 h-4 text-emerald-600 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          {memoPayeeSearchTerm && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMemoPayeeSearchTerm('');
+                              }}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-0.5"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Instant Search Results / Directory List (Shown when typing or browsing) */}
+                        {(showMemoPayeeDropdown || memoPayeeSearchTerm.trim().length > 0) && (
+                          <div className="bg-white rounded-xl border border-emerald-300 shadow-md overflow-hidden animate-in fade-in duration-150">
+                            <div className="p-2 bg-emerald-900 text-white flex items-center justify-between text-[11px] font-bold">
+                              <span className="flex items-center gap-1.5">
+                                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                                {memoPayeeSearchTerm.trim() 
+                                  ? `Search Results for "${memoPayeeSearchTerm}" (${searchedMemoPayees.length} found)`
+                                  : `Select Payee from Registered Directory (${searchedMemoPayees.length})`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setShowMemoPayeeDropdown(false)}
+                                className="text-emerald-200 hover:text-white text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <X className="w-3 h-3" /> Close
+                              </button>
+                            </div>
+
+                            <div className="max-h-56 overflow-y-auto divide-y divide-gray-100 text-xs">
+                              {searchedMemoPayees.length === 0 ? (
+                                <div className="p-4 text-center text-gray-500 space-y-1">
+                                  <p className="font-semibold text-gray-700">No payee found matching "{memoPayeeSearchTerm}"</p>
+                                  <p className="text-[11px] text-gray-400">You can enter custom payee details manually in the form fields below.</p>
+                                </div>
+                              ) : (
+                                searchedMemoPayees.map((p) => {
+                                  const isSelected = entryPayeeId === p.id;
+                                  const pRangeName = ranges.find(r => r.id === p.rangeId)?.name;
+                                  return (
+                                    <div
+                                      key={`search-payee-${p.id}`}
+                                      onClick={() => handleSelectPayeeForMemoEntry(p.id)}
+                                      className={`p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-emerald-50 cursor-pointer transition-colors ${
+                                        isSelected ? 'bg-emerald-100/70 font-semibold' : ''
+                                      }`}
+                                    >
+                                      <div className="space-y-0.5 flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="font-bold text-gray-900 text-xs">{p.name}</span>
+                                          {p.treasuryCode && (
+                                            <span className="px-1.5 py-0.2 bg-emerald-50 text-emerald-800 text-[10px] font-mono font-bold rounded border border-emerald-200">
+                                              Try: {p.treasuryCode}
+                                            </span>
+                                          )}
+                                          {pRangeName && (
+                                            <span className="px-1.5 py-0.2 bg-blue-50 text-blue-800 text-[10px] font-medium rounded border border-blue-200">
+                                              Range: {pRangeName}
+                                            </span>
+                                          )}
+                                          {isSelected && (
+                                            <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[10px] font-bold rounded flex items-center gap-0.5">
+                                              <Check className="w-2.5 h-2.5" /> Selected
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[11px] text-gray-600 font-mono flex-wrap">
+                                          <span>A/C: <strong className="text-gray-900">{p.accountNumber}</strong></span>
+                                          <span>•</span>
+                                          <span>IFSC: <strong className="text-gray-900">{p.ifscCode || 'N/A'}</strong></span>
+                                          {p.panNumber && (
+                                            <>
+                                              <span>•</span>
+                                              <span>PAN: <strong className="text-gray-900">{p.panNumber}</strong></span>
+                                            </>
+                                          )}
+                                        </div>
+                                        {p.address && (
+                                          <div className="text-[10px] text-gray-500 truncate">
+                                            Address: {p.address}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSelectPayeeForMemoEntry(p.id);
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                                          isSelected
+                                            ? 'bg-emerald-700 text-white shadow-xs'
+                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                        }`}
+                                      >
+                                        <Check className="w-3 h-3" />
+                                        <span>{isSelected ? 'Selected' : 'Select Payee'}</span>
+                                      </button>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Notice if locked */}
+                        {entryPayeeId && (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-amber-50/90 border border-amber-200 rounded-lg text-amber-900 text-[11px] font-medium animate-in fade-in">
+                            <div className="flex items-start sm:items-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
+                              <span>
+                                <strong>Master Payee Details Locked:</strong> Bank details for <strong>{entryName}</strong> (A/C: <span className="font-mono">{entryAccountNo}</span>) are locked to ensure correctness.
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectPayeeForMemoEntry('')}
+                              className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded-md font-bold text-[10px] shrink-0 transition-colors self-start sm:self-auto cursor-pointer"
+                            >
+                              Change / Unlock
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Individual Payee Entry Inputs */}
                       <form onSubmit={handleAddOrUpdatePayeeEntry} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs">
                         <div className="space-y-1">
-                          <label className="block font-bold text-gray-700">Payee Name <span className="text-red-500">*</span></label>
+                          <label className="block font-bold text-gray-700 flex items-center gap-1">
+                            <span>Payee Name</span>
+                            <span className="text-red-500">*</span>
+                            {entryPayeeId && (
+                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5">
+                                <Lock className="w-2.5 h-2.5" /> Locked
+                              </span>
+                            )}
+                          </label>
                           <input
                             type="text"
                             required
+                            readOnly={Boolean(entryPayeeId)}
                             value={entryName}
                             onChange={(e) => setEntryName(e.target.value)}
                             placeholder="e.g. Hemant Kumar"
-                            className="w-full p-2 border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            className={`w-full p-2 border rounded-lg outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
                           />
                         </div>
 
                         <div className="space-y-1">
-                          <label className="block font-bold text-gray-700">Address / Remarks</label>
+                          <label className="block font-bold text-gray-700 flex items-center gap-1">
+                            <span>Address / Remarks</span>
+                            {entryPayeeId && (
+                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5">
+                                <Lock className="w-2.5 h-2.5" /> Locked
+                              </span>
+                            )}
+                          </label>
                           <input
                             type="text"
+                            readOnly={Boolean(entryPayeeId)}
                             value={entryAddress}
                             onChange={(e) => setEntryAddress(e.target.value)}
                             placeholder="e.g. Sarahan"
-                            className="w-full p-2 border rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            className={`w-full p-2 border rounded-lg outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
                           />
                         </div>
 
                         <div className="space-y-1">
-                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider">Account No & IFSC Code <span className="text-red-500">*</span></label>
+                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider flex items-center gap-1">
+                            <span>Account No & IFSC Code</span>
+                            <span className="text-red-500">*</span>
+                            {entryPayeeId && (
+                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5 normal-case">
+                                <Lock className="w-2.5 h-2.5" /> Locked
+                              </span>
+                            )}
+                          </label>
                           <div className="grid grid-cols-2 gap-2">
                             <input
                               type="text"
                               required
+                              readOnly={Boolean(entryPayeeId)}
                               value={entryAccountNo}
                               onChange={(e) => setEntryAccountNo(e.target.value)}
                               placeholder="Account No"
-                              className="w-full p-2 border rounded-lg font-mono bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                              className={`w-full p-2 border rounded-lg font-mono outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
                             />
                             <input
                               type="text"
                               required
+                              readOnly={Boolean(entryPayeeId)}
                               value={entryIfsc}
                               onChange={(e) => setEntryIfsc(e.target.value)}
                               placeholder="IFSC Code"
-                              className="w-full p-2 border rounded-lg font-mono bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                              className={`w-full p-2 border rounded-lg font-mono outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
                             />
                           </div>
                         </div>
 
                         <div className="space-y-1">
-                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider">Try Code / PAN Number</label>
+                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider flex items-center gap-1">
+                            <span>Try Code / PAN Number</span>
+                            {entryPayeeId && (
+                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5 normal-case">
+                                <Lock className="w-2.5 h-2.5" /> Locked
+                              </span>
+                            )}
+                          </label>
                           <div className="grid grid-cols-2 gap-2">
                             <input
                               type="text"
+                              readOnly={Boolean(entryPayeeId)}
                               value={entryTreasuryCode}
                               onChange={(e) => setEntryTreasuryCode(e.target.value)}
                               placeholder="Try Code"
-                              className="w-full p-2 border rounded-lg font-mono bg-emerald-50/50 border-emerald-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                              className={`w-full p-2 border rounded-lg font-mono outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-emerald-50/50 border-emerald-200 focus:ring-2 focus:ring-emerald-500'}`}
                             />
                             <input
                               type="text"
+                              readOnly={Boolean(entryPayeeId)}
                               value={entryPan}
                               onChange={(e) => setEntryPan(e.target.value.toUpperCase())}
                               placeholder="PAN Number"
-                              className="w-full p-2 border rounded-lg font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                              className={`w-full p-2 border rounded-lg font-mono uppercase outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
                             />
                           </div>
                         </div>
 
                         <div className="space-y-1 sm:col-span-2">
-                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider">GST Number (Optional)</label>
+                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider flex items-center gap-1">
+                            <span>GST Number (Optional)</span>
+                            {entryPayeeId && (
+                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5 normal-case">
+                                <Lock className="w-2.5 h-2.5" /> Locked
+                              </span>
+                            )}
+                          </label>
                           <input
                             type="text"
+                            readOnly={Boolean(entryPayeeId)}
                             value={entryGst}
                             onChange={(e) => setEntryGst(e.target.value.toUpperCase())}
                             placeholder="e.g. 02ABCDE1234F1Z5"
-                            className="w-full p-2 border rounded-lg font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            className={`w-full p-2 border rounded-lg font-mono uppercase outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
                           />
                         </div>
 
@@ -15169,7 +15842,7 @@ export default function App() {
                               </div>
 
                               {/* Scheme, Sector & SOE info */}
-                              <div className="text-xs text-gray-700 bg-white/70 p-2 rounded-lg border border-gray-100 mb-3 space-y-0.5">
+                              <div className="text-xs text-gray-700 bg-white/70 p-2 rounded-lg border border-gray-100 mb-2.5 space-y-0.5">
                                 <p><strong>Scheme:</strong> {m.schemeName || 'All Schemes'}</p>
                                 {m.sectorName && <p><strong>Sector:</strong> {m.sectorName}</p>}
                                 {m.soeName && (
@@ -15179,6 +15852,26 @@ export default function App() {
                                 )}
                                 <p className="text-[10px] text-gray-500">From: {m.rangeName} &rarr; To: {m.toAuthority || 'DCF Rajgarh'}</p>
                               </div>
+
+                              {/* Correction Remarks Display in Card */}
+                              {(m.status === 'correction' || m.correctionRemarks) && (
+                                <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-950 space-y-1">
+                                  <div className="flex items-center justify-between text-[11px] font-bold text-amber-900">
+                                    <span className="flex items-center gap-1">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                      <span>Correction Remarks ({m.correctionRemarksBy || 'Admin / DEO'}):</span>
+                                    </span>
+                                    {m.correctionRemarksAt && (
+                                      <span className="text-[10px] text-amber-700 font-medium">
+                                        {new Date(m.correctionRemarksAt).toLocaleDateString('en-GB')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] font-medium text-amber-900 bg-white/80 p-2 rounded border border-amber-100">
+                                    "{m.correctionRemarks || m.remarks}"
+                                  </p>
+                                </div>
+                              )}
 
                               {/* Actions Bar */}
                               <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
@@ -15203,15 +15896,20 @@ export default function App() {
                                 </div>
 
                                 <div className="flex items-center gap-1.5">
-                                  {/* Send back for correction button for Admin/DEO if submitted */}
-                                  {isSubmitted && (userRole === 'admin' || userRole === 'deo') && (
+                                  {/* Send back for correction button for Admin/DEO */}
+                                  {(userRole === 'admin' || userRole === 'deo') && (isSubmitted || isCorrection) && (
                                     <button
                                       type="button"
-                                      onClick={() => handleSendBackForCorrection(m)}
-                                      className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-[11px] font-bold transition-all"
-                                      title="Return memo to user for correction"
+                                      onClick={() => handleOpenSendBackModal(m)}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                        isCorrection
+                                          ? 'bg-amber-200 hover:bg-amber-300 text-amber-950 border border-amber-300'
+                                          : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-200'
+                                      }`}
+                                      title={isCorrection ? "Update correction remarks" : "Return memo to user for correction with remarks"}
                                     >
-                                      Return for Correction
+                                      <AlertTriangle className="w-3 h-3 text-amber-700" />
+                                      <span>{isCorrection ? 'Edit Remarks' : 'Return for Correction'}</span>
                                     </button>
                                   )}
 
@@ -16493,63 +17191,631 @@ export default function App() {
           </div>
         )}
 
-        {/* Duplicate Payee Popup Alert Modal */}
-        {duplicatePayeeModalData && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-red-100 transform transition-all">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-red-100 text-red-700 rounded-full shrink-0">
-                  <AlertTriangle className="w-6 h-6" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-lg font-bold text-gray-900 leading-snug">
-                    Payee Already Exists
-                  </h3>
-                  <p className="text-xs text-gray-600 mt-1">
-                    A payee with this Bank Account Number is already registered in the Payee List. You cannot add the same account number again.
-                  </p>
-                </div>
-              </div>
+        {/* Bill QR Code Generation & Verification Modal */}
+        {viewingBillQR && (() => {
+          const { bill, qrDataUrl } = viewingBillQR;
+          const billExpenses = expenses.filter(e => bill.expenseIds.includes(e.id));
+          const firstExp = billExpenses[0];
+          const al = allocations.find(a => a.id === firstExp?.allocationId);
+          const rangeObj = ranges.find(r => r.id === al?.rangeId);
+          const soeObj = soes.find(s => s.id === firstExp?.soeId);
+          const verificationUrl = `${window.location.origin}${window.location.pathname}?verifyBill=${encodeURIComponent(bill.id)}`;
 
-              <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Existing Registered Payee:</div>
-                <div className="flex justify-between items-center py-0.5">
-                  <span className="text-gray-500 font-medium">Payee Name:</span>
-                  <span className="font-bold text-gray-900">{duplicatePayeeModalData.existingPayee.name}</span>
-                </div>
-                <div className="flex justify-between items-center py-0.5">
-                  <span className="text-gray-500 font-medium">Account Number:</span>
-                  <span className="font-mono font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
-                    {duplicatePayeeModalData.existingPayee.accountNumber}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center py-0.5">
-                  <span className="text-gray-500 font-medium">IFSC Code:</span>
-                  <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.ifscCode || 'N/A'}</span>
-                </div>
-                {duplicatePayeeModalData.existingPayee.treasuryCode && (
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-gray-500 font-medium">Treasury Code:</span>
-                    <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.treasuryCode}</span>
+          return (
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[210] animate-in fade-in duration-200">
+              <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-emerald-200 transform transition-all space-y-4 max-h-[92vh] overflow-y-auto">
+                {/* Modal Header */}
+                <div className="flex items-start justify-between gap-3 border-b pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-2xl bg-emerald-100 text-emerald-800 shrink-0">
+                      <QrCode className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-gray-900 leading-snug">
+                          Bill QR Verification Pass
+                        </h3>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${bill.status === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
+                          {bill.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 font-medium">
+                        H.P. Forest Department • Rajgarh Forest Division
+                      </p>
+                    </div>
                   </div>
-                )}
-                {duplicatePayeeModalData.existingPayee.rangeId && (
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-gray-500 font-medium">Assigned Range:</span>
-                    <span className="font-medium text-gray-800">
-                      {ranges.find(r => r.id === duplicatePayeeModalData.existingPayee.rangeId)?.name || 'General'}
+                  <button
+                    type="button"
+                    onClick={() => setViewingBillQR(null)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* QR Code Graphic Card */}
+                <div className="bg-gradient-to-b from-emerald-50/70 to-teal-50/50 p-5 rounded-2xl border border-emerald-100 flex flex-col items-center justify-center text-center">
+                  <div className="relative p-3 bg-white rounded-2xl border-2 border-emerald-500/30 shadow-md">
+                    <img 
+                      src={qrDataUrl} 
+                      alt={`QR Code for Bill ${bill.billNo}`} 
+                      className="w-48 h-48 rounded-lg object-contain"
+                    />
+                    <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 whitespace-nowrap">
+                      <Smartphone className="w-3 h-3" />
+                      <span>Scan with Mobile</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-1">
+                    <div className="text-sm font-bold text-gray-900 font-mono tracking-tight">
+                      Bill #{bill.billNo}
+                    </div>
+                    <p className="text-[11px] text-gray-600 max-w-xs">
+                      Field officers can point any mobile phone camera at this QR code to instantly verify bill authenticity, live status, and itemized expenditures.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Bill Metadata Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-medium block">Total Amount</span>
+                    <span className="font-bold text-emerald-700 text-xs font-mono">
+                      ₹{bill.totalAmount.toLocaleString('en-IN')}
                     </span>
                   </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-medium block">Bill Date</span>
+                    <span className="font-semibold text-gray-800 text-xs">
+                      {bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-medium block">Range</span>
+                    <span className="font-semibold text-gray-800 text-xs truncate block">
+                      {rangeObj?.name || 'Division'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-medium block">SOE Head</span>
+                    <span className="font-semibold text-gray-800 text-xs truncate block">
+                      {soeObj?.name || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Direct Verification Link Field */}
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-gray-700">
+                    Direct Mobile Verification Link:
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      readOnly 
+                      value={verificationUrl}
+                      className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-xl text-[11px] font-mono text-gray-700 select-all outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopyBillVerificationLink(bill)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                        copiedQRLink ? 'bg-emerald-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      }`}
+                      title="Copy Verification Link"
+                    >
+                      {copiedQRLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedQRLink ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Action Buttons Toolbar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t">
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadBillQR(bill, qrDataUrl)}
+                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Save PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintBillQRPad(bill, qrDataUrl)}
+                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Slip</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewingBillQR(null);
+                      setVerifyingBillId(bill.id);
+                    }}
+                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                  >
+                    <Scan className="w-3.5 h-3.5" />
+                    <span>Live Verify</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewingBillQR(null);
+                      handleViewBill(bill);
+                    }}
+                    className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>View PDF</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Field Officer Live Mobile Bill Verification Screen / Modal */}
+        {verifyingBillId && (() => {
+          const bill = verifyingBillData;
+          const billExpenses = bill ? expenses.filter(e => bill.expenseIds.includes(e.id)) : [];
+          const firstExp = billExpenses[0];
+          const al = allocations.find(a => a.id === firstExp?.allocationId);
+          const rangeObj = ranges.find(r => r.id === al?.rangeId);
+          const soeObj = soes.find(s => s.id === firstExp?.soeId);
+          const activeFy = bill ? (fys.find(f => f.id === bill.fyId || f.name === bill.financialYear)?.name || bill.financialYear) : '';
+
+          return (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[220] animate-in fade-in duration-200">
+              <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-emerald-300 transform transition-all space-y-4 max-h-[94vh] overflow-y-auto">
+                {/* Government Header */}
+                <div className="bg-gradient-to-r from-emerald-800 to-teal-800 -m-5 sm:-m-6 mb-2 p-5 text-white rounded-t-3xl shadow-sm relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVerifyingBillId(null);
+                      setVerifyingBillData(null);
+                      // Clear url query if present
+                      if (window.history && window.history.replaceState) {
+                        const newUrl = window.location.pathname;
+                        window.history.replaceState({}, document.title, newUrl);
+                      }
+                    }}
+                    className="absolute top-4 right-4 p-1.5 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-white/20 rounded-2xl backdrop-blur-xs shrink-0">
+                      <TreePine className="w-6 h-6 text-emerald-200" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-200">
+                        H.P. Forest Department • Rajgarh Division
+                      </div>
+                      <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight">
+                        Treasury Bill Status Verification
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+
+                {isVerifyingLoading && (
+                  <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
+                    <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin" />
+                    <p className="text-xs font-semibold text-gray-600">Verifying bill credentials with forest central database...</p>
+                  </div>
+                )}
+
+                {!isVerifyingLoading && !bill && (
+                  <div className="py-8 text-center space-y-4">
+                    <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900">Bill Record Not Found</h4>
+                      <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                        No official bill matches ID/Number &quot;{verifyingBillId}&quot;. Please verify the QR code or enter a valid bill number.
+                      </p>
+                    </div>
+                    <div className="flex max-w-xs mx-auto gap-2">
+                      <input
+                        type="text"
+                        placeholder="Search Bill No..."
+                        value={verifySearchInput}
+                        onChange={(e) => setVerifySearchInput(e.target.value)}
+                        className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (verifySearchInput.trim()) {
+                            setVerifyingBillId(verifySearchInput.trim());
+                            setVerifySearchInput('');
+                          }
+                        }}
+                        className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700"
+                      >
+                        Search
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!isVerifyingLoading && bill && (
+                  <>
+                    {/* Live Verification Badge */}
+                    <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+                      bill.status === 'finalized' 
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                        : 'bg-blue-50 border-blue-200 text-blue-900'
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-xl shrink-0 ${
+                          bill.status === 'finalized' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'
+                        }`}>
+                          {bill.status === 'finalized' ? <ShieldCheck className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-extrabold uppercase tracking-wider">
+                            Official Authenticity Status
+                          </div>
+                          <div className="text-sm sm:text-base font-extrabold">
+                            {bill.status === 'finalized' ? 'OFFICIALLY FINALIZED & VERIFIED' : 'DRAFT BILL (IN PROGRESS)'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider inline-block ${
+                          bill.status === 'finalized' ? 'bg-emerald-200 text-emerald-900' : 'bg-blue-200 text-blue-900'
+                        }`}>
+                          {bill.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Primary Key Metrics */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs">
+                      <div>
+                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Bill Number</span>
+                        <span className="font-mono font-bold text-sm text-emerald-800">
+                          {bill.billNo}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Total Net Amount</span>
+                        <span className="font-mono font-extrabold text-sm text-emerald-700">
+                          ₹{bill.totalAmount.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Bill Date</span>
+                        <span className="font-semibold text-gray-900">
+                          {bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Financial Year</span>
+                        <span className="font-semibold text-gray-900">
+                          {activeFy || 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Range / Office</span>
+                        <span className="font-semibold text-gray-900 truncate block">
+                          {rangeObj?.name || 'Rajgarh Forest Division'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-500 font-bold uppercase block">SOE Head</span>
+                        <span className="font-semibold text-gray-900 truncate block">
+                          {soeObj?.name || 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Remarks if any */}
+                    {bill.remarks && (
+                      <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-xs">
+                        <span className="font-bold text-amber-900 block text-[10px] uppercase">Remarks / Notes:</span>
+                        <span className="text-gray-800">{bill.remarks}</span>
+                      </div>
+                    )}
+
+                    {/* Itemized Expenditures List */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-bold text-gray-700">
+                        <span>Itemized Expenditures ({billExpenses.length} entries):</span>
+                        <span className="text-emerald-700 font-mono">
+                          Total: ₹{bill.totalAmount.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-2xl divide-y divide-gray-100 bg-white shadow-2xs">
+                        {billExpenses.map((exp, idx) => {
+                          const s = soes.find(s => s.id === exp.soeId);
+                          const p = payees.find(p => p.id === exp.payeeId);
+                          return (
+                            <div key={exp.id || idx} className="p-2.5 text-xs flex justify-between items-start gap-2 hover:bg-gray-50">
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold text-gray-400">#{idx + 1}</span>
+                                  <span className="font-semibold text-gray-900">
+                                    {exp.date ? exp.date.split('-').reverse().join('/') : 'N/A'}
+                                  </span>
+                                  <span className="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.2 rounded font-medium">
+                                    {s?.name || 'SOE'}
+                                  </span>
+                                </div>
+                                <div className="text-gray-600 text-[11px] truncate">
+                                  {p?.name ? `Payee: ${p.name} • ` : ''}{exp.description || 'No description'}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="font-mono font-bold text-emerald-800">
+                                  ₹{exp.amount.toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Security Footnote & Timestamp */}
+                    <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-[10px] text-gray-500 space-y-0.5">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-gray-700">Digital Reference:</span>
+                        <span className="font-mono text-emerald-800">HPFD-BILL-{bill.id.substring(0, 8).toUpperCase()}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>Live Verification Timestamp:</span>
+                        <span>{new Date().toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+
+                    {/* Field Officer Action Buttons */}
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBillQR(bill)}
+                        className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <QrCode className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>View QR Code</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleViewBill(bill)}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>View PDF</span>
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
+            </div>
+          );
+        })()}
 
-              <div className="mt-5 flex justify-end">
+        {/* Duplicate Payee Popup Alert Modal */}
+        {duplicatePayeeModalData && (() => {
+          const isAlreadyMapped = (
+            duplicatePayeeModalData.existingPayee.createdBy === user?.uid ||
+            Boolean(duplicatePayeeModalData.existingPayee.mappedUserIds && duplicatePayeeModalData.existingPayee.mappedUserIds.includes(user?.uid || '')) ||
+            Boolean(userRangeId && duplicatePayeeModalData.existingPayee.rangeId === userRangeId) ||
+            Boolean(userRangeId && duplicatePayeeModalData.existingPayee.mappedRangeIds && duplicatePayeeModalData.existingPayee.mappedRangeIds.includes(userRangeId))
+          );
+          const creatorRangeName = ranges.find(r => r.id === duplicatePayeeModalData.existingPayee.rangeId)?.name || 'General / Master Directory';
+
+          return (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-emerald-200 transform transition-all">
+                <div className="flex items-start gap-4">
+                  <div className={`p-3 rounded-full shrink-0 ${isAlreadyMapped ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {isAlreadyMapped ? <AlertTriangle className="w-6 h-6" /> : <UserCheck className="w-6 h-6" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-bold text-gray-900 leading-snug">
+                      {isAlreadyMapped ? 'Payee Already in Your Account' : 'Payee Already Registered'}
+                    </h3>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {isAlreadyMapped ? (
+                        <span>
+                          This Bank Account Number is already registered and available in your account (<strong>{userRangeName || userRole || 'your range'}</strong>). You can directly use it in Expenditures and Memos for Fund.
+                        </span>
+                      ) : (
+                        <span>
+                          This Bank Account Number was registered by <strong>{creatorRangeName}</strong>. You can map this existing payee to your user ID / Range (<strong>{userRangeName || userRole || 'your user ID'}</strong>) to make payments without creating duplicate records.
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Registered Payee Details:</div>
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-gray-500 font-medium">Payee Name:</span>
+                    <span className="font-bold text-gray-900">{duplicatePayeeModalData.existingPayee.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-gray-500 font-medium">Account Number:</span>
+                    <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                      {duplicatePayeeModalData.existingPayee.accountNumber}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-gray-500 font-medium">IFSC Code:</span>
+                    <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.ifscCode || 'N/A'}</span>
+                  </div>
+                  {duplicatePayeeModalData.existingPayee.treasuryCode && (
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-gray-500 font-medium">Treasury Code:</span>
+                      <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.treasuryCode}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-gray-500 font-medium">Original Range:</span>
+                    <span className="font-medium text-gray-800">
+                      {creatorRangeName}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setDuplicatePayeeModalData(null)}
+                    className="w-full sm:w-auto px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  {!isAlreadyMapped ? (
+                    <button
+                      type="button"
+                      onClick={() => handleMapPayeeToUser(duplicatePayeeModalData.existingPayee)}
+                      className="w-full sm:w-auto px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <UserCheck className="w-4 h-4" />
+                      <span>MAP User & Range</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDuplicatePayeeModalData(null)}
+                      className="w-full sm:w-auto px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                    >
+                      OK, Understood
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Memo Return for Correction with Remarks Modal (DEO and Admin) */}
+        {memoCorrectionModalData && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-amber-200 transform transition-all space-y-4">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 border-b pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-100 text-amber-700 shrink-0">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 leading-snug">
+                      Return Memo for Correction
+                    </h3>
+                    <p className="text-xs text-gray-500 font-medium">
+                      Memo #{memoCorrectionModalData.memo.memoNo} • {memoCorrectionModalData.memo.rangeName || 'Range'}
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setDuplicatePayeeModalData(null)}
-                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                  onClick={() => setMemoCorrectionModalData(null)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
                 >
-                  OK, Understood
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Memo Summary details */}
+              <div className="grid grid-cols-3 gap-2 bg-amber-50/60 p-2.5 rounded-xl border border-amber-200 text-xs">
+                <div>
+                  <span className="text-[10px] text-gray-500 block">Total Amount</span>
+                  <span className="font-mono font-bold text-gray-900 text-xs">
+                    ₹{Math.round(Number(memoCorrectionModalData.memo.totalNetRtgs) || Number(memoCorrectionModalData.memo.totalAmount) || 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 block">Month/Period</span>
+                  <span className="font-semibold text-gray-800 text-xs">
+                    {memoCorrectionModalData.memo.monthYear}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 block">Payees</span>
+                  <span className="font-semibold text-gray-800 text-xs">
+                    {memoCorrectionModalData.memo.payeeEntries?.length || 0} Entries
+                  </span>
+                </div>
+              </div>
+
+              {/* Quick Remarks Presets */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-gray-700">
+                  Quick Correction Reason Presets:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Bank account or IFSC mismatch',
+                    'Voucher / Bill amount mismatch',
+                    'SOE Head or Scheme incorrect',
+                    'Supporting document/bill copy missing',
+                    'Income tax / GST deduction calculation error'
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        const current = memoCorrectionModalData.remarks;
+                        const newRemarks = current.trim() ? `${current.trim()}, ${preset}` : preset;
+                        setMemoCorrectionModalData({ ...memoCorrectionModalData, remarks: newRemarks });
+                      }}
+                      className="px-2 py-1 bg-gray-100 hover:bg-amber-100 text-gray-700 hover:text-amber-900 rounded-lg text-[10px] font-semibold border border-gray-200 transition-colors cursor-pointer"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Remarks Textarea */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-gray-800">
+                  Correction Remarks & Instructions <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  value={memoCorrectionModalData.remarks}
+                  onChange={(e) => setMemoCorrectionModalData({ ...memoCorrectionModalData, remarks: e.target.value })}
+                  placeholder="Clearly describe the errors or corrections required by the user (e.g. Please rectify IFSC code for payee Laxmi and verify the voucher amount before resubmitting)..."
+                  className="w-full p-2.5 border border-amber-300 rounded-xl bg-white text-xs font-medium text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none leading-relaxed"
+                />
+                <p className="text-[10px] text-gray-500">
+                  These remarks will be displayed prominently to the user when they view and edit the memo.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setMemoCorrectionModalData(null)}
+                  disabled={isSendingCorrection}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSendBackForCorrection}
+                  disabled={isSendingCorrection || !memoCorrectionModalData.remarks.trim()}
+                  className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+                    isSendingCorrection || !memoCorrectionModalData.remarks.trim()
+                      ? 'bg-amber-300 text-amber-800 cursor-not-allowed'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
+                  }`}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isSendingCorrection ? 'Returning Memo...' : 'Send Back for Correction'}</span>
                 </button>
               </div>
             </div>
