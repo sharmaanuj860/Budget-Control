@@ -304,7 +304,20 @@
         "remarks": { "type": "string", "description": "General remarks or notes" },
         "correctionRemarks": { "type": "string", "description": "Specific remarks by Admin or DEO explaining reasons for returning memo for correction" },
         "correctionRemarksBy": { "type": "string", "description": "Role/Name of user who requested correction" },
-        "correctionRemarksAt": { "type": "number", "description": "Timestamp when memo was returned for correction" }
+        "correctionRemarksAt": { "type": "number", "description": "Timestamp when memo was returned for correction" },
+        "isApproved": { "type": "boolean", "description": "Whether memo is approved for fund by Headquarter/Admin/DEO" },
+        "approvedBy": { "type": "string", "description": "Name and role of user who approved the memo" },
+        "approvedByRole": { "type": "string", "description": "Role of approver" },
+        "approvedAt": { "type": "number", "description": "Timestamp when memo was approved" },
+        "viewedByAdmin": { "type": "boolean", "description": "Whether memo was read/reviewed by Admin or DEO" },
+        "viewedAt": { "type": "number", "description": "Timestamp of review" },
+        "viewedBy": { "type": "string", "description": "Name/role of reviewer" },
+        "viewedByRole": { "type": "string", "description": "Role of reviewer" },
+        "pulledBack": { "type": "boolean", "description": "Whether memo was pulled back to draft by range user" },
+        "pullBackRemarks": { "type": "string", "description": "Reason for pulling back memo" },
+        "pulledBackBy": { "type": "string", "description": "User who pulled back memo" },
+        "pulledBackAt": { "type": "number", "description": "Timestamp when pulled back" },
+        "copiedFromMemoNo": { "type": "string", "description": "Original memo number if duplicated" }
       },
       "required": ["memoNo", "date", "monthYear", "status", "totalAmount", "payeeEntries", "createdBy"]
     }

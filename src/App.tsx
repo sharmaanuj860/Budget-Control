@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, UserCheck, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, ArrowRight, Clock, ArrowUpRight, QrCode, Smartphone, Copy, ExternalLink, Share2, Scan } from 'lucide-react';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, UserCheck, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, CheckCircle2, ArrowRight, Clock, ArrowUpRight, QrCode, Smartphone, Copy, ExternalLink, Share2, Scan, Undo2, Loader2, Inbox } from 'lucide-react';
 import QRCode from 'qrcode';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
@@ -208,6 +208,19 @@ type MemoForFund = {
   correctionRemarks?: string;
   correctionRemarksBy?: string;
   correctionRemarksAt?: number;
+  isApproved?: boolean;
+  approvedBy?: string;
+  approvedByRole?: string;
+  approvedAt?: number;
+  viewedByAdmin?: boolean;
+  viewedAt?: number;
+  viewedBy?: string;
+  viewedByRole?: string;
+  pulledBack?: boolean;
+  pullBackRemarks?: string;
+  pulledBackBy?: string;
+  pulledBackAt?: number;
+  copiedFromMemoNo?: string;
 };
 
 type BudgetFile = {
@@ -947,6 +960,9 @@ export default function App() {
   const [duplicatePayeeModalData, setDuplicatePayeeModalData] = useState<{ existingPayee: Payee; enteredName: string; enteredAccountNo: string } | null>(null);
   const [memoCorrectionModalData, setMemoCorrectionModalData] = useState<{ memo: MemoForFund; remarks: string } | null>(null);
   const [isSendingCorrection, setIsSendingCorrection] = useState<boolean>(false);
+  const [memoPullBackModalData, setMemoPullBackModalData] = useState<{ memo: MemoForFund; remarks: string } | null>(null);
+  const [isPullingBack, setIsPullingBack] = useState<boolean>(false);
+  const [copiedFromMemoInfo, setCopiedFromMemoInfo] = useState<{ memoNo: string; originalId: string } | null>(null);
 
   const [selectedMemoPayeeId, setSelectedMemoPayeeId] = useState<string>('');
   const [selectedMemoSchemeId, setSelectedMemoSchemeId] = useState<string>('');
@@ -2049,8 +2065,27 @@ export default function App() {
     });
   }, [memos, isRangeRole, userRole, userRangeId, userRangeName, user?.uid]);
 
+  const isAuthorizedUserOrAdmin = useMemo(() => {
+    if (!user) return false;
+    if (userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'DA' || userRole === 'Division') return true;
+    const email = user.email?.toLowerCase() || '';
+    return email === 'sharmaanuj860@gmail.com' || email === 'admin@rajgarhforest.app' || email === 'da123@rajgarhforest.app' || email === 'da789@rajgarhforest.app';
+  }, [user, userRole]);
+
+  const isRangeUser = useMemo(() => {
+    if (userRole && ['Sarahan', 'Narag', 'Habban', 'Rajgarh'].some(r => r.toLowerCase() === userRole.toLowerCase())) return true;
+    if (userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'DA') return false;
+    const email = user?.email?.toLowerCase() || '';
+    if (email === 'sharmaanuj860@gmail.com' || email === 'admin@rajgarhforest.app' || email === 'da123@rajgarhforest.app' || email === 'da789@rajgarhforest.app') return false;
+    return true;
+  }, [userRole, user?.email]);
+
   const filteredMemosForSync = useMemo(() => {
     return filteredMemos.filter(m => {
+      // Strictly ONLY submitted memos can be synced / incurred as expenditure
+      if (m.status !== 'submitted') {
+        return false;
+      }
       if (selectedFY && m.financialYear && m.financialYear !== selectedFY && m.fyId !== selectedFY) {
         return false;
       }
@@ -7103,8 +7138,34 @@ export default function App() {
     }
   };
 
+  const markMemoAsViewedByAdmin = useCallback(async (memo: MemoForFund) => {
+    if (!memo || !memo.id || memo.viewedByAdmin) return;
+    if (!isAuthorizedUserOrAdmin) return;
+
+    try {
+      const roleLabel = userRole === 'admin' ? 'Admin' : (userRole === 'deo' ? 'DEO' : (userRole === 'approver' ? 'Approver' : userRole || 'Headquarter'));
+      const authorLabel = user?.displayName ? `${roleLabel} (${user.displayName})` : (user?.email ? `${roleLabel} (${user.email})` : roleLabel);
+      await updateDoc(doc(db, 'memos', memo.id), {
+        viewedByAdmin: true,
+        viewedAt: Date.now(),
+        viewedBy: authorLabel,
+        viewedByRole: userRole || 'admin',
+        updatedAt: Date.now()
+      });
+      logAuditAction('Memo Viewed by Admin', `Memo No: ${memo.memoNo} viewed by ${authorLabel}`);
+    } catch (err) {
+      console.warn("Failed to mark memo as viewed by admin:", err);
+    }
+  }, [isAuthorizedUserOrAdmin, userRole, user?.displayName, user?.email]);
+
+  const handleViewMemo = useCallback((memo: MemoForFund) => {
+    setViewingMemo(memo);
+    markMemoAsViewedByAdmin(memo);
+  }, [markMemoAsViewedByAdmin]);
+
   const downloadMemoPDF = (memo: MemoForFund) => {
     try {
+      markMemoAsViewedByAdmin(memo);
       const doc = new jsPDF('landscape', 'mm', 'a4');
       const rangeTitle = memo.rangeName ? memo.rangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '') : (userRangeName || 'Sarahan');
 
@@ -7119,6 +7180,14 @@ export default function App() {
 
       doc.setLineWidth(0.4);
       doc.line(12, 26, 285, 26);
+
+      if (memo.isApproved) {
+        doc.setFontSize(8.5);
+        doc.setTextColor(5, 122, 85);
+        doc.setFont("helvetica", "bold");
+        doc.text(`[SANCTIONED & APPROVED FOR FUND RELEASE - ${memo.approvedBy || 'Office of DCF Rajgarh'}]`, 148.5, 30, { align: "center" });
+        doc.setTextColor(0, 0, 0);
+      }
 
       doc.setFontSize(9.5);
       doc.setFont("helvetica", "bold");
@@ -7272,6 +7341,7 @@ export default function App() {
   const handlePrintMemo = (targetMemo?: MemoForFund) => {
     const memoToPrint = targetMemo || viewingMemo;
     if (!memoToPrint) return;
+    markMemoAsViewedByAdmin(memoToPrint);
     try {
       const rangeTitle = memoToPrint.rangeName ? memoToPrint.rangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '') : (userRangeName || 'Sarahan');
       const dateFormatted = memoToPrint.date ? memoToPrint.date.split('-').reverse().join('.') : '';
@@ -8823,7 +8893,14 @@ export default function App() {
       createdBy: editingMemo?.createdBy || user?.uid || '',
       createdByRole: editingMemo?.createdByRole || userRole || '',
       createdByName: editingMemo?.createdByName || user?.email || '',
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      ...(copiedFromMemoInfo ? { copiedFromMemoNo: copiedFromMemoInfo.memoNo } : {}),
+      ...(editingMemo?.pulledBack ? {
+        pulledBack: editingMemo.pulledBack,
+        pullBackRemarks: editingMemo.pullBackRemarks,
+        pulledBackBy: editingMemo.pulledBackBy,
+        pulledBackAt: editingMemo.pulledBackAt
+      } : {})
     };
 
     try {
@@ -8848,8 +8925,107 @@ export default function App() {
     }
   };
 
+  const handleDuplicateMemo = (memo: MemoForFund) => {
+    // Generate the next sequential memo number in line for this Range/Authority in this FY
+    const fromAuthority = memo.rangeName || defaultFromAuthority || userRangeName || 'Sarahan';
+    const nextNo = getNextSequentialMemoNo(fromAuthority, selectedFY || '2026-27', memos);
+
+    setEditingMemo(null);
+    setMemoNoInput(nextNo);
+    setMemoDateInput(new Date().toISOString().split('T')[0]);
+    setMemoMonthYearInput(memo.monthYear || '');
+    setMemoSchemeIdInput(memo.schemeId || '');
+    setMemoSectorIdInput(memo.sectorId || '');
+    setMemoSoeIdInput(memo.soeId || '');
+    setMemoFromInput(memo.rangeName || defaultFromAuthority);
+    setMemoToInput(memo.toAuthority || 'DCF Rajgarh');
+
+    // Deep clone payees so the user can freely edit or delete rows without affecting original memo
+    const clonedPayees: MemoPayeeEntry[] = (memo.payeeEntries || []).map(p => ({
+      ...p,
+      subVouchers: p.subVouchers ? p.subVouchers.map(sv => ({ ...sv })) : []
+    }));
+
+    setMemoPayeeEntries(clonedPayees);
+    setEditingEntryIndex(null);
+    setEntryPayeeId('');
+    setEntryName('');
+    setEntryAddress('');
+    setEntryAccountNo('');
+    setEntryIfsc('');
+    setEntryTreasuryCode('');
+    setEntryPan('');
+    setEntryGst('');
+    setEntryTotalAmount('');
+    setEntrySubVouchers([]);
+    setShowSubVoucherSection(false);
+
+    setCopiedFromMemoInfo({ memoNo: memo.memoNo, originalId: memo.id });
+
+    showAlert(`Created duplicate draft from Memo #${memo.memoNo} with new sequential Memo #${nextNo}. You can now edit payee amounts, delete unwanted payees, or add new payees, then save as Draft or submit.`);
+  };
+
+  const handleOpenPullBackModal = (memo: MemoForFund) => {
+    if (memo.status !== 'submitted') {
+      showAlert('Only submitted memos can be pulled back.');
+      return;
+    }
+    if (memo.viewedByAdmin) {
+      showAlert(`This memo has already been reviewed by Headquarter (${memo.viewedBy || 'Admin'}${memo.viewedAt ? ` on ${new Date(memo.viewedAt).toLocaleDateString('en-GB')}` : ''}). It cannot be pulled back by the range user. Please contact Headquarter/Admin to return it for correction.`);
+      return;
+    }
+    setMemoPullBackModalData({ memo, remarks: '' });
+  };
+
+  const handleConfirmPullBack = async () => {
+    if (!memoPullBackModalData) return;
+    const { memo, remarks } = memoPullBackModalData;
+    if (!remarks.trim()) {
+      showAlert('Please enter the reason / remarks for pulling back the memo.');
+      return;
+    }
+
+    try {
+      setIsPullingBack(true);
+      const roleLabel = userRole || 'Range User';
+      const authorLabel = user?.displayName ? `${roleLabel} (${user.displayName})` : (user?.email ? `${roleLabel} (${user.email})` : roleLabel);
+
+      await updateDoc(doc(db, 'memos', memo.id), {
+        status: 'draft',
+        pulledBack: true,
+        pullBackRemarks: remarks.trim(),
+        pulledBackBy: authorLabel,
+        pulledBackAt: Date.now(),
+        updatedAt: Date.now()
+      });
+
+      logAuditAction(
+        'Memo Pulled Back',
+        `Memo No: ${memo.memoNo} pulled back to Draft by ${authorLabel} with remarks: "${remarks.trim()}"`
+      );
+
+      showAlert(`Memo No. ${memo.memoNo} has been successfully pulled back to Draft. You can now edit and re-submit it.`);
+      setMemoPullBackModalData(null);
+
+      // Automatically load into form for editing
+      handleEditMemo({
+        ...memo,
+        status: 'draft',
+        pulledBack: true,
+        pullBackRemarks: remarks.trim(),
+        pulledBackBy: authorLabel,
+        pulledBackAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
+    } finally {
+      setIsPullingBack(false);
+    }
+  };
+
   const handleEditMemo = (memo: MemoForFund) => {
     setEditingMemo(memo);
+    setCopiedFromMemoInfo(null);
     setMemoNoInput(memo.memoNo || '');
     setMemoDateInput(memo.date || new Date().toISOString().split('T')[0]);
     setMemoMonthYearInput(memo.monthYear || '');
@@ -8924,8 +9100,118 @@ export default function App() {
     }
   };
 
+  const handleApproveMemo = async (memo: MemoForFund) => {
+    if (!isAdmin() && !isDEO() && userRole !== 'approver' && userRole !== 'DA') {
+      showAlert('Only Admin or Data Entry Operator can approve memos for fund.');
+      return;
+    }
+
+    try {
+      const roleLabel = userRole === 'admin' ? 'Admin' : (userRole === 'deo' ? 'DEO' : (userRole === 'approver' ? 'Approver' : userRole || 'Headquarter'));
+      const authorLabel = user?.displayName ? `${roleLabel} (${user.displayName})` : (user?.email ? `${roleLabel} (${user.email})` : roleLabel);
+
+      await updateDoc(doc(db, 'memos', memo.id), {
+        isApproved: true,
+        approvedBy: authorLabel,
+        approvedByRole: userRole || 'admin',
+        approvedAt: Date.now(),
+        viewedByAdmin: true,
+        viewedAt: memo.viewedAt || Date.now(),
+        viewedBy: memo.viewedBy || authorLabel,
+        viewedByRole: memo.viewedByRole || userRole || 'admin',
+        updatedAt: Date.now()
+      });
+
+      logAuditAction(
+        'Memo Approved for Fund',
+        `Memo No: ${memo.memoNo} approved for funding by ${authorLabel}`
+      );
+
+      showAlert(`Memo No. ${memo.memoNo} has been successfully Approved for Fund! The Range user can now see the "Approved by HQ" status.`);
+      if (viewingMemo?.id === memo.id) {
+        setViewingMemo({
+          ...memo,
+          isApproved: true,
+          approvedBy: authorLabel,
+          approvedByRole: userRole || 'admin',
+          approvedAt: Date.now(),
+          viewedByAdmin: true,
+          viewedAt: memo.viewedAt || Date.now(),
+          viewedBy: memo.viewedBy || authorLabel
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
+    }
+  };
+
+  const handleRevokeMemoApproval = async (memo: MemoForFund) => {
+    if (!isAdmin() && !isDEO() && userRole !== 'approver' && userRole !== 'DA') {
+      showAlert('Only Admin or Data Entry Operator can revoke memo approval.');
+      return;
+    }
+
+    showConfirm(`Are you sure you want to revoke approval for Memo No. ${memo.memoNo}?`, async () => {
+      try {
+        await updateDoc(doc(db, 'memos', memo.id), {
+          isApproved: false,
+          approvedBy: '',
+          approvedByRole: '',
+          approvedAt: 0,
+          updatedAt: Date.now()
+        });
+
+        logAuditAction(
+          'Memo Approval Revoked',
+          `Approval for Memo No: ${memo.memoNo} was revoked by ${user?.email || userRole}`
+        );
+
+        showAlert(`Approval for Memo No. ${memo.memoNo} has been revoked.`);
+        if (viewingMemo?.id === memo.id) {
+          setViewingMemo({
+            ...memo,
+            isApproved: false,
+            approvedBy: undefined,
+            approvedByRole: undefined,
+            approvedAt: undefined
+          });
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
+      }
+    });
+  };
+
+  const handleMarkMemoAsRead = async (memo: MemoForFund) => {
+    if (!isAuthorizedUserOrAdmin) return;
+    try {
+      const roleLabel = userRole === 'admin' ? 'Admin' : (userRole === 'deo' ? 'DEO' : (userRole === 'approver' ? 'Approver' : userRole || 'Headquarter'));
+      const authorLabel = user?.displayName ? `${roleLabel} (${user.displayName})` : (user?.email ? `${roleLabel} (${user.email})` : roleLabel);
+      await updateDoc(doc(db, 'memos', memo.id), {
+        viewedByAdmin: true,
+        viewedAt: Date.now(),
+        viewedBy: authorLabel,
+        viewedByRole: userRole || 'admin',
+        updatedAt: Date.now()
+      });
+      logAuditAction('Memo Marked Reviewed', `Memo No: ${memo.memoNo} marked as reviewed by ${authorLabel}`);
+      showAlert(`Memo No. ${memo.memoNo} marked as Read / Reviewed.`);
+      if (viewingMemo?.id === memo.id) {
+        setViewingMemo({
+          ...memo,
+          viewedByAdmin: true,
+          viewedAt: Date.now(),
+          viewedBy: authorLabel
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `memos/${memo.id}`);
+    }
+  };
+
   const handleResetMemoForm = () => {
     setEditingMemo(null);
+    setCopiedFromMemoInfo(null);
     setMemoNoInput(autoMemoNo);
     setMemoDateInput(new Date().toISOString().split('T')[0]);
     setMemoMonthYearInput('08/2026');
@@ -14795,6 +15081,53 @@ export default function App() {
                       <span className="text-xs text-gray-400 font-medium">* Required fields</span>
                     </div>
 
+                    {/* Duplicate / Copied Memo Banner */}
+                    {copiedFromMemoInfo && (
+                      <div className="p-4 bg-emerald-50/90 rounded-xl border-2 border-emerald-300 text-xs shadow-xs space-y-2 animate-in fade-in">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 font-black text-emerald-950">
+                            <Copy className="w-4 h-4 text-emerald-700 shrink-0" />
+                            <span>Duplicated from Memo #{copiedFromMemoInfo.memoNo}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleResetMemoForm}
+                            className="text-[11px] text-emerald-800 hover:text-emerald-950 font-bold underline cursor-pointer"
+                          >
+                            Discard Duplicate
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-emerald-900 font-medium leading-relaxed">
+                          This is a new editable draft with next sequential <strong>Memo #{memoNoInput}</strong>. All payees from Memo #{copiedFromMemoInfo.memoNo} are pre-populated. You can adjust amounts, delete unwanted payees, or add new payees before saving or submitting.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Pulled Back Banner if editing a pulled back memo */}
+                    {editingMemo && editingMemo.pulledBack && (
+                      <div className="p-4 bg-orange-50/90 rounded-xl border-2 border-orange-300 text-xs shadow-xs space-y-2 animate-in fade-in">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 font-black text-orange-950">
+                            <Undo2 className="w-4 h-4 text-orange-700 shrink-0" />
+                            <span>Memo Pulled Back to Draft {editingMemo.pulledBackBy ? `by ${editingMemo.pulledBackBy}` : ''}</span>
+                          </div>
+                          {editingMemo.pulledBackAt && (
+                            <span className="text-[10px] text-orange-800 font-bold bg-orange-200/70 px-2 py-0.5 rounded">
+                              {new Date(editingMemo.pulledBackAt).toLocaleDateString('en-GB')}
+                            </span>
+                          )}
+                        </div>
+                        {editingMemo.pullBackRemarks && (
+                          <div className="p-2.5 bg-white/95 rounded-lg border border-orange-300 text-orange-950 font-semibold text-[11px] leading-relaxed shadow-2xs">
+                            Reason: "{editingMemo.pullBackRemarks}"
+                          </div>
+                        )}
+                        <p className="text-[11px] text-orange-800 font-medium">
+                          You can now modify payees or amounts and click <strong>"Submit & Lock Memo"</strong> once ready.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Correction Remarks Banner if editing a returned memo */}
                     {editingMemo && (editingMemo.status === 'correction' || editingMemo.correctionRemarks) && (
                       <div className="p-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 rounded-xl border-2 border-amber-300 text-xs shadow-xs space-y-2 animate-in fade-in">
@@ -15851,14 +16184,47 @@ export default function App() {
                               {/* Header info */}
                               <div className="flex justify-between items-start gap-2 mb-2">
                                 <div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-1.5">
                                     <span className="font-extrabold text-xs text-gray-900">
                                       Memo #{m.memoNo}
                                     </span>
                                     {isSubmitted && (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                                        <Lock className="w-2.5 h-2.5" /> Submitted
-                                      </span>
+                                      <>
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                                          <Lock className="w-2.5 h-2.5" /> Submitted
+                                        </span>
+                                        {/* For Range User: Show Pending HQ Review or Reviewed or Approved */}
+                                        {isRangeUser ? (
+                                          m.isApproved ? (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs" title={`Approved by ${m.approvedBy || 'HQ'}${m.approvedAt ? ` on ${new Date(m.approvedAt).toLocaleDateString('en-GB')}` : ''}`}>
+                                              <CheckCircle2 className="w-2.5 h-2.5" /> Approved by HQ
+                                            </span>
+                                          ) : m.viewedByAdmin ? (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 flex items-center gap-1" title={`Reviewed by ${m.viewedBy || 'HQ'}${m.viewedAt ? ` on ${new Date(m.viewedAt).toLocaleDateString('en-GB')}` : ''}`}>
+                                              <Eye className="w-2.5 h-2.5 text-blue-700" /> Reviewed by HQ
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-1" title="Pending review by Headquarter / Admin. Can be pulled back by Range user.">
+                                              <Clock className="w-2.5 h-2.5 text-amber-700" /> Pending HQ Review
+                                            </span>
+                                          )
+                                        ) : (
+                                          /* For Admin / DEO: No 'Pending Review' tag! Show Approved or Read / New */
+                                          m.isApproved ? (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs" title={`Approved by ${m.approvedBy || 'Admin'}${m.approvedAt ? ` on ${new Date(m.approvedAt).toLocaleDateString('en-GB')}` : ''}`}>
+                                              <CheckCircle2 className="w-2.5 h-2.5" /> Approved
+                                            </span>
+                                          ) : m.viewedByAdmin ? (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 flex items-center gap-1" title={`Read / Reviewed by ${m.viewedBy || 'HQ'}${m.viewedAt ? ` on ${new Date(m.viewedAt).toLocaleDateString('en-GB')}` : ''}`}>
+                                              <Eye className="w-2.5 h-2.5 text-blue-700" /> Read / Reviewed
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-900 flex items-center gap-1" title="New submitted memo from Range waiting for your review & approval">
+                                              <Inbox className="w-2.5 h-2.5 text-purple-700" /> New for Review
+                                            </span>
+                                          )
+                                        )}
+                                      </>
                                     )}
                                     {isCorrection && (
                                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
@@ -15866,12 +16232,17 @@ export default function App() {
                                       </span>
                                     )}
                                     {m.status === 'draft' && (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">
-                                        Draft
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.pulledBack ? 'bg-orange-100 text-orange-900 border border-orange-200' : 'bg-gray-200 text-gray-700'}`}>
+                                        {m.pulledBack ? 'Draft (Pulled Back)' : 'Draft'}
+                                      </span>
+                                    )}
+                                    {m.copiedFromMemoNo && (
+                                      <span className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200" title={`Duplicated from Memo #${m.copiedFromMemoNo}`}>
+                                        From #{m.copiedFromMemoNo}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[11px] text-gray-500 font-medium">
+                                  <div className="text-[11px] text-gray-500 font-medium mt-0.5">
                                     Date: {m.date ? m.date.split('-').reverse().join('/') : ''} | Month: {m.monthYear}
                                   </div>
                                 </div>
@@ -15897,6 +16268,41 @@ export default function App() {
                                 <p className="text-[10px] text-gray-500">From: {m.rangeName} &rarr; To: {m.toAuthority || 'DCF Rajgarh'}</p>
                               </div>
 
+                              {/* Approved for Fund Status Banner */}
+                              {m.isApproved && (
+                                <div className="mb-2.5 p-2 bg-emerald-50 border border-emerald-300 rounded-lg text-xs text-emerald-950 flex items-center justify-between shadow-2xs">
+                                  <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                    <span>Approved for Fund ({m.approvedBy || 'Headquarter'})</span>
+                                  </div>
+                                  {m.approvedAt ? (
+                                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100/90 px-2 py-0.5 rounded border border-emerald-200">
+                                      {new Date(m.approvedAt).toLocaleDateString('en-GB')}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )}
+
+                              {/* Pulled Back Remarks Display in Card */}
+                              {m.pulledBack && m.pullBackRemarks && (
+                                <div className="mb-3 p-2.5 bg-orange-50 border border-orange-200 rounded-lg text-xs text-orange-950 space-y-1">
+                                  <div className="flex items-center justify-between text-[11px] font-bold text-orange-900">
+                                    <span className="flex items-center gap-1">
+                                      <Undo2 className="w-3.5 h-3.5 text-orange-700 shrink-0" />
+                                      <span>Pulled Back to Draft ({m.pulledBackBy || 'User'}):</span>
+                                    </span>
+                                    {m.pulledBackAt && (
+                                      <span className="text-[10px] text-orange-700 font-medium">
+                                        {new Date(m.pulledBackAt).toLocaleDateString('en-GB')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] font-medium text-orange-900 bg-white/80 p-2 rounded border border-orange-100">
+                                    "{m.pullBackRemarks}"
+                                  </p>
+                                </div>
+                              )}
+
                               {/* Correction Remarks Display in Card */}
                               {(m.status === 'correction' || m.correctionRemarks) && (
                                 <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-950 space-y-1">
@@ -15919,11 +16325,11 @@ export default function App() {
 
                               {/* Actions Bar */}
                               <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => setViewingMemo(m)}
-                                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                                    onClick={() => handleViewMemo(m)}
+                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
                                   >
                                     <Printer className="w-3 h-3" />
                                     <span>View & Print</span>
@@ -15937,11 +16343,86 @@ export default function App() {
                                     <Download className="w-3 h-3" />
                                     <span>Download PDF</span>
                                   </button>
+                                  {/* Duplicate / Copy Memo Button for all users */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDuplicateMemo(m)}
+                                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                                    title="Duplicate / Copy this memo to create a new draft in sequence with same payees & editable amounts"
+                                  >
+                                    <Copy className="w-3 h-3 text-emerald-700" />
+                                    <span>Duplicate</span>
+                                  </button>
                                 </div>
 
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {/* PULL BACK BUTTON: ONLY visible to Range users when memo is submitted and NOT yet viewed/approved by HQ */}
+                                  {isRangeUser && isSubmitted && !m.viewedByAdmin && !m.isApproved && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenPullBackModal(m)}
+                                      className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-900 border border-orange-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                                      title="Pull back this submitted memo to Draft with remarks (before Headquarter reviews it)"
+                                    >
+                                      <Undo2 className="w-3 h-3 text-orange-700" />
+                                      <span>Pull Back</span>
+                                    </button>
+                                  )}
+
+                                  {/* Range User Status indicators */}
+                                  {isRangeUser && isSubmitted && m.viewedByAdmin && !m.isApproved && (
+                                    <span
+                                      className="px-2 py-1 bg-blue-50 text-blue-900 rounded-lg text-[10px] font-bold border border-blue-200 flex items-center gap-1"
+                                      title={`Viewed by ${m.viewedBy || 'Headquarter'}${m.viewedAt ? ` on ${new Date(m.viewedAt).toLocaleDateString('en-GB')}` : ''}. Locked - cannot be pulled back.`}
+                                    >
+                                      <Eye className="w-2.5 h-2.5 text-blue-600" />
+                                      <span>Under HQ Review</span>
+                                    </span>
+                                  )}
+
+                                  {/* ADMIN & DEO ACTIONS: Read & Approve buttons */}
+                                  {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && isSubmitted && (
+                                    <>
+                                      {/* Mark as Read button if not yet viewed */}
+                                      {!m.viewedByAdmin && !m.isApproved && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMarkMemoAsRead(m)}
+                                          className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                                          title="Mark this memo as Read / Reviewed"
+                                        >
+                                          <Eye className="w-3 h-3 text-blue-700" />
+                                          <span>Mark Read</span>
+                                        </button>
+                                      )}
+
+                                      {/* Approve Button / Revoke Approval button for Admin & DEO */}
+                                      {!m.isApproved ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleApproveMemo(m)}
+                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                                          title="Approve this Memo for Fund so the Range user can see the Approved status"
+                                        >
+                                          <CheckCircle2 className="w-3 h-3 text-white" />
+                                          <span>Approve Memo</span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRevokeMemoApproval(m)}
+                                          className="px-2.5 py-1 bg-emerald-50 hover:bg-red-50 text-emerald-800 hover:text-red-700 border border-emerald-300 hover:border-red-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                                          title="Memo is Approved. Click to revoke approval if needed."
+                                        >
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                          <span>Approved ✓</span>
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+
                                   {/* Send back for correction button for Admin/DEO */}
-                                  {(userRole === 'admin' || userRole === 'deo') && (isSubmitted || isCorrection) && (
+                                  {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && (isSubmitted || isCorrection) && (
                                     <button
                                       type="button"
                                       onClick={() => handleOpenSendBackModal(m)}
@@ -15962,7 +16443,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => handleEditMemo(m)}
                                     disabled={!canEdit}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                                    className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                                       canEdit
                                         ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
                                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -16038,6 +16519,29 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Admin / DEO Approve Button in Modal Toolbar */}
+                    {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && viewingMemo.status === 'submitted' && (
+                      !viewingMemo.isApproved ? (
+                        <button 
+                          onClick={() => handleApproveMemo(viewingMemo)}
+                          className="flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 border border-emerald-400/50 px-3 py-1.5 rounded-lg transition-all text-sm font-bold cursor-pointer text-white shadow-sm"
+                          title="Approve this memo for funding"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                          <span>Approve for Fund</span>
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => handleRevokeMemoApproval(viewingMemo)}
+                          className="flex items-center gap-1.5 bg-white/20 hover:bg-red-500/80 px-3 py-1.5 rounded-lg transition-colors text-sm font-bold cursor-pointer text-white"
+                          title="Memo is Approved. Click to revoke."
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                          <span>Approved ✓</span>
+                        </button>
+                      )
+                    )}
+
                     <button 
                       onClick={() => downloadMemoPDF(viewingMemo)}
                       className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
@@ -16067,6 +16571,29 @@ export default function App() {
 
                 {/* Scrollable Letter Sheet */}
                 <div className="print-area overflow-y-auto flex-1 p-6 md:p-12 space-y-5 text-gray-900 bg-white font-sans">
+                  {/* Official Approval Status Banner on Letter if Approved */}
+                  {viewingMemo.isApproved && (
+                    <div className="p-3 bg-emerald-50 border-2 border-emerald-600 rounded-lg flex items-center justify-between text-xs font-bold text-emerald-950">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
+                        <div>
+                          <p className="uppercase tracking-wide text-emerald-900 font-extrabold text-[13px]">
+                            SANCTIONED & APPROVED FOR FUND RELEASE
+                          </p>
+                          <p className="text-[11px] text-emerald-800 font-normal">
+                            Approved by Headquarter ({viewingMemo.approvedBy || 'Office of DCF Rajgarh'})
+                          </p>
+                        </div>
+                      </div>
+                      {viewingMemo.approvedAt && (
+                        <div className="text-right text-[11px] text-emerald-800 font-medium">
+                          <span>Approval Date: </span>
+                          <span className="font-bold">{new Date(viewingMemo.approvedAt).toLocaleDateString('en-GB')}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Department Header */}
                   <div className="text-center space-y-1 border-b-2 border-gray-900 pb-3">
                     <h2 className="text-xs md:text-sm font-extrabold uppercase tracking-widest text-gray-800">
@@ -17860,6 +18387,136 @@ export default function App() {
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>{isSendingCorrection ? 'Returning Memo...' : 'Send Back for Correction'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Memo Pull Back with Remarks Modal for Range Users */}
+        {memoPullBackModalData && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-orange-200 transform transition-all space-y-4">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 border-b pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-orange-100 text-orange-700 shrink-0">
+                    <Undo2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 leading-snug">
+                      Pull Back Submitted Memo
+                    </h3>
+                    <p className="text-xs text-gray-500 font-medium">
+                      Memo #{memoPullBackModalData.memo.memoNo} • {memoPullBackModalData.memo.rangeName || 'Range'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMemoPullBackModalData(null)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Memo Summary details */}
+              <div className="grid grid-cols-3 gap-2 bg-orange-50/60 p-2.5 rounded-xl border border-orange-200 text-xs">
+                <div>
+                  <span className="text-[10px] text-gray-500 block">Total Amount</span>
+                  <span className="font-mono font-bold text-gray-900 text-xs">
+                    ₹{Math.round(Number(memoPullBackModalData.memo.totalNetRtgs) || Number(memoPullBackModalData.memo.totalAmount) || 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 block">Month/Period</span>
+                  <span className="font-semibold text-gray-800 text-xs">
+                    {memoPullBackModalData.memo.monthYear}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 block">Payees</span>
+                  <span className="font-semibold text-gray-800 text-xs">
+                    {memoPullBackModalData.memo.payeeEntries?.length || 0} Entries
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs leading-relaxed">
+                <p className="font-medium">
+                  This memo has not yet been reviewed by Headquarter / Admin. Pulling it back unlocks it to <strong>Draft</strong> so you can edit details, adjust amounts, or add/delete payees.
+                </p>
+              </div>
+
+              {/* Quick Reason Presets */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-gray-700">
+                  Quick Pull Back Reason Presets:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Need to correct Payee Bank / IFSC Details',
+                    'Need to adjust Payee Bill Amount / Tax',
+                    'Need to delete / remove a Payee',
+                    'Need to add more Payees to this Memo',
+                    'SOE Head or Scheme correction needed'
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        const current = memoPullBackModalData.remarks;
+                        const newRemarks = current.trim() ? `${current.trim()}, ${preset}` : preset;
+                        setMemoPullBackModalData({ ...memoPullBackModalData, remarks: newRemarks });
+                      }}
+                      className="px-2 py-1 bg-gray-100 hover:bg-orange-100 text-gray-700 hover:text-orange-900 rounded-lg text-[10px] font-semibold border border-gray-200 transition-colors cursor-pointer"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Remarks Textarea */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-gray-800">
+                  Reason / Remarks for Pulling Back <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={memoPullBackModalData.remarks}
+                  onChange={(e) => setMemoPullBackModalData({ ...memoPullBackModalData, remarks: e.target.value })}
+                  placeholder="State why you are pulling back this memo (e.g. need to correct payee account number, remove payee, amount adjustment)..."
+                  className="w-full p-2.5 border border-orange-300 rounded-xl bg-white text-xs font-medium text-gray-900 focus:ring-2 focus:ring-orange-500 outline-none leading-relaxed"
+                />
+                <p className="text-[10px] text-gray-500">
+                  * Pull-back remarks will be recorded and visible in the memo details.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setMemoPullBackModalData(null)}
+                  disabled={isPullingBack}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPullBack}
+                  disabled={isPullingBack || !memoPullBackModalData.remarks.trim()}
+                  className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+                    isPullingBack || !memoPullBackModalData.remarks.trim()
+                      ? 'bg-orange-300 text-orange-800 cursor-not-allowed'
+                      : 'bg-orange-600 hover:bg-orange-700 text-white active:scale-95'
+                  }`}
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  <span>{isPullingBack ? 'Pulling Back...' : 'Confirm Pull Back'}</span>
                 </button>
               </div>
             </div>
