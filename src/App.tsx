@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, UserCheck, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, CheckCircle2, ArrowRight, Clock, ArrowUpRight, QrCode, Smartphone, Copy, ExternalLink, Share2, Scan, Undo2, Loader2, Inbox } from 'lucide-react';
+import { IndianRupee, Wallet, TrendingDown, Landmark, Activity, FileText, Map, MapPin, Plus, Trash2, Download, LogOut, User, UserCheck, Shield, FileBarChart, Filter, Search, Menu, Table, Pencil, Edit2, Home, ChevronUp, ChevronDown, TreePine, Check, X, Unlock, RefreshCcw, RefreshCw, Save, Eye, EyeOff, ShieldCheck, Lock, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Printer, CornerUpLeft, Calendar, PieChart as PieChartIcon, Maximize2, Minimize2, Bell, MoveHorizontal, PlusCircle, Users, Send, History, Building2, DollarSign, AlertTriangle, CheckCircle, CheckCircle2, ArrowRight, Clock, ArrowUpRight, QrCode, Smartphone, Copy, ExternalLink, Share2, Scan, Undo2, Loader2, Inbox, Globe, Laptop, Wifi, WifiOff } from 'lucide-react';
 import QRCode from 'qrcode';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
@@ -349,9 +349,55 @@ function convertNumberToWords(amount: number): string {
   return str.trim() || 'Zero';
 }
 
+function sanitizeFirestoreDoc<T>(obj: T): T {
+  if (obj === undefined) return "" as any;
+  if (obj === null) return null as any;
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeFirestoreDoc(item)) as any;
+  }
+  if (typeof obj === 'object' && !(obj instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeFirestoreDoc(value);
+      }
+    }
+    return cleaned as any;
+  }
+  return obj;
+}
+
+function getDeviceInfo(): string {
+  if (typeof window === 'undefined' || !window.navigator) return 'Web Client';
+  const ua = window.navigator.userAgent;
+  let os = 'Windows/PC';
+  if (/windows phone/i.test(ua)) os = 'Windows Phone';
+  else if (/win(dows )?nt 10\.0/i.test(ua)) os = 'Windows 10/11';
+  else if (/win(dows )?nt 6\.3/i.test(ua)) os = 'Windows 8.1';
+  else if (/win(dows )?nt 6\.1/i.test(ua)) os = 'Windows 7';
+  else if (/android/i.test(ua)) os = 'Android';
+  else if (/ipad/i.test(ua)) os = 'iPad';
+  else if (/iphone|ipod/i.test(ua)) os = 'iPhone';
+  else if (/macintosh|mac os x/i.test(ua)) os = 'macOS';
+  else if (/linux/i.test(ua)) os = 'Linux';
+
+  let browser = 'Browser';
+  if (/edg/i.test(ua)) browser = 'Edge';
+  else if (/chrome|crios/i.test(ua) && !/opr|opera/i.test(ua)) browser = 'Chrome';
+  else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browser = 'Safari';
+  else if (/firefox|fxios/i.test(ua)) browser = 'Firefox';
+  else if (/opr|opera/i.test(ua)) browser = 'Opera';
+
+  const isMobile = /mobile|tablet|android|iphone|ipad/i.test(ua);
+  return `${os} (${browser}) â€¢ ${isMobile ? 'Mobile' : 'Desktop'}`;
+}
+
+let globalAlertDispatcher: ((msg: string) => void) | null = null;
+
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errText = error instanceof Error ? error.message : String(error);
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errText,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email || undefined,
@@ -367,9 +413,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     },
     operationType,
     path
-  }
+  };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  if (globalAlertDispatcher) {
+    globalAlertDispatcher(`Database operation failed (${operationType} on ${path || 'database'}).\n\nPlease contact the administrator with this error:\n"${errText}"`);
+  }
 }
 
 const TryUpdateInput = ({ soeId, initialValue, onUpdate }: { soeId: string, initialValue: number, onUpdate: (id: string, val: number) => void }) => {
@@ -751,6 +799,10 @@ export default function App() {
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; message: string; onConfirm: () => void }>({ isOpen: false, message: '', onConfirm: () => {} });
 
   const showAlert = (message: string) => setAlertModal({ isOpen: true, message });
+  useEffect(() => {
+    globalAlertDispatcher = showAlert;
+    return () => { globalAlertDispatcher = null; };
+  }, []);
   const showConfirm = (message: string, onConfirm: () => void) => setConfirmModal({ isOpen: true, message, onConfirm });
 
   // --- State ---
@@ -803,21 +855,68 @@ export default function App() {
   const [showMemoSyncModal, setShowMemoSyncModal] = useState<boolean>(false);
   const [memoSearchTerm, setMemoSearchTerm] = useState<string>('');
 
-  // Audit Logs State & Helper
+  // Audit Logs State & Network/Device Tracking
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
+  const [clientIpAddress, setClientIpAddress] = useState<string>('Detecting...');
+  const [isNetworkOnline, setIsNetworkOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsNetworkOnline(true);
+    const handleOffline = () => setIsNetworkOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    let isMounted = true;
+    const fetchClientIp = async () => {
+      try {
+        const res = await fetch('https://api.ipify.org?format=json', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ip && isMounted) {
+            setClientIpAddress(data.ip);
+            return;
+          }
+        }
+      } catch (_) {}
+      try {
+        const res2 = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          if (data2.ip && isMounted) {
+            setClientIpAddress(data2.ip);
+            return;
+          }
+        }
+      } catch (_) {}
+      if (isMounted) {
+        setClientIpAddress('Direct Connection');
+      }
+    };
+
+    fetchClientIp();
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      isMounted = false;
+    };
+  }, []);
 
   const logAuditAction = async (action: string, details?: string) => {
     try {
+      const userRangeNameForLog = userRole && ['Sarahan', 'Narag', 'Habban', 'Division', 'Rajgarh'].includes(userRole) ? userRole : (userRangeName || 'All Ranges');
       const logData = {
         action,
         details: details || '',
         userName: user?.displayName || user?.email?.split('@')[0] || 'User',
         userEmail: user?.email || '',
         userRole: userRole || 'User',
+        userRange: userRangeNameForLog,
+        ipAddress: clientIpAddress !== 'Detecting...' ? clientIpAddress : (typeof window !== 'undefined' ? window.location.hostname : 'Direct IP'),
+        deviceInfo: getDeviceInfo(),
         timestamp: Date.now()
       };
-      await addDoc(collection(db, 'auditLogs'), logData);
+      await addDoc(collection(db, 'auditLogs'), sanitizeFirestoreDoc(logData));
     } catch (err) {
       console.warn("Could not log audit action:", err);
     }
@@ -833,7 +932,7 @@ export default function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const logs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }) as any);
       logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      setAuditLogs(logs.slice(0, 50));
+      setAuditLogs(logs.slice(0, 100));
     }, (error) => {
       console.warn("Audit logs listener error:", error);
     });
@@ -965,6 +1064,106 @@ export default function App() {
   const [memoPullBackModalData, setMemoPullBackModalData] = useState<{ memo: MemoForFund; remarks: string } | null>(null);
   const [isPullingBack, setIsPullingBack] = useState<boolean>(false);
   const [copiedFromMemoInfo, setCopiedFromMemoInfo] = useState<{ memoNo: string; originalId: string } | null>(null);
+
+  // --- Auto-Save Drafts Engine (Offline & Power Outage Protection) ---
+  const [lastAutoSaveMemoTime, setLastAutoSaveMemoTime] = useState<string | null>(null);
+  const [lastAutoSaveExpenseTime, setLastAutoSaveExpenseTime] = useState<string | null>(null);
+  const memoDraftLoadedRef = useRef(false);
+  const expenseDraftLoadedRef = useRef(false);
+
+  // 1. Memo for Fund: Auto-Restore Draft on Initial Load
+  useEffect(() => {
+    if (memoDraftLoadedRef.current) return;
+    try {
+      const savedMemoDraft = localStorage.getItem('rajgarh_draft_memo_fund');
+      if (savedMemoDraft) {
+        const d = JSON.parse(savedMemoDraft);
+        if (d && !editingMemo) {
+          if (d.memoNoInput) setMemoNoInput(d.memoNoInput);
+          if (d.memoDateInput) setMemoDateInput(d.memoDateInput);
+          if (d.memoMonthYearInput) setMemoMonthYearInput(d.memoMonthYearInput);
+          if (d.memoSchemeIdInput) setMemoSchemeIdInput(d.memoSchemeIdInput);
+          if (d.memoSectorIdInput) setMemoSectorIdInput(d.memoSectorIdInput);
+          if (d.memoSoeIdInput) setMemoSoeIdInput(d.memoSoeIdInput);
+          if (d.memoFromInput) setMemoFromInput(d.memoFromInput);
+          if (d.memoToInput) setMemoToInput(d.memoToInput);
+          if (Array.isArray(d.memoPayeeEntries) && d.memoPayeeEntries.length > 0) {
+            setMemoPayeeEntries(d.memoPayeeEntries);
+          }
+          if (d.entryName) setEntryName(d.entryName);
+          if (d.entryAddress) setEntryAddress(d.entryAddress);
+          if (d.entryAccountNo) setEntryAccountNo(d.entryAccountNo);
+          if (d.entryIfsc) setEntryIfsc(d.entryIfsc);
+          if (d.entryTreasuryCode) setEntryTreasuryCode(d.entryTreasuryCode);
+          if (d.entryPan) setEntryPan(d.entryPan);
+          if (d.entryGst) setEntryGst(d.entryGst);
+          if (d.entryTotalAmount) setEntryTotalAmount(d.entryTotalAmount);
+          if (d.entrySubVouchers && Array.isArray(d.entrySubVouchers)) {
+            setEntrySubVouchers(d.entrySubVouchers);
+            if (d.entrySubVouchers.length > 0) setShowSubVoucherSection(true);
+          }
+          if (d.timestamp) {
+            setLastAutoSaveMemoTime(new Date(d.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore memo draft from localStorage:", e);
+    }
+    memoDraftLoadedRef.current = true;
+  }, [editingMemo]);
+
+  // 2. Memo for Fund: Continuous Auto-Save on Any Input Change
+  useEffect(() => {
+    if (editingMemo) return; // Do not overwrite draft when editing existing saved memo
+    const hasData = memoPayeeEntries.length > 0 || memoNoInput.trim() || entryName.trim() || entryAccountNo.trim() || entryTotalAmount || entrySubVouchers.length > 0;
+    if (!hasData) return;
+
+    const timer = setTimeout(() => {
+      try {
+        const draftObj = {
+          memoNoInput,
+          memoDateInput,
+          memoMonthYearInput,
+          memoSchemeIdInput,
+          memoSectorIdInput,
+          memoSoeIdInput,
+          memoFromInput,
+          memoToInput,
+          memoPayeeEntries,
+          entryName,
+          entryAddress,
+          entryAccountNo,
+          entryIfsc,
+          entryTreasuryCode,
+          entryPan,
+          entryGst,
+          entryTotalAmount,
+          entryDeductITax,
+          entryITaxPercent,
+          entryDeductGst,
+          entryGstPercent,
+          entrySubVouchers,
+          subVoucherNoInput,
+          subVoucherDescInput,
+          subVoucherAmountInput,
+          timestamp: Date.now()
+        };
+        localStorage.setItem('rajgarh_draft_memo_fund', JSON.stringify(draftObj));
+        setLastAutoSaveMemoTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+      } catch (err) {
+        console.warn("Auto-save memo draft failed:", err);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [memoNoInput, memoDateInput, memoMonthYearInput, memoSchemeIdInput, memoSectorIdInput, memoSoeIdInput, memoFromInput, memoToInput, memoPayeeEntries, entryName, entryAddress, entryAccountNo, entryIfsc, entryTreasuryCode, entryPan, entryGst, entryTotalAmount, entryDeductITax, entryITaxPercent, entryDeductGst, entryGstPercent, entrySubVouchers, subVoucherNoInput, subVoucherDescInput, subVoucherAmountInput, editingMemo]);
+
+  const handleClearMemoDraft = () => {
+    localStorage.removeItem('rajgarh_draft_memo_fund');
+    setLastAutoSaveMemoTime(null);
+    handleResetMemoForm();
+  };
 
   const [selectedMemoPayeeId, setSelectedMemoPayeeId] = useState<string>('');
   const [selectedMemoSchemeId, setSelectedMemoSchemeId] = useState<string>('');
@@ -1213,6 +1412,69 @@ export default function App() {
 
   // --- Editing State ---
   const [editingItem, setEditingItem] = useState<{ type: string; item: any } | null>(null);
+
+  // 3. Expenditure Entry: Auto-Restore Draft on Initial Load
+  useEffect(() => {
+    if (expenseDraftLoadedRef.current) return;
+    try {
+      const savedExpDraft = localStorage.getItem('rajgarh_draft_expenditure');
+      if (savedExpDraft && !editingItem) {
+        const d = JSON.parse(savedExpDraft);
+        if (d.expenseAmount) setExpenseAmount(d.expenseAmount);
+        if (d.expenseDate) setExpenseDate(d.expenseDate);
+        if (d.expenseDescription) setExpenseDescription(d.expenseDescription);
+        if (Array.isArray(d.selectedPayeesForExpense)) setSelectedPayeesForExpense(d.selectedPayeesForExpense);
+        if (Array.isArray(d.selectedDeductions)) setSelectedDeductions(d.selectedDeductions);
+        if (d.panNumber) setPanNumber(d.panNumber);
+        if (d.gstNumber) setGstNumber(d.gstNumber);
+        if (d.timestamp) {
+          setLastAutoSaveExpenseTime(new Date(d.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore expenditure draft:", e);
+    }
+    expenseDraftLoadedRef.current = true;
+  }, [editingItem]);
+
+  // 4. Expenditure Entry: Continuous Auto-Save on Any Input Change
+  useEffect(() => {
+    if (editingItem) return;
+    const hasData = expenseAmount.trim() || expenseDescription.trim() || selectedPayeesForExpense.length > 0 || panNumber.trim() || gstNumber.trim();
+    if (!hasData) return;
+
+    const timer = setTimeout(() => {
+      try {
+        const draftObj = {
+          expenseAmount,
+          expenseDate,
+          expenseDescription,
+          selectedPayeesForExpense,
+          selectedDeductions,
+          panNumber,
+          gstNumber,
+          timestamp: Date.now()
+        };
+        localStorage.setItem('rajgarh_draft_expenditure', JSON.stringify(draftObj));
+        setLastAutoSaveExpenseTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+      } catch (err) {
+        console.warn("Auto-save expense draft failed:", err);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [expenseAmount, expenseDate, expenseDescription, selectedPayeesForExpense, selectedDeductions, panNumber, gstNumber, editingItem]);
+
+  const handleClearExpenseDraft = () => {
+    localStorage.removeItem('rajgarh_draft_expenditure');
+    setLastAutoSaveExpenseTime(null);
+    setExpenseAmount('');
+    setExpenseDescription('');
+    setSelectedPayeesForExpense([]);
+    setSelectedDeductions([]);
+    setPanNumber('');
+    setGstNumber('');
+  };
 
   useEffect(() => {
     if (!editingItem) {
@@ -8836,8 +9098,8 @@ export default function App() {
         if (sv.id === editingSubVoucherId) {
           return {
             ...sv,
-            voucherNo: subVoucherNoInput.trim() || undefined,
-            description: subVoucherDescInput.trim() || undefined,
+            voucherNo: subVoucherNoInput.trim() || '',
+            description: subVoucherDescInput.trim() || '',
             amount: Math.round(amt)
           };
         }
@@ -8847,8 +9109,8 @@ export default function App() {
     } else {
       const newSubVoucher: MemoSubVoucher = {
         id: Math.random().toString(36).substring(2, 9),
-        voucherNo: subVoucherNoInput.trim() || undefined,
-        description: subVoucherDescInput.trim() || undefined,
+        voucherNo: subVoucherNoInput.trim() || '',
+        description: subVoucherDescInput.trim() || '',
         amount: Math.round(amt)
       };
       updatedSubVouchers = [...entrySubVouchers, newSubVoucher];
@@ -8934,15 +9196,22 @@ export default function App() {
     const gstAmt = isGstApplicable ? Math.round((tot * gstP) / 100) : 0;
     const netRtgs = Math.round(tot) - iTaxAmt - gstAmt;
 
+    const sanitizedSubVouchers = entrySubVouchers.map(sv => ({
+      id: sv.id || Math.random().toString(36).substring(2, 9),
+      voucherNo: (sv.voucherNo || '').trim(),
+      description: (sv.description || '').trim(),
+      amount: Math.round(Number(sv.amount) || 0)
+    }));
+
     const newEntry: MemoPayeeEntry = {
-      payeeId: entryPayeeId || undefined,
+      payeeId: (entryPayeeId || '').trim(),
       name: entryName.trim(),
-      address: entryAddress.trim(),
+      address: (entryAddress || '').trim(),
       accountNumber: entryAccountNo.trim(),
-      ifscCode: entryIfsc.trim(),
-      treasuryCode: entryTreasuryCode.trim(),
-      panNumber: entryPan.trim(),
-      gstNumber: entryGst.trim(),
+      ifscCode: (entryIfsc || '').trim(),
+      treasuryCode: (entryTreasuryCode || '').trim(),
+      panNumber: (entryPan || '').trim(),
+      gstNumber: (entryGst || '').trim(),
       totalAmount: Math.round(tot),
       deductITax: isITaxApplicable,
       iTaxPercent: parseFloat(entryITaxPercent) || 0,
@@ -8951,7 +9220,7 @@ export default function App() {
       gstPercent: parseFloat(entryGstPercent) || 0,
       gstAmount: gstAmt,
       netRtgsAmount: netRtgs,
-      subVouchers: entrySubVouchers.length > 0 ? entrySubVouchers : undefined,
+      subVouchers: sanitizedSubVouchers
     };
 
     if (editingEntryIndex !== null) {
@@ -9004,7 +9273,12 @@ export default function App() {
     setEntryGstPercent(entry.gstPercent !== undefined ? String(entry.gstPercent) : '2');
     
     if (entry.subVouchers && entry.subVouchers.length > 0) {
-      setEntrySubVouchers(entry.subVouchers);
+      setEntrySubVouchers(entry.subVouchers.map(sv => ({
+        id: sv.id || Math.random().toString(36).substring(2, 9),
+        voucherNo: sv.voucherNo || '',
+        description: sv.description || '',
+        amount: Math.round(Number(sv.amount) || 0)
+      })));
     } else if (entry.totalAmount && entry.totalAmount > 0) {
       setEntrySubVouchers([{
         id: Math.random().toString(36).substring(2, 9),
@@ -9048,17 +9322,69 @@ export default function App() {
   };
 
   const handleSaveMemo = async (status: 'draft' | 'submitted') => {
+    // 1. Validate Memo Date
+    if (!memoDateInput || !memoDateInput.trim()) {
+      showAlert('Please select or enter the Memo Date.');
+      return;
+    }
+
+    // 2. Validate Memo Reference Number
+    if (!memoNoInput || !memoNoInput.trim()) {
+      showAlert('Please enter Memo Reference Number (e.g., 101, 102).');
+      return;
+    }
+
+    // 3. Validate Month / Period
+    if (!memoMonthYearInput || !memoMonthYearInput.trim()) {
+      showAlert('Please enter Month / Period (e.g., February 2026 or 02/2026).');
+      return;
+    }
+
+    // 4. Validate From Authority
+    const effectiveFromAuthority = (memoFromInput || defaultFromAuthority || userRangeName || 'Sarahan').trim();
+    if (!effectiveFromAuthority) {
+      showAlert('Please select or specify From Authority / Range.');
+      return;
+    }
+
+    // 5. Validate To Authority
+    if (!memoToInput || !memoToInput.trim()) {
+      showAlert('Please enter To Authority (e.g., DCF Rajgarh).');
+      return;
+    }
+
+    // 6. Validate Scheme
+    if (!memoSchemeIdInput || !memoSchemeIdInput.trim()) {
+      showAlert('Please select a Scheme for this Memo.');
+      return;
+    }
+
+    // 7. Validate Payees presence
     if (memoPayeeEntries.length === 0) {
-      showAlert('Please add at least one Payee to the Memo before saving.');
+      if (entryName.trim() || entryAccountNo.trim() || entryTotalAmount) {
+        showAlert(`You have entered details for payee "${entryName.trim() || 'Payee'}" in Step 2, but have not clicked "+ Add Payee to Memo" yet.\n\nPlease click the "+ Add Payee to Memo" button to add this payee to the memo before saving.`);
+        return;
+      }
+      showAlert('Please add at least one Payee to the Memo before saving.\n\nFill out the payee details in Step 2 above and click "+ Add Payee to Memo".');
       return;
     }
-    if (!memoNoInput.trim()) {
-      showAlert('Please enter Memo Reference Number.');
-      return;
-    }
-    if (!memoMonthYearInput.trim()) {
-      showAlert('Please enter Month / Period.');
-      return;
+
+    // 8. Validate each Payee in the list
+    for (let i = 0; i < memoPayeeEntries.length; i++) {
+      const p = memoPayeeEntries[i];
+      if (!p.name || !p.name.trim()) {
+        showAlert(`Payee #${i + 1} is missing a Name. Please edit and specify the payee name.`);
+        return;
+      }
+      if (!p.accountNumber || !p.accountNumber.trim()) {
+        showAlert(`Payee #${i + 1} (${p.name}) is missing a Bank Account Number. Please edit and specify the account number.`);
+        return;
+      }
+      const pTot = Number(p.totalAmount) || 0;
+      if (pTot <= 0) {
+        showAlert(`Payee #${i + 1} (${p.name}) has an invalid Total Amount (â‚¹${pTot}). Amount must be greater than zero.`);
+        return;
+      }
     }
 
     const schemeObj = currentSchemes.find(s => s.id === memoSchemeIdInput);
@@ -9080,7 +9406,7 @@ export default function App() {
     // Determine final guaranteed unique reference number
     let finalMemoNo = editingMemo ? editingMemo.memoNo : (memoNoInput.trim() || autoMemoNo);
     if (!editingMemo) {
-      const freshNextNo = getNextSequentialMemoNo(memoFromInput || defaultFromAuthority, selectedFY || '2026-27', memos);
+      const freshNextNo = getNextSequentialMemoNo(effectiveFromAuthority, selectedFY || '2026-27', memos);
       const isColliding = memos.some(m => {
         const mFY = m.financialYear || m.fyId;
         return (mFY === (selectedFY || '2026-27')) && m.memoNo === finalMemoNo;
@@ -9089,6 +9415,32 @@ export default function App() {
         finalMemoNo = freshNextNo;
       }
     }
+
+    // Deeply sanitize payee entries to guarantee no undefined values exist
+    const sanitizedPayees = memoPayeeEntries.map(p => ({
+      payeeId: (p.payeeId || '').trim(),
+      name: (p.name || '').trim(),
+      address: (p.address || '').trim(),
+      accountNumber: (p.accountNumber || '').trim(),
+      ifscCode: (p.ifscCode || '').trim(),
+      treasuryCode: (p.treasuryCode || '').trim(),
+      panNumber: (p.panNumber || '').trim(),
+      gstNumber: (p.gstNumber || '').trim(),
+      totalAmount: Math.round(Number(p.totalAmount) || 0),
+      deductITax: Boolean(p.deductITax),
+      iTaxPercent: Number(p.iTaxPercent) || 0,
+      iTaxAmount: Math.round(Number(p.iTaxAmount) || 0),
+      deductGst: Boolean(p.deductGst),
+      gstPercent: Number(p.gstPercent) || 0,
+      gstAmount: Math.round(Number(p.gstAmount) || 0),
+      netRtgsAmount: Math.round(Number(p.netRtgsAmount) || 0),
+      subVouchers: (p.subVouchers || []).map(sv => ({
+        id: sv.id || Math.random().toString(36).substring(2, 9),
+        voucherNo: (sv.voucherNo || '').trim(),
+        description: (sv.description || '').trim(),
+        amount: Math.round(Number(sv.amount) || 0)
+      }))
+    }));
 
     const memoData = {
       memoNo: finalMemoNo,
@@ -9101,15 +9453,15 @@ export default function App() {
       soeId: memoSoeIdInput || '',
       soeName: soeObj ? soeObj.name : '',
       rangeId: userRangeId || '',
-      rangeName: memoFromInput || defaultFromAuthority,
-      toAuthority: memoToInput || 'DCF Rajgarh',
-      financialYear: selectedFY,
+      rangeName: effectiveFromAuthority,
+      toAuthority: memoToInput.trim() || 'DCF Rajgarh',
+      financialYear: selectedFY || '2026-27',
       status,
       totalAmount: totalGross,
       totalITax: totalITax,
       totalGst: totalGst,
       totalNetRtgs: totalNetRtgs,
-      payeeEntries: memoPayeeEntries,
+      payeeEntries: sanitizedPayees,
       createdBy: editingMemo?.createdBy || user?.uid || '',
       createdByRole: editingMemo?.createdByRole || userRole || '',
       createdByName: editingMemo?.createdByName || user?.email || '',
@@ -9124,28 +9476,35 @@ export default function App() {
     };
 
     try {
+      const cleanData = sanitizeFirestoreDoc(memoData);
       if (editingMemo) {
         await updateDoc(doc(db, 'memos', editingMemo.id), {
-          ...memoData,
+          ...cleanData,
           memoNo: editingMemo.memoNo // Strictly maintain original reference number when editing / submitting to admin
         });
-        logAuditAction('Memo Updated', `Memo No: ${editingMemo.memoNo}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: â‚¹${totalGross}`);
+        localStorage.removeItem('rajgarh_draft_memo_fund');
+        setLastAutoSaveMemoTime(null);
+        logAuditAction('Memo Updated', `Memo No: ${editingMemo.memoNo}, Status: ${status}, Payees: ${sanitizedPayees.length}, Amount: â‚¹${totalGross}`);
         showAlert(`Memo for Fund ${status === 'submitted' ? 'submitted and locked' : 'updated as draft'} successfully.`);
       } else {
         await addDoc(collection(db, 'memos'), {
-          ...memoData,
+          ...cleanData,
           createdAt: Date.now()
         });
-        logAuditAction('Memo Created', `Memo No: ${finalMemoNo}, Status: ${status}, Payees: ${memoPayeeEntries.length}, Amount: â‚¹${totalGross}`);
+        localStorage.removeItem('rajgarh_draft_memo_fund');
+        setLastAutoSaveMemoTime(null);
+        logAuditAction('Memo Created', `Memo No: ${finalMemoNo}, Status: ${status}, Payees: ${sanitizedPayees.length}, Amount: â‚¹${totalGross}`);
         showAlert(`Memo for Fund ${status === 'submitted' ? 'submitted and locked' : 'saved as draft'} successfully.`);
       }
       handleResetMemoForm();
-    } catch (error) {
-      handleFirestoreError(error, editingMemo ? OperationType.UPDATE : OperationType.CREATE, 'memos');
+    } catch (error: any) {
+      console.error('Firestore Error saving memo:', error);
+      const errMsg = error?.message || error?.code || String(error);
+      showAlert(`Unable to save Memo for Fund.\n\nPlease contact the administrator with this error:\n"${errMsg}"`);
     }
   };
 
-  const handleDuplicateMemo = (memo: MemoForFund) => {
+    const handleDuplicateMemo = (memo: MemoForFund) => {
     // Generate the next sequential memo number in line for this Range/Authority in this FY
     const fromAuthority = memo.rangeName || defaultFromAuthority || userRangeName || 'Sarahan';
     const nextNo = getNextSequentialMemoNo(fromAuthority, selectedFY || '2026-27', memos);
@@ -10566,6 +10925,9 @@ export default function App() {
         (log.userName && log.userName.toLowerCase().includes(q)) ||
         (log.userEmail && log.userEmail.toLowerCase().includes(q)) ||
         (log.userRole && log.userRole.toLowerCase().includes(q)) ||
+        (log.userRange && log.userRange.toLowerCase().includes(q)) ||
+        (log.ipAddress && log.ipAddress.toLowerCase().includes(q)) ||
+        (log.deviceInfo && log.deviceInfo.toLowerCase().includes(q)) ||
         (log.details && log.details.toLowerCase().includes(q))
       );
     });
@@ -10575,10 +10937,10 @@ export default function App() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b pb-4">
           <div>
             <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <History className="h-5 w-5 text-emerald-600" /> System Audit Log
+              <History className="h-5 w-5 text-emerald-600" /> System Audit & Security Log
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Real-time activity monitor displaying the last 50 actions performed by users.
+              Real-time activity and security monitor recording user actions, IP addresses, and device logins.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -10588,12 +10950,30 @@ export default function App() {
           </div>
         </div>
 
+        {/* Live Client IP & Device Banner for Admin/DEO */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-slate-700">
+            <Globe className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              <strong>Current Connection IP:</strong> <code className="bg-white px-2 py-0.5 rounded border border-slate-300 font-mono text-emerald-700 font-bold">{clientIpAddress}</code>
+            </span>
+            <span className="text-slate-400 hidden sm:inline">â€¢</span>
+            <span>
+              <strong>Device & Browser:</strong> <span className="text-slate-600 font-medium">{getDeviceInfo()}</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-emerald-700 text-[11px] font-bold">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>IP Logging Enabled for Admin & DEO</span>
+          </div>
+        </div>
+
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="relative w-full sm:w-80">
+          <div className="relative w-full sm:w-96">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search audit logs (user, action, details)..."
+              placeholder="Search by User, IP Address, Device, Action, Details..."
               value={auditSearchTerm}
               onChange={(e) => setAuditSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -10605,18 +10985,20 @@ export default function App() {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-gray-100 text-gray-700 font-bold border-b border-gray-200">
-                <th className="p-3 w-12 text-center">#</th>
-                <th className="p-3 w-40">Date & Time</th>
-                <th className="p-3 w-48">User & Role</th>
-                <th className="p-3 w-48">Action</th>
+                <th className="p-3 w-10 text-center">#</th>
+                <th className="p-3 w-36">Date & Time</th>
+                <th className="p-3 w-44">User & Account</th>
+                <th className="p-3 w-32">Role & Range</th>
+                <th className="p-3 w-48">IP Address & Device</th>
+                <th className="p-3 w-36">Action</th>
                 <th className="p-3">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-gray-400">
-                    <p className="font-medium text-sm">No audit log entries found.</p>
+                  <td colSpan={7} className="p-8 text-center text-gray-400">
+                    <p className="font-medium text-sm">No audit log entries found matching your search.</p>
                   </td>
                 </tr>
               ) : (
@@ -10644,9 +11026,33 @@ export default function App() {
                       <td className="p-3 text-gray-600 font-mono text-[11px] whitespace-nowrap">{dateStr}</td>
                       <td className="p-3">
                         <div className="font-bold text-gray-900">{log.userName || 'User'}</div>
-                        <div className="text-[10px] text-gray-500 font-medium">
-                          {log.userRole || 'User'} {log.userEmail ? `â€¢ ${log.userEmail}` : ''}
+                        <div className="text-[10px] text-gray-500 font-mono">
+                          {log.userEmail || '-'}
                         </div>
+                      </td>
+                      <td className="p-3">
+                        <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-800 rounded text-[10px] font-bold border border-gray-200">
+                          {log.userRole || 'User'}
+                        </span>
+                        {log.userRange && (
+                          <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                            {log.userRange}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-1.5">
+                          <Globe className="w-3 h-3 text-emerald-600 shrink-0" />
+                          <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded text-[11px] border border-slate-200">
+                            {log.ipAddress || 'Direct IP'}
+                          </span>
+                        </div>
+                        {log.deviceInfo && (
+                          <div className="text-[10px] text-slate-500 mt-0.5 font-medium flex items-center gap-1">
+                            <Laptop className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{log.deviceInfo}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="p-3">
                         <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold border ${badgeColor}`}>
@@ -10890,9026 +11296,319 @@ export default function App() {
                     </span>
                     {u.activeSessions?.length ? (
                       <button 
-                        onClick={() => handleClearSessions(u.id)}
-                        className="text-red-500 hover:text-red-700 p-1"
-                        title="Clear all sessions"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                      </button>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="p-3 text-right flex justify-end gap-2">
-                  <button 
-                    onClick={() => {
-                      setEditingPasswordId(u.id);
-                      setNewPasswordInput(u.password || '');
-                    }} 
-                    className="text-blue-500 hover:text-blue-700 text-sm border border-blue-200 px-2 py-1 rounded"
-                  >
-                    Set New Password
-                  </button>
-                  <button onClick={() => handleResetPassword(u.email)} className="text-gray-500 hover:text-gray-700 text-sm border border-gray-200 px-2 py-1 rounded">
-                    Send Reset Email
-                  </button>
-                  <button 
-                    onClick={() => handleToggleUserStatus(u.id, u.isDisabled || false)}
-                    className={`text-sm border px-2 py-1 rounded transition-colors ${u.isDisabled ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'}`}
-                  >
-                    {u.isDisabled ? 'Disabled' : 'Enabled'}
-                  </button>
-                  <button onClick={() => handleDeleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-12 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <h3 className="text-lg font-semibold mb-4 border-b pb-2 flex items-center gap-2">
-          <Lock className="h-5 w-5 text-red-600" /> Feature Locking Control
-        </h3>
-        <p className="text-xs text-gray-500 mb-6">Lock specific features for specific roles or ranges. When locked, users cannot add, edit, or delete records for that feature.</p>
-
-        <div className="space-y-6">
-          <div className="flex flex-col md:flex-row gap-4 items-end bg-gray-50 p-4 rounded-lg border border-gray-200">
-            <div className="flex-1">
-              <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Select Range, Role or User</label>
-              <select 
-                value={selectedLockTarget}
-                onChange={(e) => setSelectedLockTarget(e.target.value)}
-                className="w-full p-2 border rounded bg-white text-sm"
-              >
-                <option value="">-- Select Target --</option>
-                <optgroup label="Roles">
-                  <option value="deo">DEO</option>
-                  <option value="approver">DA</option>
-                  <option value="Sarahan">Sarahan</option>
-                  <option value="Narag">Narag</option>
-                  <option value="Habban">Habban</option>
-                  <option value="Division">Division</option>
-                  <option value="Rajgarh">Rajgarh</option>
-                </optgroup>
-                <optgroup label="Ranges">
-                  {ranges.map(r => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Users">
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>{u.email} ({u.role})</option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-            
-            <div className="flex gap-2 flex-wrap">
-              <button 
-                disabled={!selectedLockTarget}
-                onClick={() => handleToggleFeatureLock('Allocation', selectedLockTarget)}
-                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'Allocation' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
-              >
-                {featureLocks.find(l => l.feature === 'Allocation' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                {featureLocks.find(l => l.feature === 'Allocation' && l.target === selectedLockTarget)?.isLocked ? 'Allocation Locked' : 'Lock Allocation'}
-              </button>
-              
-              <button 
-                disabled={!selectedLockTarget}
-                onClick={() => handleToggleFeatureLock('Expenditure', selectedLockTarget)}
-                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'Expenditure' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
-              >
-                {featureLocks.find(l => l.feature === 'Expenditure' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                {featureLocks.find(l => l.feature === 'Expenditure' && l.target === selectedLockTarget)?.isLocked ? 'Expenditure Locked' : 'Lock Expenditure'}
-              </button>
-
-              <button 
-                disabled={!selectedLockTarget}
-                onClick={() => handleToggleFeatureLock('Memo', selectedLockTarget)}
-                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'Memo' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
-              >
-                {featureLocks.find(l => l.feature === 'Memo' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                {featureLocks.find(l => l.feature === 'Memo' && l.target === selectedLockTarget)?.isLocked ? 'Memo for Fund Locked' : 'Lock Memo for Fund'}
-              </button>
-
-              <button 
-                disabled={!selectedLockTarget}
-                onClick={() => handleToggleFeatureLock('MemoSync', selectedLockTarget)}
-                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : featureLocks.find(l => l.feature === 'MemoSync' && l.target === selectedLockTarget)?.isLocked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-teal-600 text-white hover:bg-teal-700'}`}
-              >
-                {featureLocks.find(l => l.feature === 'MemoSync' && l.target === selectedLockTarget)?.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                {featureLocks.find(l => l.feature === 'MemoSync' && l.target === selectedLockTarget)?.isLocked ? 'Sync Memo Locked' : 'Lock Sync Memo'}
-              </button>
-
-              <button 
-                disabled={!selectedLockTarget}
-                onClick={() => {
-                  const targetUser = users.find(u => u.id === selectedLockTarget);
-                  if (targetUser) {
-                    handleToggleUserStatus(selectedLockTarget, targetUser.isDisabled || false);
-                  } else {
-                    handleToggleFeatureLock('Access', selectedLockTarget);
-                  }
-                }}
-                className={`px-3 py-1.5 rounded text-[11px] font-bold transition-colors flex items-center gap-1.5 ${!selectedLockTarget ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : (users.find(u => u.id === selectedLockTarget)?.isDisabled || featureLocks.find(l => l.feature === 'Access' && l.target === selectedLockTarget)?.isLocked) ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
-              >
-                {(users.find(u => u.id === selectedLockTarget)?.isDisabled || featureLocks.find(l => l.feature === 'Access' && l.target === selectedLockTarget)?.isLocked) ? <Shield className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-                {(users.find(u => u.id === selectedLockTarget)?.isDisabled || featureLocks.find(l => l.feature === 'Access' && l.target === selectedLockTarget)?.isLocked) ? 'Disabled' : 'Enabled'}
-              </button>
-            </div>
-          </div>
-
-          {(featureLocks.filter(l => l.isLocked).length > 0 || users.filter(u => u.isDisabled).length > 0) && (
-            <div className="mt-4">
-              <h4 className="text-sm font-bold mb-2 text-gray-600">Active Restrictions</h4>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50 text-gray-600 text-xs">
-                      <th className="p-2 border-b">Target</th>
-                      <th className="p-2 border-b">Feature</th>
-                      <th className="p-2 border-b">Status</th>
-                      <th className="p-2 border-b">Updated By</th>
-                      <th className="p-2 border-b">Updated At</th>
-                      <th className="p-2 border-b text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {featureLocks.filter(l => l.isLocked).map(l => (
-                      <tr key={l.id} className="border-b hover:bg-gray-50 text-xs">
-                        <td className="p-2 font-medium uppercase">
-                          {ranges.find(r => r.id === l.target)?.name || (l.target === 'approver' ? 'DA' : l.target)}
-                        </td>
-                        <td className="p-2">{l.feature === 'Access' ? 'Full Access' : l.feature}</td>
-                        <td className="p-2">
-                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
-                            {l.feature === 'Access' ? 'DISABLED' : 'LOCKED'}
-                          </span>
-                        </td>
-                        <td className="p-2 text-gray-500">{l.updatedBy}</td>
-                        <td className="p-2 text-gray-500">{new Date(l.updatedAt).toLocaleString()}</td>
-                        <td className="p-2 text-right">
-                          <button 
-                            onClick={() => handleToggleFeatureLock(l.feature as any, l.target)}
-                            className="text-emerald-600 hover:text-emerald-700 font-bold"
-                          >
-                            {l.feature === 'Access' ? 'Enable' : 'Unlock'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {users.filter(u => u.isDisabled).map(u => (
-                      <tr key={u.id} className="border-b hover:bg-gray-50 text-xs">
-                        <td className="p-2 font-medium">
-                          {u.email} ({u.role})
-                        </td>
-                        <td className="p-2">User Access</td>
-                        <td className="p-2">
-                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">DISABLED</span>
-                        </td>
-                        <td className="p-2 text-gray-500">Admin</td>
-                        <td className="p-2 text-gray-500">{u.updatedAt ? new Date(u.updatedAt).toLocaleString() : 'N/A'}</td>
-                        <td className="p-2 text-right">
-                          <button 
-                            onClick={() => handleToggleUserStatus(u.id, true)}
-                            className="text-emerald-600 hover:text-emerald-700 font-bold"
-                          >
-                            Enable
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderReports = () => {
-    const downloadPDF = (title: string, abstractData: any[], abstractHeaders: string[], detailedData: any[], detailedHeaders: string[]) => {
-      const doc = new jsPDF('landscape');
-      const fyName = fys.find(f => f.id === selectedFY)?.name || selectedFY;
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`${title} - FY ${fyName}`, 14, 14);
-      
-      let finalY = 16;
-
-      if (abstractData.length > 0) {
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text("SOE Abstract Summary", 14, finalY + 8);
-        autoTable(doc, {
-          head: [abstractHeaders],
-          body: abstractData,
-          startY: finalY + 12,
-          theme: 'grid',
-          showHead: 'everyPage',
-          pageBreak: 'auto',
-          styles: { fontSize: 7, cellPadding: 1.5 },
-          headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold' }
-        });
-        finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 8 : 35;
-      }
-
-      if (detailedData.length > 0) {
-        if (finalY > 175) {
-          doc.addPage();
-          finalY = 14;
-        }
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text("Detailed Range-wise Report", 14, finalY + 6);
-        autoTable(doc, {
-          head: [detailedHeaders],
-          body: detailedData,
-          startY: finalY + 10,
-          theme: 'grid',
-          showHead: 'everyPage',
-          pageBreak: 'auto',
-          styles: { fontSize: 7, cellPadding: 1.5 },
-          headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold' }
-        });
-      }
-      doc.save(`${title.toLowerCase().replace(/\s+/g, '_')}.pdf`);
-    };
-
-    const downloadLedgerPDF = () => {
-      const doc = new jsPDF('landscape');
-      const fyName = fys.find(f => f.id === selectedFY)?.name || selectedFY;
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`Scheme Wise Allocation & Expenditure Ledger - FY ${fyName}`, 14, 14);
-
-      // Build groups
-      const ledgerGroups: Record<string, { hierarchy: string, soeName: string, totalAllocation: number, items: any[] }> = {};
-      const filteredAllocations = currentAllocations.filter(alloc => {
-        const sch = schemes.find(s => s.id === alloc.schemeId);
-        const sec = sectors.find(s => s.id === alloc.sectorId);
-        const act = activities.find(a => a.id === alloc.activityId);
-        const sa = subActivities.find(s => s.id === alloc.subActivityId);
-        const r = ranges.find(r => r.id === alloc.rangeId);
-        const rangeName = r?.name === 'Rajgarh Forest Division' ? 'Division' : (r?.name || '');
-        
-        const matchesFilters = (
-          (!reportFilters.scheme || sch?.name === reportFilters.scheme) &&
-          (!reportFilters.sector || sec?.name === reportFilters.sector) &&
-          (!reportFilters.activity || act?.name === reportFilters.activity) &&
-          (!reportFilters.subActivity || sa?.name === reportFilters.subActivity) &&
-          (!reportFilters.range || rangeName === reportFilters.range)
-        );
-        if (!matchesFilters) return false;
-        if (ledgerSearchTerm) {
-          const searchLower = ledgerSearchTerm.toLowerCase();
-          const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(' ') || '';
-          const hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
-          return (
-            hierarchy.toLowerCase().includes(searchLower) ||
-            soeNames.toLowerCase().includes(searchLower) ||
-            rangeName.toLowerCase().includes(searchLower) ||
-            alloc.remarks?.toLowerCase().includes(searchLower)
-          );
-        }
-        return true;
-      });
-
-      filteredAllocations.forEach(alloc => {
-        alloc.fundedSOEs?.forEach(f => {
-          const soe = soes.find(s => s.id === f.soeId);
-          if (!soe) return;
-          let hierarchy = '';
-          if (alloc.subActivityId) {
-            const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
-            const act = activities.find(a => a.id === sa?.activityId);
-            const sec = sectors.find(sec => sec.id === act?.sectorId);
-            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-            hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
-          } else if (alloc.activityId) {
-            const act = activities.find(a => a.id === alloc.activityId);
-            const sec = sectors.find(sec => sec.id === act?.sectorId);
-            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-            hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
-          }
-          const key = `${hierarchy}-${soe.name}`;
-          if (!ledgerGroups[key]) {
-            ledgerGroups[key] = { hierarchy, soeName: soe.name, totalAllocation: 0, items: [] };
-          }
-          ledgerGroups[key].totalAllocation += f.amount;
-        });
-      });
-
-      currentExpenses.forEach(exp => {
-        const alloc = filteredAllocations.find(a => a.id === exp.allocationId);
-        if (!alloc) return;
-        const soe = soes.find(s => s.id === exp.soeId);
-        if (!soe) return;
-        let hierarchy = '';
-        if (alloc.subActivityId) {
-          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
-          const act = activities.find(a => a.id === sa?.activityId);
-          const sec = sectors.find(sec => sec.id === act?.sectorId);
-          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
-        } else if (alloc.activityId) {
-          const act = activities.find(a => a.id === alloc.activityId);
-          const sec = sectors.find(sec => sec.id === act?.sectorId);
-          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
-        }
-        const key = `${hierarchy}-${soe.name}`;
-        if (ledgerGroups[key]) {
-          ledgerGroups[key].items.push({
-            date: exp.date,
-            expenditure: exp.amount,
-            status: exp.status || 'pending'
-          });
-        }
-      });
-
-      const sortedGroups = Object.values(ledgerGroups).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
-
-      let currentY = 22;
-      sortedGroups.forEach((group, idx) => {
-        if (currentY > 160) {
-          doc.addPage();
-          currentY = 16;
-        }
-
-        doc.setFontSize(9.5);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(5, 150, 105);
-        doc.text(`${idx + 1}. ${group.soeName} [${group.hierarchy}]`, 14, currentY);
-        doc.setTextColor(30, 64, 175);
-        doc.text(`Total Allocation: Rs. ${Math.round(group.totalAllocation).toLocaleString('en-IN')}`, 280, currentY, { align: 'right' });
-        doc.setTextColor(0, 0, 0);
-
-        currentY += 4;
-
-        const head = [['S.No', 'Date', 'Allocation (Rs)', 'Expenditure (Rs)', 'Status', 'Balance (Rs)']];
-        const sortedItems = [...group.items].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        
-        let runningBalance = group.totalAllocation;
-        let totalExp = 0;
-
-        const body = [
-          ['1', 'Allocation Date', Math.round(group.totalAllocation).toLocaleString('en-IN'), '-', '-', Math.round(runningBalance).toLocaleString('en-IN')]
-        ];
-
-        sortedItems.forEach((item, itemIdx) => {
-          const isRejected = item.status === 'rejected';
-          if (!isRejected) {
-            runningBalance -= item.expenditure;
-            totalExp += item.expenditure;
-          }
-          body.push([
-            String(itemIdx + 2),
-            item.date ? item.date.split('-').reverse().join('/') : '-',
-            '-',
-            Math.round(item.expenditure).toLocaleString('en-IN'),
-            item.status ? item.status.toUpperCase() : 'PENDING',
-            Math.round(runningBalance).toLocaleString('en-IN')
-          ]);
-        });
-
-        const foot = [
-          ['', 'TOTAL', Math.round(group.totalAllocation).toLocaleString('en-IN'), Math.round(totalExp).toLocaleString('en-IN'), '-', Math.round(runningBalance).toLocaleString('en-IN')]
-        ];
-
-        autoTable(doc, {
-          startY: currentY,
-          head,
-          body,
-          foot,
-          theme: 'grid',
-          showHead: 'everyPage',
-          pageBreak: 'auto',
-          styles: { fontSize: 7.5, cellPadding: 1.5 },
-          headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
-          footStyles: { fillColor: [245, 245, 245], textColor: [0, 0, 0], fontStyle: 'bold' },
-          columnStyles: {
-            0: { halign: 'center', cellWidth: 14 },
-            1: { cellWidth: 35 },
-            2: { halign: 'right', cellWidth: 48 },
-            3: { halign: 'right', cellWidth: 48 },
-            4: { halign: 'center', cellWidth: 32 },
-            5: { halign: 'right', cellWidth: 48, fontStyle: 'bold' }
-          }
-        });
-
-        currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 10 : currentY + 30;
-      });
-
-      doc.save(`Scheme_Wise_Ledger_FY_${fyName.replace(/[/\\?%*:|"<>]/g, '_')}.pdf`);
-    };
-
-    const downloadExcel = async (title: string, abstractData: any[], abstractHeaders: string[], detailedData: any[], detailedHeaders: string[]) => {
-      const workbook = new ExcelJS.Workbook();
-      
-      if (abstractData.length > 0) {
-        const abstractSheet = workbook.addWorksheet("Abstract Summary");
-        
-        // Add Title
-        const titleRow = abstractSheet.addRow(["SOE Abstract Summary"]);
-        titleRow.font = { bold: true, size: 14 };
-        abstractSheet.mergeCells(1, 1, 1, abstractHeaders.length);
-        titleRow.alignment = { horizontal: 'center' };
-
-        // Add Headers
-        const headerRow = abstractSheet.addRow(abstractHeaders);
-        headerRow.eachCell((cell) => {
-          cell.font = { bold: true };
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFE0E0E0' }
-          };
-          cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
-          };
-        });
-
-        // Add Data
-        abstractData.forEach(row => {
-          const dataRow = abstractSheet.addRow(row);
-          dataRow.eachCell((cell) => {
-            cell.border = {
-              top: { style: 'thin' },
-              left: { style: 'thin' },
-              bottom: { style: 'thin' },
-              right: { style: 'thin' }
-            };
-          });
-        });
-
-        // Auto-width columns
-        abstractSheet.columns.forEach(column => {
-          let maxLength = 0;
-          column.eachCell({ includeEmpty: true }, cell => {
-            const columnLength = cell.value ? cell.value.toString().length : 10;
-            if (columnLength > maxLength) {
-              maxLength = columnLength;
-            }
-          });
-          column.width = maxLength < 12 ? 12 : maxLength + 2;
-        });
-      }
-
-      const detailedSheet = workbook.addWorksheet("Detailed Report");
-      
-      // Add Title
-      const dTitleRow = detailedSheet.addRow(["Detailed Range-wise Report"]);
-      dTitleRow.font = { bold: true, size: 14 };
-      detailedSheet.mergeCells(1, 1, 1, detailedHeaders.length);
-      dTitleRow.alignment = { horizontal: 'center' };
-
-      // Add Headers
-      const dHeaderRow = detailedSheet.addRow(detailedHeaders);
-      dHeaderRow.eachCell((cell) => {
-        cell.font = { bold: true };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE0E0E0' }
-        };
-        cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        };
-      });
-
-      // Add Data
-      detailedData.forEach(row => {
-        const dataRow = detailedSheet.addRow(row);
-        dataRow.eachCell((cell) => {
-          cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
-          };
-        });
-      });
-
-      // Auto-width columns
-      detailedSheet.columns.forEach(column => {
-        let maxLength = 0;
-        column.eachCell({ includeEmpty: true }, cell => {
-          const columnLength = cell.value ? cell.value.toString().length : 10;
-          if (columnLength > maxLength) {
-            maxLength = columnLength;
-          }
-        });
-        column.width = maxLength < 12 ? 12 : maxLength + 2;
-      });
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `${title.toLowerCase().replace(/\s+/g, '_')}.xlsx`);
-    };
-
-    const downloadZip = async () => {
-      const zip = new JSZip();
-      
-      // 1. Allocations
-      const allocHeaders = ['ID', 'SOE', 'Range', 'Amount', 'Scheme', 'Sector', 'Activity', 'SubActivity'];
-      const allocData = currentAllocations.map(a => [
-        a.id,
-        a.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).join(', ') || 'Pending',
-        ranges.find(r => r.id === a.rangeId)?.name || 'N/A',
-        a.amount,
-        schemes.find(s => s.id === a.schemeId)?.name || 'N/A',
-        sectors.find(s => s.id === a.sectorId)?.name || 'N/A',
-        activities.find(ac => ac.id === a.activityId)?.name || 'N/A',
-        subActivities.find(sa => sa.id === a.subActivityId)?.name || 'N/A'
-      ]);
-      const allocWs = XLSX.utils.aoa_to_sheet([allocHeaders, ...allocData]);
-      const allocCsv = XLSX.utils.sheet_to_csv(allocWs);
-      zip.file("allocations.csv", allocCsv);
-
-      // 2. Expenses
-      const expHeaders = ['ID', 'Date', 'Amount', 'Description', 'Allocation ID', 'Approval ID'];
-      const expData = currentExpenses.map(e => [
-        e.id, e.date ? e.date.split('-').reverse().join('/') : '', e.amount, e.description, e.allocationId, e.approvalId ? `#${e.approvalId}` : '-'
-      ]);
-      const expWs = XLSX.utils.aoa_to_sheet([expHeaders, ...expData]);
-      const expCsv = XLSX.utils.sheet_to_csv(expWs);
-      zip.file("expenses.csv", expCsv);
-
-      // 3. SOE Summary (Admin/DEO only)
-      if (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') {
-        const soeHeaders = ['SOE ID', 'Name', 'Approved Budget', 'Received in TRY', 'Allocated', 'Spent', 'Remaining'];
-        const soeData = soeAbstractData.map(s => [
-          s.soeId, 
-          s.soeName, 
-          s.approvedBudget, 
-          s.receivedInTry, 
-          s.allocated, 
-          s.spent, 
-          s.remainingToSpend
-        ]);
-        const soeWs = XLSX.utils.aoa_to_sheet([soeHeaders, ...soeData]);
-        const soeCsv = XLSX.utils.sheet_to_csv(soeWs);
-        zip.file("soe_summary.csv", soeCsv);
-      }
-
-      const content = await zip.generateAsync({ type: "blob" });
-      saveAs(content, `financial_data_fy_${selectedFY}.zip`);
-    };
-
-    const comprehensiveReportData = baseAllocations.map(a => {
-      const soeNames = a.fundedSOEs?.map((f: any) => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(', ') || 'Pending Funds';
-      const range = ranges.find(r => r.id === a.rangeId);
-      
-      let sa = subActivities.find(s => s.id === a.subActivityId);
-      let act = activities.find(ac => ac.id === a.activityId);
-      let sec = sectors.find(s => s.id === a.sectorId);
-      let sch = schemes.find(s => s.id === a.schemeId);
-
-      const budget = soes.filter(s => 
-        ALLOWED_SOES.includes(s.name || 'Provisional') &&
-        s.schemeId === a.schemeId && 
-        (s.sectorId || null) === (a.sectorId || null) && 
-        (s.activityId || null) === (a.activityId || null) && 
-        (s.subActivityId || null) === (a.subActivityId || null)
-      ).reduce((sum, s) => sum + getApprovedBudget(s), 0);
-      const totalBudget = budget || 0;
-      const allocated = a.amount;
-      const expenditure = baseExpenses.filter(e => e.allocationId === a.id && e.status !== 'rejected').reduce((sum, e) => sum + e.amount, 0);
-      const remaining = allocated - expenditure;
-
-      return {
-        soe: soeNames,
-        range: range?.name || 'N/A',
-        scheme: sch?.name || 'N/A',
-        sector: sec?.name || 'N/A',
-        activity: act?.name || 'N/A',
-        subActivity: sa?.name || 'N/A',
-        totalBudget: totalBudget,
-        allocated: allocated,
-        expenditure: expenditure,
-        remaining: remaining,
-        balance: remaining // for report consistency
-      };
-    });
-
-    const allocationExpenditureData: any[] = [];
-    baseAllocations.forEach(alloc => {
-      const sch = schemes.find(s => s.id === alloc.schemeId);
-      const sec = sectors.find(s => s.id === alloc.sectorId);
-      const act = activities.find(a => a.id === alloc.activityId);
-      const sa = subActivities.find(s => s.id === alloc.subActivityId);
-      const range = ranges.find(r => r.id === alloc.rangeId);
-
-      alloc.fundedSOEs?.forEach(f => {
-        const soe = soes.find(s => s.id === f.soeId);
-        const allocExpenses = baseExpenses.filter(e => e.allocationId === alloc.id && e.soeId === f.soeId && e.status !== 'rejected');
-        
-        const totalSpentOnSoe = allocExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-        if (allocExpenses.length === 0) {
-          allocationExpenditureData.push({
-            id: `alloc-${alloc.id}-${f.soeId}`,
-            allocationId: alloc.id,
-            soeId: f.soeId,
-            date: alloc.createdAt ? new Date(alloc.createdAt).toISOString().split('T')[0] : 'N/A',
-            scheme: sch?.name || 'N/A',
-            sector: sec?.name || 'N/A',
-            activity: act?.name || 'N/A',
-            subActivity: sa?.name || 'N/A',
-            soe: soe?.name || 'N/A',
-            range: range?.name || 'N/A',
-            allocation: f.amount,
-            expenditure: 0,
-            balance: f.amount,
-            description: 'Initial Allocation',
-            status: 'approved'
-          });
-        } else {
-          allocExpenses.forEach(exp => {
-            allocationExpenditureData.push({
-              id: exp.id,
-              allocationId: exp.allocationId,
-              soeId: exp.soeId,
-              date: exp.date,
-              scheme: sch?.name || 'N/A',
-              sector: sec?.name || 'N/A',
-              activity: act?.name || 'N/A',
-              subActivity: sa?.name || 'N/A',
-              soe: soe?.name || 'N/A',
-              range: range?.name || 'N/A',
-              allocation: f.amount,
-              expenditure: exp.amount,
-              balance: f.amount - totalSpentOnSoe,
-              description: exp.description,
-              status: exp.status
-            });
-          });
-        }
-      });
-    });
-
-    const combinedReportData = [...comprehensiveReportData, ...allocationExpenditureData];
-    const uniqueSchemes = Array.from(new Set(combinedReportData.map(r => r.scheme))).filter(Boolean).sort();
-    const uniqueSectors = Array.from(new Set(combinedReportData.map(r => r.sector))).filter(Boolean).sort();
-    const uniqueActivities = Array.from(new Set(combinedReportData.map(r => r.activity))).filter(Boolean).sort();
-    const uniqueSubActivities = Array.from(new Set(combinedReportData.map(r => r.subActivity))).filter(Boolean).sort();
-    const uniqueSoes = Array.from(new Set(soes.map(s => s.name))).filter(Boolean).sort();
-    const uniqueRangesList = Array.from(new Set(ranges.map(r => r.name === 'Rajgarh Forest Division' ? 'Division' : r.name))).filter(Boolean).sort();
-
-    const renderAllocationExpenditureReport = () => {
-      const searchLower = reportSearchTerm.toLowerCase();
-      const filtered = allocationExpenditureData.filter(row => {
-        const matchesSearch = (
-          row.scheme.toLowerCase().includes(searchLower) ||
-          row.sector.toLowerCase().includes(searchLower) ||
-          row.activity.toLowerCase().includes(searchLower) ||
-          row.subActivity.toLowerCase().includes(searchLower) ||
-          row.soe.toLowerCase().includes(searchLower) ||
-          row.range.toLowerCase().includes(searchLower) ||
-          row.description.toLowerCase().includes(searchLower)
-        );
-
-        const matchesFilters = (
-          (!reportFilters.scheme || row.scheme === reportFilters.scheme) &&
-          (!reportFilters.sector || row.sector === reportFilters.sector) &&
-          (!reportFilters.activity || row.activity === reportFilters.activity) &&
-          (!reportFilters.subActivity || row.subActivity === reportFilters.subActivity) &&
-          (!reportFilters.range || row.range === reportFilters.range) &&
-          (!reportFilters.soe || row.soe.includes(reportFilters.soe))
-        );
-
-        return matchesSearch && matchesFilters;
-      }).sort((a, b) => {
-        // Sort by Activity first, then Sub-Activity, then Date
-        if (a.activity !== b.activity) {
-          return a.activity.localeCompare(b.activity);
-        }
-        if (a.subActivity !== b.subActivity) {
-          return a.subActivity.localeCompare(b.subActivity);
-        }
-        // Sort by date (assuming YYYY-MM-DD format)
-        return new Date(a.date).getTime() - new Date(b.date).getTime();
-      });
-
-      // Totals for searched/filtered items
-      // Fix: Calculate total allocation correctly by only counting each unique allocation-SOE pair once
-      const uniqueAllocationsInFiltered = Array.from(new Set(filtered.map(r => (r as any).allocationId + '-' + (r as any).soeId)));
-      const totalAllocation = uniqueAllocationsInFiltered.reduce((sum, key) => {
-        const row = filtered.find(r => ((r as any).allocationId + '-' + (r as any).soeId) === key);
-        return sum + (row ? (row as any).allocation : 0);
-      }, 0);
-
-      const totalExpenditure = filtered.reduce((sum, r) => sum + r.expenditure, 0);
-      const totalBalance = totalAllocation - totalExpenditure;
-
-      // Pagination
-      const totalPages = reportItemsPerPage === -1 ? 1 : Math.ceil(filtered.length / reportItemsPerPage);
-      const paginatedData = reportItemsPerPage === -1 ? filtered : filtered.slice((reportPage - 1) * reportItemsPerPage, reportPage * reportItemsPerPage);
-
-      const headers = ['Date', 'Range', 'Scheme', 'Sector', 'Activity', 'Sub-Activity', 'SOE', 'Description', 'Allocation', 'Expenditure', 'Balance to Book'];
-      const tableData = filtered.map(r => [
-        r.date, r.range, r.scheme, r.sector, r.activity, r.subActivity, r.soe, r.description, r.allocation, r.expenditure, r.balance
-      ]);
-
-      return (
-        <div className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4 flex-1">
-              <div className="relative flex-1 max-w-md flex items-center gap-1">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search report by scheme, sector, activity, soe, range..."
-                    value={reportSearchTerm}
-                    onChange={(e) => { setReportSearchTerm(e.target.value); setReportPage(1); }}
-                    className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
-                  />
-                </div>
-                <button 
-                  className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-                  title="Search"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
-              </div>
-              <button 
-                onClick={() => setShowReportFilters(!showReportFilters)}
-                className={`flex items-center gap-1 px-3 py-2 border rounded-lg text-sm transition-colors ${showReportFilters ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white hover:bg-gray-50'}`}
-              >
-                <Filter className="w-4 h-4" />
-                <span>Filters</span>
-                {showReportFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </button>
-              <select 
-                value={reportItemsPerPage} 
-                onChange={(e) => { setReportItemsPerPage(Number(e.target.value)); setReportPage(1); }}
-                className="p-2 border rounded text-sm bg-white"
-              >
-                <option value={10}>10 per page</option>
-                <option value={25}>25 per page</option>
-                <option value={50}>50 per page</option>
-                <option value={-1}>View All</option>
-              </select>
-            </div>
-            <div className="flex gap-2">
-
-              <button 
-                onClick={() => downloadPDF('Allocation & Expenditure Report', [], [], tableData, headers)}
-                className="bg-red-600 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1 hover:bg-red-700 transition-colors"
-              >
-                <Download className="w-3 h-3" /> PDF
-              </button>
-              <button 
-                onClick={() => downloadExcel('Allocation & Expenditure Report', [], [], tableData, headers)}
-                className="bg-emerald-600 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1 hover:bg-emerald-700 transition-colors"
-              >
-                <Download className="w-3 h-3" /> Excel
-              </button>
-            </div>
-          </div>
-
-              {showReportFilters && (
-                <div className="mb-6 animate-in fade-in slide-in-from-top-2">
-                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-t-lg border border-gray-200">
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
-                      <select 
-                        value={reportFilters.range}
-                        onChange={(e) => { setReportFilters({ ...reportFilters, range: e.target.value, scheme: '', sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All Ranges</option>
-                        {uniqueRangesList.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
-                      <select 
-                        value={reportFilters.scheme}
-                        onChange={(e) => { setReportFilters({ ...reportFilters, scheme: e.target.value, sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All Schemes</option>
-                        {uniqueSchemes.filter(s => {
-                          if (!reportFilters.range) return true;
-                          return combinedReportData.some(r => r.range === reportFilters.range && r.scheme === s);
-                        }).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
-                      <select 
-                        value={reportFilters.sector}
-                        onChange={(e) => { setReportFilters({ ...reportFilters, sector: e.target.value, activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All Sectors</option>
-                        {uniqueSectors.filter(s => {
-                          if (!reportFilters.range && !reportFilters.scheme) return true;
-                          return combinedReportData.some(r => {
-                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                            return rangeMatch && schemeMatch && r.sector === s;
-                          });
-                        }).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
-                      <select 
-                        value={reportFilters.activity}
-                        onChange={(e) => { setReportFilters({ ...reportFilters, activity: e.target.value, subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All Activities</option>
-                        {uniqueActivities.filter(a => {
-                          if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector) return true;
-                          return combinedReportData.some(r => {
-                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                            const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
-                            return rangeMatch && schemeMatch && sectorMatch && r.activity === a;
-                          });
-                        }).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
-                      <select 
-                        value={reportFilters.subActivity}
-                        onChange={(e) => { setReportFilters({ ...reportFilters, subActivity: e.target.value, soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All Sub-Activities</option>
-                        {uniqueSubActivities.filter(sa => {
-                          if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity) return true;
-                          return combinedReportData.some(r => {
-                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                            const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
-                            const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
-                            return rangeMatch && schemeMatch && sectorMatch && activityMatch && r.subActivity === sa;
-                          });
-                        }).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
-                      <select 
-                        value={reportFilters.soe}
-                        onChange={(e) => { setReportFilters({ ...reportFilters, soe: e.target.value }); setReportPage(1); }}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All SOEs</option>
-                        {uniqueSoes.filter(s => {
-                          if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity && !reportFilters.subActivity) return true;
-                          return combinedReportData.some(r => {
-                            const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                            const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                            const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
-                            const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
-                            const subActivityMatch = !reportFilters.subActivity || r.subActivity === reportFilters.subActivity;
-                            return rangeMatch && schemeMatch && sectorMatch && activityMatch && subActivityMatch && (r as any).soe.includes(s);
-                          });
-                        }).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div className="lg:col-span-6 flex justify-end">
-                      <button 
-                        onClick={() => {
-                          setReportFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
-                          setReportSearchTerm('');
-                          setReportPage(1);
-                        }}
-                        className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
-                      >
-                        <X className="w-3 h-3" />
-                        Reset Filters
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 bg-emerald-50 rounded-b-lg border-x border-b border-gray-200">
-                    <div className="flex justify-between items-center px-2">
-                      <span className="text-[10px] font-bold text-emerald-800 uppercase">Total Allocation:</span>
-                      <span className="text-sm font-bold text-emerald-700">â‚¹{totalAllocation.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-center px-2 border-x border-emerald-100">
-                      <span className="text-[10px] font-bold text-red-800 uppercase">Total Expenditure:</span>
-                      <span className="text-sm font-bold text-red-700">â‚¹{totalExpenditure.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-center px-2">
-                      <span className="text-[10px] font-bold text-blue-800 uppercase">Total Balance:</span>
-                      <span className="text-sm font-bold text-blue-700">â‚¹{totalBalance.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse border border-gray-300">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">Date</th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
-                    <div className="flex items-center justify-between">
-                      Range <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
-                    </div>
-                  </th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
-                    <div className="flex items-center justify-between">
-                      Scheme <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
-                    </div>
-                  </th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
-                    <div className="flex items-center justify-between">
-                      Sector <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
-                    </div>
-                  </th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
-                    <div className="flex items-center justify-between">
-                      Activity <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
-                    </div>
-                  </th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
-                    <div className="flex items-center justify-between">
-                      Sub-Activity <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
-                    </div>
-                  </th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">
-                    <div className="flex items-center justify-between">
-                      SOE <Filter className="w-3 h-3 cursor-pointer hover:text-emerald-600" onClick={() => setShowReportFilters(!showReportFilters)} />
-                    </div>
-                  </th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">Description</th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight text-right">Allocation</th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight text-right">Expenditure</th>
-                  <th className="p-2 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight text-right">Balance to Book</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedData.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50 border-b border-gray-200">
-                    <td className="p-2 text-[10px] border border-gray-300">{row.date}</td>
-                    <td className="p-2 text-[10px] border border-gray-300">{row.range}</td>
-                    <td className="p-2 text-[10px] border border-gray-300">{row.scheme}</td>
-                    <td className="p-2 text-[10px] border border-gray-300">{row.sector}</td>
-                    <td className="p-2 text-[10px] border border-gray-300">{row.activity}</td>
-                    <td className="p-2 text-[10px] border border-gray-300">{row.subActivity}</td>
-                    <td className="p-2 text-[10px] border border-gray-300 font-medium">{row.soe}</td>
-                    <td className="p-2 text-[10px] border border-gray-300">{row.description}</td>
-                    <td className="p-2 text-[10px] border border-gray-300 text-right font-medium text-emerald-700">â‚¹{row.allocation.toLocaleString()}</td>
-                    <td className="p-2 text-[10px] border border-gray-300 text-right font-bold text-red-700">â‚¹{row.expenditure.toLocaleString()}</td>
-                    <td className="p-2 text-[10px] border border-gray-300 text-right font-bold text-blue-700">â‚¹{row.balance.toLocaleString()}</td>
-                  </tr>
-                ))}
-                {paginatedData.length === 0 && (
-                  <tr>
-                    <td colSpan={11} className="p-8 text-center text-gray-500 border border-gray-300">No expenditure data found.</td>
-                  </tr>
-                )}
-              </tbody>
-              {paginatedData.length > 0 && (
-                <tfoot className="bg-gray-100 font-bold">
-                  <tr>
-                    <td colSpan={8} className="p-2 text-[10px] border border-gray-300 text-right uppercase">Total (Filtered)</td>
-                    <td className="p-2 text-[10px] border border-gray-300 text-right text-emerald-700">â‚¹{totalAllocation.toLocaleString()}</td>
-                    <td className="p-2 text-[10px] border border-gray-300 text-right text-red-700">â‚¹{totalExpenditure.toLocaleString()}</td>
-                    <td className="p-2 text-[10px] border border-gray-300 text-right text-blue-700">â‚¹{totalBalance.toLocaleString()}</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-
-          {reportItemsPerPage !== -1 && totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-gray-500">Showing {(reportPage - 1) * reportItemsPerPage + 1} to {Math.min(reportPage * reportItemsPerPage, filtered.length)} of {filtered.length} entries</span>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setReportPage(p => Math.max(1, p - 1))}
-                  disabled={reportPage === 1}
-                  className="p-1 rounded border hover:bg-gray-100 disabled:opacity-50"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <div className="flex gap-1">
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNum;
-                    if (totalPages <= 5) pageNum = i + 1;
-                    else if (reportPage <= 3) pageNum = i + 1;
-                    else if (reportPage >= totalPages - 2) pageNum = totalPages - 4 + i;
-                    else pageNum = reportPage - 2 + i;
-                    
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => setReportPage(pageNum)}
-                        className={`w-8 h-8 text-xs rounded border ${reportPage === pageNum ? 'bg-emerald-600 text-white border-emerald-600' : 'hover:bg-gray-100'}`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button
-                  onClick={() => setReportPage(p => Math.min(totalPages, p + 1))}
-                  disabled={reportPage === totalPages}
-                  className="p-1 rounded border hover:bg-gray-100 disabled:opacity-50"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    };
-
-    // Calculate total allocated per SOE Head across all ranges to get accurate "To be Allocated"
-    const totalAllocatedBySoe: Record<string, number> = {};
-    comprehensiveReportData.forEach(a => {
-      totalAllocatedBySoe[a.soe] = (totalAllocatedBySoe[a.soe] || 0) + a.allocated;
-    });
-
-    // Filtering
-    const filteredData = comprehensiveReportData.filter(row => {
-      return (
-        (!reportFilters.range || row.range === reportFilters.range) &&
-        (!reportFilters.scheme || row.scheme === reportFilters.scheme) &&
-        (!reportFilters.sector || row.sector === reportFilters.sector) &&
-        (!reportFilters.activity || row.activity === reportFilters.activity) &&
-        (!reportFilters.subActivity || row.subActivity === reportFilters.subActivity) &&
-        (!reportFilters.soe || row.soe.includes(reportFilters.soe))
-      );
-    });
-
-    const sortedData = [...filteredData].sort((a, b) => {
-      if (a.scheme !== b.scheme) return a.scheme.localeCompare(b.scheme);
-      if (a.sector !== b.sector) return a.sector.localeCompare(b.sector);
-      if (a.activity !== b.activity) return a.activity.localeCompare(b.activity);
-      return a.subActivity.localeCompare(b.subActivity);
-    });
-
-    const groupedData = [];
-    
-    // Helper to calculate totals for a group of rows
-    const calculateTotals = (rows: any[]) => {
-      const distinctSoes: Record<string, number> = {};
-      let totalAllocated = 0;
-      let totalExpenditure = 0;
-
-      rows.forEach(r => {
-        if (!(r.soe in distinctSoes)) {
-          distinctSoes[r.soe] = r.totalBudget;
-        }
-        totalAllocated += r.allocated;
-        totalExpenditure += r.expenditure;
-      });
-
-      const totalBudget = Object.values(distinctSoes).reduce((sum, b) => sum + b, 0);
-      const toBeAllocated = totalBudget - totalAllocated;
-      const remaining = totalAllocated - totalExpenditure; // Fix: Balance = Allocated - Expenditure
-
-      return {
-        totalBudget,
-        allocated: totalAllocated,
-        toBeAllocated,
-        expenditure: totalExpenditure,
-        remaining
-      };
-    };
-
-    let currentSchemeRows = [];
-    let currentSectorRows = [];
-    let currentActivityRows = [];
-    let currentSubActivityRows = [];
-
-    let currentScheme = null;
-    let currentSector = null;
-    let currentActivity = null;
-    let currentSubActivity = null;
-
-    sortedData.forEach((row, idx) => {
-      const totalAllocatedForThisSoe = totalAllocatedBySoe[row.soe] || 0;
-      const toBeAllocated = row.totalBudget - totalAllocatedForThisSoe;
-      const rowWithCalc = { ...row, toBeAllocated };
-
-      if (idx > 0) {
-        if (row.subActivity !== currentSubActivity || row.activity !== currentActivity || row.sector !== currentSector || row.scheme !== currentScheme) {
-          const totals = calculateTotals(currentSubActivityRows);
-          groupedData.push({ ...totals, range: '', scheme: '', sector: '', activity: '', subActivity: `Total for ${currentSubActivity}`, soe: '', isTotal: true, level: 'subActivity' });
-          currentSubActivityRows = [];
-        }
-        if (row.activity !== currentActivity || row.sector !== currentSector || row.scheme !== currentScheme) {
-          const totals = calculateTotals(currentActivityRows);
-          groupedData.push({ ...totals, range: '', scheme: '', sector: '', activity: `Total for ${currentActivity}`, subActivity: '', soe: '', isTotal: true, level: 'activity' });
-          currentActivityRows = [];
-        }
-        if (row.sector !== currentSector || row.scheme !== currentScheme) {
-          const totals = calculateTotals(currentSectorRows);
-          groupedData.push({ ...totals, range: '', scheme: '', sector: `Total for ${currentSector}`, activity: '', subActivity: '', soe: '', isTotal: true, level: 'sector' });
-          currentSectorRows = [];
-        }
-        if (row.scheme !== currentScheme) {
-          const totals = calculateTotals(currentSchemeRows);
-          groupedData.push({ ...totals, range: '', scheme: `Total for ${currentScheme}`, sector: '', activity: '', subActivity: '', soe: '', isTotal: true, level: 'scheme' });
-          currentSchemeRows = [];
-        }
-      }
-
-      currentScheme = row.scheme;
-      currentSector = row.sector;
-      currentActivity = row.activity;
-      currentSubActivity = row.subActivity;
-
-      groupedData.push(rowWithCalc);
-      
-      currentSubActivityRows.push(rowWithCalc);
-      currentActivityRows.push(rowWithCalc);
-      currentSectorRows.push(rowWithCalc);
-      currentSchemeRows.push(rowWithCalc);
-    });
-
-    if (sortedData.length > 0) {
-      const saTotals = calculateTotals(currentSubActivityRows);
-      groupedData.push({ ...saTotals, range: '', scheme: '', sector: '', activity: '', subActivity: `Total for ${currentSubActivity}`, soe: '', isTotal: true, level: 'subActivity' });
-      
-      const actTotals = calculateTotals(currentActivityRows);
-      groupedData.push({ ...actTotals, range: '', scheme: '', sector: '', activity: `Total for ${currentActivity}`, subActivity: '', soe: '', isTotal: true, level: 'activity' });
-      
-      const secTotals = calculateTotals(currentSectorRows);
-      groupedData.push({ ...secTotals, range: '', scheme: '', sector: `Total for ${currentSector}`, activity: '', subActivity: '', soe: '', isTotal: true, level: 'sector' });
-      
-      const schTotals = calculateTotals(currentSchemeRows);
-      groupedData.push({ ...schTotals, range: '', scheme: `Total for ${currentScheme}`, sector: '', activity: '', subActivity: '', soe: '', isTotal: true, level: 'scheme' });
-      
-      const grandTotals = calculateTotals(sortedData);
-      groupedData.push({ ...grandTotals, range: '', scheme: '', sector: '', activity: '', subActivity: '', soe: 'Grand Total', isTotal: true, level: 'grand' });
-    }
-
-    // --- SOE Abstract Summary Calculation ---
-    const abstractRows = soeAbstractData.filter(row => {
-      // Apply UI filters
-      const matchesFilters = (
-        (!reportFilters.scheme || row.schemeName === reportFilters.scheme) &&
-        (!reportFilters.sector || row.sectorName === reportFilters.sector) &&
-        (!reportFilters.activity || row.activityName === reportFilters.activity) &&
-        (!reportFilters.subActivity || row.subActivityName === reportFilters.subActivity)
-      );
-
-      if (!matchesFilters) return false;
-
-      if (soeAbstractSearch) {
-        const searchStr = soeAbstractSearch.toLowerCase();
-        return (
-          row.hierarchy.toLowerCase().includes(searchStr) ||
-          row.soeName.toLowerCase().includes(searchStr)
-        );
-      }
-
-      return true;
-    }).map(r => ({
-      ...r,
-      expenditure: r.spent, // Rename for report consistency
-      remaining: r.remainingToSpend // Rename for report consistency
-    })).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
-
-    const abstractHeaders = ['Hierarchy', 'Name of SOE', 'Approved Budget', 'Received in Try', 'Allocated', 'To be Allocated', 'Try Balance', 'Expenditure', 'Remaining'];
-    const abstractTableData = abstractRows.map(r => [
-      r.hierarchy, r.soeName, r.approvedBudget, r.receivedInTry, r.allocated, r.toBeAllocated, r.tryBalance, r.expenditure, r.remaining
-    ]);
-
-    const isGlobalUser = userRole === 'admin' || userRole === 'deo' || userRole === 'approver';
-    const detailedHeaders = ['Range', 'Scheme', 'Sector', 'Activity', 'Sub-Activity', 'SOE Head'];
-    if (!userRangeId) detailedHeaders.push('Total Budget');
-    detailedHeaders.push('Allocation');
-    detailedHeaders.push('Expenditure', 'Balance to Book');
-    
-    const detailedTableData = groupedData.map(row => {
-      const cols = [row.range, row.scheme, row.sector, row.activity, row.subActivity, row.soe];
-      if (!userRangeId) cols.push(row.totalBudget);
-      cols.push(row.allocated);
-      cols.push(row.expenditure, row.remaining);
-      return cols;
-    });
-
-    const renderTaxDeductionReport = () => {
-      const filtered = baseExpenses.filter(e => {
-        if (e.status === 'rejected') return false;
-        if (!e.deductionType || e.deductionType === 'None') return false;
-        
-        const alloc = allocations.find(a => a.id === e.allocationId);
-        if (!alloc) return false;
-
-        const scheme = schemes.find(s => s.id === alloc.schemeId)?.name || 'N/A';
-        const sector = sectors.find(s => s.id === alloc.sectorId)?.name || 'N/A';
-        const range = ranges.find(r => r.id === alloc.rangeId)?.name || 'N/A';
-
-        const matchesFilters = (
-          (!reportFilters.scheme || scheme === reportFilters.scheme) &&
-          (!reportFilters.sector || sector === reportFilters.sector) &&
-          (!reportFilters.range || range === reportFilters.range) &&
-          (!reportFilters.deductionType || 
-            (reportFilters.deductionType === 'TDS' && (e.deductionType === 'TDS' || e.deductionType === 'Both')) ||
-            (reportFilters.deductionType === 'TDS_GST' && (e.deductionType === 'TDS_GST' || e.deductionType === 'Both'))
-          )
-        );
-
-        return matchesFilters;
-      });
-
-      const headers = ['Date', 'Bill No', 'Range', 'Scheme', 'Sector', 'Payee', 'PAN', 'GST', 'Gross Amt', 'TDS (1%)', 'TDS GST (2%)', 'Total Deducted', 'Net Paid'];
-      const tableData = filtered.map(e => {
-        const alloc = allocations.find(a => a.id === e.allocationId);
-        const bill = bills.find(b => b.expenseIds.includes(e.id));
-        const payee = payees.find(p => p.id === e.payeeId);
-        return [
-          e.date,
-          bill?.billNo || 'N/A',
-          ranges.find(r => r.id === alloc?.rangeId)?.name || 'N/A',
-          schemes.find(s => s.id === alloc?.schemeId)?.name || 'N/A',
-          sectors.find(s => s.id === alloc?.sectorId)?.name || 'N/A',
-          e.payeeName || payee?.name || 'N/A',
-          e.panNumber || payee?.panNumber || '-',
-          e.gstNumber || payee?.gstNumber || '-',
-          e.amount,
-          Math.round(e.tdsAmount || 0),
-          Math.round(e.tdsGstAmount || 0),
-          Math.round(e.deductedAmount || 0),
-          Math.round(e.netAmount || (e.amount - (e.deductedAmount || 0)))
-        ];
-      });
-
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-gray-700 uppercase">Tax Deduction Report</h4>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => downloadPDF('Tax Deduction Report', [], [], tableData, headers)}
-                className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 hover:bg-red-700 transition-colors"
-              >
-                <Download className="w-3 h-3" /> PDF
-              </button>
-              <button 
-                onClick={() => downloadExcel('Tax Deduction Report', [], [], tableData, headers)}
-                className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 hover:bg-emerald-700 transition-colors"
-              >
-                <Download className="w-3 h-3" /> Excel
-              </button>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto border rounded-xl shadow-sm">
-            <table className="w-full text-xs border-collapse">
-              <thead className="bg-gray-50">
-                <tr>
-                  {headers.map(h => (
-                    <th key={h} className="p-2 text-[10px] font-bold text-gray-700 border border-gray-200 uppercase tracking-tight text-left">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((e, i) => {
-                  const alloc = allocations.find(a => a.id === e.allocationId);
-                  const bill = bills.find(b => b.expenseIds.includes(e.id));
-                  const payee = payees.find(p => p.id === e.payeeId);
-                  const net = e.netAmount || (e.amount - (e.deductedAmount || 0));
-                  return (
-                    <tr key={e.id} className="hover:bg-gray-50 border-b border-gray-100">
-                      <td className="p-2 border border-gray-100">{e.date}</td>
-                      <td className="p-2 border border-gray-100 font-medium">{bill?.billNo || '-'}</td>
-                      <td className="p-2 border border-gray-100">{ranges.find(r => r.id === alloc?.rangeId)?.name || '-'}</td>
-                      <td className="p-2 border border-gray-100">{schemes.find(s => s.id === alloc?.schemeId)?.name || '-'}</td>
-                      <td className="p-2 border border-gray-100">{sectors.find(s => s.id === alloc?.sectorId)?.name || '-'}</td>
-                      <td className="p-2 border border-gray-100">{e.payeeName || payee?.name || '-'}</td>
-                      <td className="p-2 border border-gray-100 font-mono text-[10px]">{e.panNumber || payee?.panNumber || '-'}</td>
-                      <td className="p-2 border border-gray-100 font-mono text-[10px]">{e.gstNumber || payee?.gstNumber || '-'}</td>
-                      <td className="p-2 border border-gray-100 text-right">â‚¹{e.amount.toLocaleString()}</td>
-                      <td className="p-2 border border-gray-100 text-right text-blue-600">â‚¹{Math.round(e.tdsAmount || 0).toLocaleString()}</td>
-                      <td className="p-2 border border-gray-100 text-right text-blue-600">â‚¹{Math.round(e.tdsGstAmount || 0).toLocaleString()}</td>
-                      <td className="p-2 border border-gray-100 text-right font-bold text-red-600">â‚¹{Math.round(e.deductedAmount || 0).toLocaleString()}</td>
-                      <td className="p-2 border border-gray-100 text-right font-bold text-emerald-700">â‚¹{Math.round(net).toLocaleString()}</td>
-                    </tr>
-                  );
-                })}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={headers.length} className="p-8 text-center text-gray-500">No tax deduction records found.</td>
-                  </tr>
-                )}
-              </tbody>
-              {filtered.length > 0 && (
-                <tfoot className="bg-gray-50 font-bold">
-                  <tr>
-                    <td colSpan={8} className="p-2 text-right uppercase">Totals</td>
-                    <td className="p-2 text-right">â‚¹{filtered.reduce((sum, e) => sum + e.amount, 0).toLocaleString()}</td>
-                    <td className="p-2 text-right text-blue-600">â‚¹{filtered.reduce((sum, e) => sum + Math.round(e.tdsAmount || 0), 0).toLocaleString()}</td>
-                    <td className="p-2 text-right text-blue-600">â‚¹{filtered.reduce((sum, e) => sum + Math.round(e.tdsGstAmount || 0), 0).toLocaleString()}</td>
-                    <td className="p-2 text-right text-red-600">â‚¹{filtered.reduce((sum, e) => sum + Math.round(e.deductedAmount || 0), 0).toLocaleString()}</td>
-                    <td className="p-2 text-right text-emerald-700">â‚¹{filtered.reduce((sum, e) => sum + Math.round(e.netAmount || (e.amount - (e.deductedAmount || 0))), 0).toLocaleString()}</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </div>
-      );
-    };
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-white p-3 md:p-6 rounded-xl shadow-sm border border-gray-100">
-          <div className="flex border-b border-gray-200 mb-6 overflow-x-auto whitespace-nowrap scrollbar-hide">
-            <button
-              onClick={() => { setReportSubTab('summary'); setReportPage(1); }}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'summary' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            >
-              Summary Report
-            </button>
-            <button
-              onClick={() => { setReportSubTab('allocation-expenditure'); setReportPage(1); }}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'allocation-expenditure' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            >
-              Allocation & Expenditure Details
-            </button>
-            <button
-              onClick={() => { setReportSubTab('ledger'); setReportPage(1); }}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'ledger' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            >
-              Scheme Wise Ledger
-            </button>
-            {(userRole === 'admin' || userRole === 'Division') && (
-              <button
-                onClick={() => { setReportSubTab('master-control'); setReportPage(1); }}
-                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'master-control' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-              >
-                Master Control
-              </button>
-            )}
-            <button
-              onClick={() => { setReportSubTab('tax-deduction'); setReportPage(1); }}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex-shrink-0 ${reportSubTab === 'tax-deduction' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            >
-              Tax Deduction
-            </button>
-          </div>
-
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              <FileBarChart className="text-emerald-600" /> {reportSubTab === 'summary' ? 'Comprehensive Budget Report' : reportSubTab === 'ledger' ? 'Scheme Wise Ledger' : 'Allocation & Expenditure Details'}
-            </h3>
-            <div className="flex flex-wrap gap-1">
-              <button 
-                onClick={() => setShowReportFilters(!showReportFilters)}
-                className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-gray-200 transition-colors border border-gray-200"
-              >
-                <Filter className="w-3 h-3" /> {showReportFilters ? 'Hide' : 'Show'} Filters
-                {showReportFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </button>
-              {reportSubTab === 'summary' && (
-                <>
-                  <button 
-                    onClick={() => downloadPDF('Comprehensive Budget Report', (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractTableData : [], (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractHeaders : [], detailedTableData, detailedHeaders)}
-                    className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-red-700 transition-colors shadow-sm"
-                  >
-                    <Download className="w-3 h-3" /> PDF
-                  </button>
-                  <button 
-                    onClick={() => downloadExcel('Comprehensive Budget Report', (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractTableData : [], (userRole === 'admin' || userRole === 'deo' || userRole === 'approver') ? abstractHeaders : [], detailedTableData, detailedHeaders)}
-                    className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-emerald-700 transition-colors shadow-sm"
-                  >
-                    <Download className="w-3 h-3" /> Excel
-                  </button>
-                  <button 
-                    onClick={downloadZip}
-                    className="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-blue-700 transition-colors shadow-sm"
-                  >
-                    <Download className="w-3 h-3" /> ZIP
-                  </button>
-                </>
-              )}
-              {reportSubTab === 'ledger' && (
-                <button 
-                  onClick={downloadLedgerPDF}
-                  className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-red-700 transition-colors shadow-sm"
-                >
-                  <Download className="w-3 h-3" /> PDF
-                </button>
-              )}
-              {reportSubTab === 'master-control' && (
-                <>
-                  <button 
-                    onClick={() => {
-                      const headers = ["Range", "Scheme", "Sector", "Activity", "Sub-Activity", "SOE", "Allocated", "Expenditure", "Balance"];
-                      const data = masterControlData.map(r => [r.rangeName, r.schemeName, r.sectorName, r.activityName, r.subActivityName, r.soeName, r.allocated, r.expenditure, r.balance]);
-                      downloadPDF('Master Control Budget Report', [], [], data, headers);
-                    }}
-                    className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-red-700 transition-colors shadow-sm"
-                  >
-                    <Download className="w-3 h-3" /> PDF
-                  </button>
-                  <button 
-                    onClick={() => {
-                      const headers = ["Range", "Scheme", "Sector", "Activity", "Sub-Activity", "SOE", "Allocated", "Expenditure", "Balance"];
-                      const data = masterControlData.map(r => [r.rangeName, r.schemeName, r.sectorName, r.activityName, r.subActivityName, r.soeName, r.allocated, r.expenditure, r.balance]);
-                      downloadExcel('Master Control Budget Report', [], [], data, headers);
-                    }}
-                    className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] flex items-center justify-center gap-1 hover:bg-emerald-700 transition-colors shadow-sm"
-                  >
-                    <Download className="w-3 h-3" /> Excel
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {showReportFilters && (
-            <div className="mb-6 animate-in fade-in slide-in-from-top-2">
-                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
-                {reportSubTab === 'summary' && (
-                  <div className="lg:col-span-1 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                    <h5 className="text-xs font-bold text-gray-700 uppercase mb-3 flex items-center gap-2">
-                      <PieChartIcon className="w-3 h-3 text-emerald-600" /> Budget Distribution
-                    </h5>
-                    <div className="h-40">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie 
-                            data={[
-                              { name: 'Spent', value: calculateTotals(sortedData).expenditure },
-                              { name: 'Balance', value: calculateTotals(sortedData).remaining }
-                            ]} 
-                            innerRadius={35} 
-                            outerRadius={50} 
-                            paddingAngle={5} 
-                            dataKey="value"
-                          >
-                            <Cell fill="#dc3545" />
-                            <Cell fill="#10b981" />
-                          </Pie>
-                          <Tooltip formatter={(value: number) => `â‚¹${value.toLocaleString()}`} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="flex justify-center gap-4 mt-2">
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                        <span className="text-[10px] text-gray-500">Spent</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                        <span className="text-[10px] text-gray-500">Balance</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                    
-                <div className={`${reportSubTab === 'summary' ? 'lg:col-span-3' : 'lg:col-span-4'} grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200`}>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
-                    <select 
-                      value={reportFilters.range}
-                      onChange={(e) => { setReportFilters({ ...reportFilters, range: e.target.value, scheme: '', sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Ranges</option>
-                      {uniqueRangesList.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
-                    <select 
-                      value={reportFilters.scheme}
-                      onChange={(e) => { setReportFilters({ ...reportFilters, scheme: e.target.value, sector: '', activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Schemes</option>
-                      {uniqueSchemes.filter(s => {
-                        if (!reportFilters.range) return true;
-                        return combinedReportData.some(r => r.range === reportFilters.range && r.scheme === s);
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
-                    <select 
-                      value={reportFilters.sector}
-                      onChange={(e) => { setReportFilters({ ...reportFilters, sector: e.target.value, activity: '', subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Sectors</option>
-                      {uniqueSectors.filter(s => {
-                        if (!reportFilters.range && !reportFilters.scheme) return true;
-                        return combinedReportData.some(r => {
-                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                          return rangeMatch && schemeMatch && r.sector === s;
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
-                    <select 
-                      value={reportFilters.activity}
-                      onChange={(e) => { setReportFilters({ ...reportFilters, activity: e.target.value, subActivity: '', soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Activities</option>
-                      {uniqueActivities.filter(a => {
-                        if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector) return true;
-                        return combinedReportData.some(r => {
-                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                          const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
-                          return rangeMatch && schemeMatch && sectorMatch && r.activity === a;
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
-                    <select 
-                      value={reportFilters.subActivity}
-                      onChange={(e) => { setReportFilters({ ...reportFilters, subActivity: e.target.value, soe: '', deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Sub-Activities</option>
-                      {uniqueSubActivities.filter(sa => {
-                        if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity) return true;
-                        return combinedReportData.some(r => {
-                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                          const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
-                          const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
-                          return rangeMatch && schemeMatch && sectorMatch && activityMatch && r.subActivity === sa;
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
-                    <select 
-                      value={reportFilters.soe}
-                      onChange={(e) => { setReportFilters({ ...reportFilters, soe: e.target.value, deductionType: reportFilters.deductionType }); setReportPage(1); }}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All SOEs</option>
-                      {uniqueSoes.filter(s => {
-                        if (!reportFilters.range && !reportFilters.scheme && !reportFilters.sector && !reportFilters.activity && !reportFilters.subActivity) return true;
-                        return combinedReportData.some(r => {
-                          const rangeMatch = !reportFilters.range || r.range === reportFilters.range;
-                          const schemeMatch = !reportFilters.scheme || r.scheme === reportFilters.scheme;
-                          const sectorMatch = !reportFilters.sector || r.sector === reportFilters.sector;
-                          const activityMatch = !reportFilters.activity || r.activity === reportFilters.activity;
-                          const subActivityMatch = !reportFilters.subActivity || r.subActivity === reportFilters.subActivity;
-                          return rangeMatch && schemeMatch && sectorMatch && activityMatch && subActivityMatch && (r as any).soe.includes(s);
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  {reportSubTab === 'tax-deduction' && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Deduction Type</label>
-                      <select 
-                        value={reportFilters.deductionType}
-                        onChange={(e) => setReportFilters({ ...reportFilters, deductionType: e.target.value })}
-                        className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                      >
-                        <option value="">All Deductions</option>
-                        <option value="TDS">TDS (1%)</option>
-                        <option value="TDS_GST">TDS on GST (2%)</option>
-                      </select>
-                    </div>
-                  )}
-                  {reportSubTab === 'ledger' && (
-                    <div className="lg:col-span-2">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Search Ledger</label>
-                      <div className="flex items-center gap-1">
-                        <div className="relative flex-1">
-                          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                          <input
-                            type="text"
-                            placeholder="Search hierarchy, SOE, range..."
-                            value={ledgerSearchTerm}
-                            onChange={(e) => setLedgerSearchTerm(e.target.value)}
-                            className="pl-9 pr-4 py-2 border border-gray-300 rounded text-xs bg-white w-full"
-                          />
-                        </div>
-                        <button 
-                          className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-                          title="Search"
-                        >
-                          <Search className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <div className={`${reportSubTab === 'ledger' ? 'lg:col-span-4' : 'lg:col-span-6'} flex justify-end`}>
-                    <button 
-                      onClick={() => {
-                        setReportFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '', deductionType: '' });
-                        setSoeAbstractSearch('');
-                        setLedgerSearchTerm('');
-                        setReportPage(1);
-                      }}
-                      className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
-                    >
-                      <X className="w-3 h-3" />
-                      Reset Filters
-                    </button>
-                  </div>
-                </div>
-                  </div>
-                  {sortedData.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-3 bg-emerald-50 rounded-lg border border-gray-200">
-                      <div className="flex justify-between items-center px-2">
-                        <span className="text-[10px] font-bold text-emerald-800 uppercase">Total Allocation:</span>
-                        <span className="text-sm font-bold text-emerald-700">â‚¹{calculateTotals(sortedData).allocated.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between items-center px-2 border-x border-emerald-100">
-                        <span className="text-[10px] font-bold text-red-800 uppercase">Total Expenditure:</span>
-                        <span className="text-sm font-bold text-red-700">â‚¹{calculateTotals(sortedData).expenditure.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between items-center px-2">
-                        <span className="text-[10px] font-bold text-blue-800 uppercase">Total Balance:</span>
-                        <span className="text-sm font-bold text-blue-700">â‚¹{calculateTotals(sortedData).remaining.toLocaleString()}</span>
-                      </div>
-                      <div className="px-2">
-                        <div className="flex justify-between mb-1">
-                          <span className="text-[10px] font-bold text-gray-600 uppercase">Usage:</span>
-                          <span className="text-[10px] font-bold text-gray-700">{calculateTotals(sortedData).allocated > 0 ? `${((calculateTotals(sortedData).expenditure / calculateTotals(sortedData).allocated) * 100).toFixed(1)}%` : '0%'}</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-1.5">
-                          <div 
-                            className="bg-emerald-600 h-1.5 rounded-full" 
-                            style={{ width: `${Math.min(100, calculateTotals(sortedData).allocated > 0 ? (calculateTotals(sortedData).expenditure / calculateTotals(sortedData).allocated) * 100 : 0)}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {reportSubTab === 'summary' && (
-                <>
-                  {/* SOE Abstract Summary Table */}
-              {(userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'Division') && (
-                <div className="mb-10">
-                  <div 
-                    className="flex justify-between items-center mb-4 cursor-pointer hover:bg-gray-50 p-2 rounded -mx-2"
-                    onClick={() => setShowSoeAbstract(!showSoeAbstract)}
-                  >
-                    <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
-                      <Table className="w-4 h-4 text-emerald-600" /> SOE Abstract Summary
-                    </h4>
-                    <div className="flex items-center gap-2 md:gap-4">
-                      {showSoeAbstract && (
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <div className={`relative transition-all duration-300 ${showMobileReportSearch ? 'w-40 sm:w-64' : 'w-0 sm:w-64 overflow-hidden'}`}>
-                            <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                            <input
-                              type="text"
-                              placeholder="Search abstract..."
-                              value={soeAbstractSearch}
-                              onChange={(e) => setSoeAbstractSearch(e.target.value)}
-                              className="pl-9 pr-4 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
-                            />
-                          </div>
-                          <button 
-                            onClick={() => setShowMobileReportSearch(!showMobileReportSearch)}
-                            className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm sm:hidden"
-                            title="Search"
-                          >
-                            <Search className="w-4 h-4" />
-                          </button>
-                          <button 
-                            className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm hidden sm:block"
-                            title="Search"
-                          >
-                            <Search className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                      <button type="button" className="text-gray-500 hover:text-gray-700">
-                        {showSoeAbstract ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {showSoeAbstract && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse border border-gray-300">
-                        <thead>
-                          <tr className="bg-emerald-50 border-b border-gray-300">
-                            {abstractHeaders.map(h => <th key={h} className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase tracking-tight">{h}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {abstractRows.map((row, i) => (
-                            <tr key={i} className="border-b border-gray-300 hover:bg-emerald-50/30 transition-colors">
-                              <td className="p-1.5 text-[10px] border border-gray-300 font-medium text-gray-600">{row.hierarchy}</td>
-                              <td className="p-1.5 text-[10px] border border-gray-300 font-bold text-gray-800">{row.soeName}</td>
-                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-gray-700">â‚¹{row.approvedBudget.toLocaleString()}</td>
-                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-indigo-700">â‚¹{row.receivedInTry.toLocaleString()}</td>
-                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-emerald-700 font-medium">â‚¹{row.allocated.toLocaleString()}</td>
-                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-amber-700 font-medium">â‚¹{row.toBeAllocated.toLocaleString()}</td>
-                              <td className="p-1.5 text-[10px] border border-gray-300 text-right text-purple-700 font-medium">â‚¹{row.tryBalance.toLocaleString()}</td>
-                              <td 
-                                className="p-1.5 text-[10px] border border-gray-300 text-right text-red-700 font-medium cursor-pointer hover:underline"
-                                onClick={() => setViewingSoeExp({ soeId: row.soeId, soeName: row.soeName, hierarchy: row.hierarchy })}
-                                title="Click to view expenditure details"
-                              >
-                                â‚¹{row.expenditure.toLocaleString()}
-                              </td>
-                              <td className={`p-1.5 text-[10px] border border-gray-300 text-right font-bold ${row.remaining < 0 ? 'text-red-600 bg-red-50' : 'text-blue-700'}`}>
-                                â‚¹{row.remaining.toLocaleString()}
-                              </td>
-                            </tr>
-                          ))}
-                          {abstractRows.length === 0 && (
-                            <tr>
-                              <td colSpan={9} className="p-4 text-center text-gray-500 border border-gray-300 text-xs">No abstract data available.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="mb-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                <div 
-                  className="flex items-center justify-between cursor-pointer group"
-                  onClick={() => setShowDetailedReport(!showDetailedReport)}
-                >
-                  <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
-                    <Table className="w-4 h-4 text-emerald-600" /> Detailed Range-wise Report
-                  </h4>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 group-hover:text-gray-600 transition-colors">
-                      {showDetailedReport ? 'Click to collapse' : 'Click to expand'}
-                    </span>
-                    <button type="button" className="p-1 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-all">
-                      {showDetailedReport ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                    </button>
-                  </div>
-                </div>
-                
-                {showDetailedReport && (
-                  <div className="overflow-x-auto mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <table className="w-full text-left border-collapse border border-gray-300">
-                      <thead>
-                        <tr className="bg-gray-100 border-b border-gray-300">
-                          {detailedHeaders.map(h => <th key={h} className="p-1.5 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">{h}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {groupedData.map((row, i) => {
-                          let rowClass = "border-b border-gray-300 hover:bg-gray-50";
-                          let textClass = "text-[10px]";
-                          if (row.isTotal) {
-                            textClass = "text-[9px] uppercase tracking-tight";
-                            if (row.level === 'grand') rowClass = "bg-gray-800 text-white font-bold";
-                            else if (row.level === 'scheme') rowClass = "bg-amber-50 font-bold";
-                            else if (row.level === 'sector') rowClass = "bg-emerald-50 font-bold";
-                            else if (row.level === 'activity') rowClass = "bg-blue-50 font-bold";
-                            else if (row.level === 'subActivity') rowClass = "bg-gray-100 font-bold";
-                          }
-
-                          return (
-                            <tr key={i} className={rowClass}>
-                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.range}</td>
-                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.scheme}</td>
-                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.sector}</td>
-                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.activity}</td>
-                              <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.subActivity}</td>
-                              <td className={`p-1.5 font-medium border border-gray-300 whitespace-nowrap ${textClass}`}>{row.soe}</td>
-                              {!userRangeId && <td className={`p-1.5 text-right border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-gray-600'}`}>â‚¹{row.totalBudget.toLocaleString()}</td>}
-                              <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-emerald-700'}`}>â‚¹{row.allocated.toLocaleString()}</td>
-                              <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-red-700'}`}>â‚¹{row.expenditure.toLocaleString()}</td>
-                              <td className={`p-1.5 text-right font-bold border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-blue-700'}`}>â‚¹{row.remaining.toLocaleString()}</td>
-                            </tr>
-                          );
-                        })}
-                        {groupedData.length === 0 && (
-                          <tr>
-                            <td colSpan={detailedHeaders.length} className="p-8 text-center text-gray-500 border border-gray-300">No data available for the selected filters.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-          
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
-            <div className="p-3 md:p-6">
-              {reportSubTab === 'summary' && (
-                <div className="space-y-6">
-                  {/* SOE Abstract Summary Table */}
-                  {(userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'Division') && (
-                    <div className="mb-10">
-                      <div 
-                        className="flex justify-between items-center mb-4 cursor-pointer hover:bg-gray-50 p-2 rounded -mx-2"
-                        onClick={() => setShowSoeAbstract(!showSoeAbstract)}
-                      >
-                        <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
-                          <Table className="w-4 h-4 text-emerald-600" /> SOE Abstract Summary
-                        </h4>
-                        <div className="flex items-center gap-2 md:gap-4">
-                          {showSoeAbstract && (
-                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                              <div className={`relative transition-all duration-300 ${showMobileReportSearch ? 'w-40 sm:w-64' : 'w-0 sm:w-64 overflow-hidden'}`}>
-                                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                                <input
-                                  type="text"
-                                  placeholder="Search abstract..."
-                                  value={soeAbstractSearch}
-                                  onChange={(e) => setSoeAbstractSearch(e.target.value)}
-                                  className="pl-9 pr-4 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
-                                />
-                              </div>
-                              <button 
-                                onClick={() => setShowMobileReportSearch(!showMobileReportSearch)}
-                                className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm sm:hidden"
-                                title="Search"
-                              >
-                                <Search className="w-4 h-4" />
-                              </button>
-                              <button 
-                                className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm hidden sm:block"
-                                title="Search"
-                              >
-                                <Search className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )}
-                          <button type="button" className="text-gray-500 hover:text-gray-700">
-                            {showSoeAbstract ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {showSoeAbstract && (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse border border-gray-300">
-                            <thead>
-                              <tr className="bg-emerald-50 border-b border-gray-300">
-                                {abstractHeaders.map(h => <th key={h} className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase tracking-tight">{h}</th>)}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {abstractRows.map((row, i) => (
-                                <tr key={i} className="border-b border-gray-300 hover:bg-emerald-50/30 transition-colors">
-                                  <td className="p-1.5 text-[10px] border border-gray-300 font-medium text-gray-600">{row.hierarchy}</td>
-                                  <td className="p-1.5 text-[10px] border border-gray-300 font-bold text-gray-800">{row.soeName}</td>
-                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-gray-700">â‚¹{row.approvedBudget.toLocaleString()}</td>
-                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-indigo-700">â‚¹{row.receivedInTry.toLocaleString()}</td>
-                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-emerald-700 font-medium">â‚¹{row.allocated.toLocaleString()}</td>
-                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-amber-700 font-medium">â‚¹{row.toBeAllocated.toLocaleString()}</td>
-                                  <td className="p-1.5 text-[10px] border border-gray-300 text-right text-purple-700 font-medium">â‚¹{row.tryBalance.toLocaleString()}</td>
-                                  <td 
-                                    className="p-1.5 text-[10px] border border-gray-300 text-right text-red-700 font-medium cursor-pointer hover:underline"
-                                    onClick={() => setViewingSoeExp({ soeId: row.soeId, soeName: row.soeName, hierarchy: row.hierarchy })}
-                                    title="Click to view expenditure details"
-                                  >
-                                    â‚¹{row.expenditure.toLocaleString()}
-                                  </td>
-                                  <td className={`p-1.5 text-[10px] border border-gray-300 text-right font-bold ${row.remaining < 0 ? 'text-red-600 bg-red-50' : 'text-blue-700'}`}>
-                                    â‚¹{row.remaining.toLocaleString()}
-                                  </td>
-                                </tr>
-                              ))}
-                              {abstractRows.length === 0 && (
-                                <tr>
-                                  <td colSpan={9} className="p-4 text-center text-gray-500 border border-gray-300 text-xs">No abstract data available.</td>
-                                </tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="mb-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <div 
-                      className="flex items-center justify-between cursor-pointer group"
-                      onClick={() => setShowDetailedReport(!showDetailedReport)}
-                    >
-                      <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
-                        <Table className="w-4 h-4 text-emerald-600" /> Detailed Budget Report
-                      </h4>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 group-hover:text-gray-600 transition-colors">
-                          {showDetailedReport ? 'Click to collapse' : 'Click to expand'}
-                        </span>
-                        <button type="button" className="p-1 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-all">
-                          {showDetailedReport ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                        </button>
-                      </div>
-                    </div>
-                    
-                    {showDetailedReport && (
-                      <div className="overflow-x-auto mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                        <table className="w-full text-left border-collapse border border-gray-300">
-                          <thead>
-                            <tr className="bg-gray-100 border-b border-gray-300">
-                              {detailedHeaders.map(h => <th key={h} className="p-1.5 text-[10px] font-bold text-gray-700 border border-gray-300 uppercase tracking-tight">{h}</th>)}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {groupedData.map((row, i) => {
-                              let rowClass = "border-b border-gray-300 hover:bg-gray-50";
-                              let textClass = "text-[10px]";
-                              if (row.isTotal) {
-                                textClass = "text-[9px] uppercase tracking-tight";
-                                if (row.level === 'grand') rowClass = "bg-gray-800 text-white font-bold";
-                                else if (row.level === 'scheme') rowClass = "bg-amber-50 font-bold";
-                                else if (row.level === 'sector') rowClass = "bg-emerald-50 font-bold";
-                                else if (row.level === 'activity') rowClass = "bg-blue-50 font-bold";
-                                else if (row.level === 'subActivity') rowClass = "bg-gray-100 font-bold";
-                              }
-
-                              return (
-                                <tr key={i} className={rowClass}>
-                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.range}</td>
-                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.scheme}</td>
-                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.sector}</td>
-                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.activity}</td>
-                                  <td className={`p-1.5 border border-gray-300 whitespace-nowrap ${textClass}`}>{row.subActivity}</td>
-                                  <td className={`p-1.5 font-medium border border-gray-300 whitespace-nowrap ${textClass}`}>{row.soe}</td>
-                                  {!userRangeId && <td className={`p-1.5 text-right border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-gray-600'}`}>â‚¹{row.totalBudget.toLocaleString()}</td>}
-                                  <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-emerald-700'}`}>â‚¹{row.allocated.toLocaleString()}</td>
-                                  <td className={`p-1.5 text-right font-medium border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-red-700'}`}>â‚¹{row.expenditure.toLocaleString()}</td>
-                                  <td className={`p-1.5 text-right font-bold border border-gray-300 whitespace-nowrap ${textClass} ${row.level === 'grand' ? 'text-white' : 'text-blue-700'}`}>â‚¹{row.remaining.toLocaleString()}</td>
-                                </tr>
-                              );
-                            })}
-                            {groupedData.length === 0 && (
-                              <tr>
-                                <td colSpan={detailedHeaders.length} className="p-8 text-center text-gray-500 border border-gray-300">No data available for the selected filters.</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {reportSubTab === 'allocation-expenditure' && renderAllocationExpenditureReport()}
-              {reportSubTab === 'ledger' && renderSchemeWiseLedger()}
-              {reportSubTab === 'master-control' && (
-                <>
-                  <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100">
-                      <p className="text-[10px] font-bold text-emerald-800 uppercase">Total Allocated</p>
-                      <p className="text-lg font-bold text-emerald-700">â‚¹{masterControlData.reduce((sum: any, r: any) => sum + r.allocated, 0).toLocaleString()}</p>
-                    </div>
-                    <div className="bg-red-50 p-3 rounded-lg border border-red-100">
-                      <p className="text-[10px] font-bold text-red-800 uppercase">Total Expenditure</p>
-                      <p className="text-lg font-bold text-red-700">â‚¹{masterControlData.reduce((sum: any, r: any) => sum + r.expenditure, 0).toLocaleString()}</p>
-                    </div>
-                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                      <p className="text-[10px] font-bold text-blue-800 uppercase">Total Balance</p>
-                      <p className="text-lg font-bold text-blue-700">â‚¹{masterControlData.reduce((sum: any, r: any) => sum + r.balance, 0).toLocaleString()}</p>
-                    </div>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse border border-gray-300">
-                      <thead>
-                        <tr className="bg-emerald-50 border-b border-gray-300">
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Range</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Scheme</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Sector</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Activity</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">Sub-Activity</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase">SOE</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase text-right">Allocated</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase text-right">Expenditure</th>
-                          <th className="p-1.5 text-[9px] font-bold text-emerald-900 border border-gray-300 uppercase text-right">Balance</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {masterControlData.map((row, i) => (
-                          <tr key={i} className="border-b border-gray-300 hover:bg-emerald-50/30">
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.rangeName}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.schemeName}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.sectorName}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.activityName}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-gray-600">{row.subActivityName}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 font-bold text-gray-800">{row.soeName}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-right text-emerald-700 font-medium">â‚¹{row.allocated.toLocaleString()}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-right text-red-700 font-medium">â‚¹{row.expenditure.toLocaleString()}</td>
-                            <td className="p-1.5 text-[10px] border border-gray-300 text-right text-blue-700 font-bold">â‚¹{row.balance.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                        {masterControlData.length === 0 && (
-                          <tr>
-                            <td colSpan={9} className="p-8 text-center text-gray-400 italic">No budget data found for the selected filters.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-              {reportSubTab === 'tax-deduction' && renderTaxDeductionReport()}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderSchemeWiseLedger = () => {
-    if (userRole !== 'admin' && userRole !== 'deo' && userRole !== 'approver') return null;
-
-    // Group allocations and expenditures by Hierarchy + SOE Head
-    const ledgerGroups: Record<string, { hierarchy: string, soeName: string, totalAllocation: number, items: any[] }> = {};
-
-    const filteredAllocations = currentAllocations.filter(alloc => {
-      const sch = schemes.find(s => s.id === alloc.schemeId);
-      const sec = sectors.find(s => s.id === alloc.sectorId);
-      const act = activities.find(a => a.id === alloc.activityId);
-      const sa = subActivities.find(s => s.id === alloc.subActivityId);
-      const r = ranges.find(r => r.id === alloc.rangeId);
-      const rangeName = r?.name === 'Rajgarh Forest Division' ? 'Division' : (r?.name || '');
-      
-      const matchesFilters = (
-        (!reportFilters.scheme || sch?.name === reportFilters.scheme) &&
-        (!reportFilters.sector || sec?.name === reportFilters.sector) &&
-        (!reportFilters.activity || act?.name === reportFilters.activity) &&
-        (!reportFilters.subActivity || sa?.name === reportFilters.subActivity) &&
-        (!reportFilters.range || rangeName === reportFilters.range)
-      );
-
-      if (!matchesFilters) return false;
-
-      if (ledgerSearchTerm) {
-        const searchLower = ledgerSearchTerm.toLowerCase();
-        const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(' ') || '';
-        const hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
-        return (
-          hierarchy.toLowerCase().includes(searchLower) ||
-          soeNames.toLowerCase().includes(searchLower) ||
-          rangeName.toLowerCase().includes(searchLower) ||
-          alloc.remarks?.toLowerCase().includes(searchLower)
-        );
-      }
-
-      return true;
-    });
-
-    filteredAllocations.forEach(alloc => {
-      alloc.fundedSOEs?.forEach(f => {
-        const soe = soes.find(s => s.id === f.soeId);
-        if (!soe) return;
-
-        let hierarchy = '';
-        if (alloc.subActivityId) {
-          const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
-          const act = activities.find(a => a.id === sa?.activityId);
-          const sec = sectors.find(sec => sec.id === act?.sectorId);
-          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-          hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
-        } else if (alloc.activityId) {
-          const act = activities.find(a => a.id === alloc.activityId);
-          const sec = sectors.find(sec => sec.id === act?.sectorId);
-          const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-          hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
-        }
-
-        const key = `${hierarchy}-${soe.name}`;
-
-        if (!ledgerGroups[key]) {
-          ledgerGroups[key] = {
-            hierarchy,
-            soeName: soe.name,
-            totalAllocation: 0,
-            items: []
-          };
-        }
-
-        ledgerGroups[key].totalAllocation += f.amount;
-      });
-    });
-
-    // Now add expenditures
-    currentExpenses.forEach(exp => {
-      const alloc = filteredAllocations.find(a => a.id === exp.allocationId);
-      if (!alloc) return;
-      const soe = soes.find(s => s.id === exp.soeId);
-      if (!soe) return;
-
-      let hierarchy = '';
-      if (alloc.subActivityId) {
-        const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
-        const act = activities.find(a => a.id === sa?.activityId);
-        const sec = sectors.find(sec => sec.id === act?.sectorId);
-        const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-        hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' > ');
-      } else if (alloc.activityId) {
-        const act = activities.find(a => a.id === alloc.activityId);
-        const sec = sectors.find(sec => sec.id === act?.sectorId);
-        const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-        hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' > ');
-      }
-
-      const key = `${hierarchy}-${soe.name}`;
-
-      if (ledgerGroups[key]) {
-        ledgerGroups[key].items.push({
-          date: exp.date,
-          expenditure: exp.amount,
-          status: exp.status || 'pending'
-        });
-      }
-    });
-
-    // Sort groups
-    const sortedGroups = Object.values(ledgerGroups).sort((a, b) => a.hierarchy.localeCompare(b.hierarchy) || a.soeName.localeCompare(b.soeName));
-
-    return (
-      <div className="mt-10">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-          <h4 className="text-md font-bold text-gray-800 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-emerald-600" /> Scheme Wise Allocation and Expenditure Details
-          </h4>
-          <button
-            type="button"
-            onClick={downloadLedgerPDF}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
-            title="Download Scheme Wise Ledger as PDF"
-          >
-            <Download className="w-4 h-4" />
-            <span>Download Ledger PDF</span>
-          </button>
-        </div>
-        <div className="space-y-8">
-          {sortedGroups.map((group, gIdx) => {
-            // Sort items by date
-            const sortedItems = group.items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-            
-            let runningBalance = group.totalAllocation;
-            let totalExp = 0;
-
-            return (
-              <div key={gIdx} className="border border-gray-300 rounded-lg overflow-hidden">
-                <div className="bg-gray-100 p-3 border-b border-gray-300 flex justify-between items-center">
-                  <div className="font-bold text-gray-800">
-                    <span className="text-emerald-700">{group.soeName}</span> <span className="text-gray-500 font-normal text-sm">[{group.hierarchy}]</span>
-                  </div>
-                  <div className="font-bold text-blue-700">
-                    Total Allocation: â‚¹{group.totalAllocation.toLocaleString()}
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200 text-gray-600">
-                        <th className="p-2 border-r border-gray-200">S.No</th>
-                        <th className="p-2 border-r border-gray-200">Date</th>
-                        <th className="p-2 border-r border-gray-200 text-right">Allocation</th>
-                        <th className="p-2 border-r border-gray-200 text-right">Expenditure</th>
-                        <th className="p-2 border-r border-gray-200 text-center">Status</th>
-                        <th className="p-2 text-right">Balance</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* Row 1: Initialization */}
-                      <tr className="border-b border-gray-200">
-                        <td className="p-2 border-r border-gray-200 text-center">1</td>
-                        <td className="p-2 border-r border-gray-200 text-gray-500 italic">Allocation Date</td>
-                        <td className="p-2 border-r border-gray-200 text-right font-medium text-emerald-600">â‚¹{group.totalAllocation.toLocaleString()}</td>
-                        <td className="p-2 border-r border-gray-200 text-right text-gray-400">-</td>
-                        <td className="p-2 border-r border-gray-200 text-center text-gray-400">-</td>
-                        <td className="p-2 text-right font-bold text-blue-600">â‚¹{runningBalance.toLocaleString()}</td>
-                      </tr>
-                      {/* Row 2+: Expenditures */}
-                      {sortedItems.map((item, i) => {
-                        const isRejected = item.status === 'rejected';
-                        if (!isRejected) {
-                          runningBalance -= item.expenditure;
-                          totalExp += item.expenditure;
-                        }
-                        return (
-                          <tr key={i} className={`border-b border-gray-200 hover:bg-gray-50 ${isRejected ? 'opacity-50 grayscale' : ''}`}>
-                            <td className="p-2 border-r border-gray-200 text-center">{i + 2}</td>
-                            <td className="p-2 border-r border-gray-200">{item.date ? item.date.split('-').reverse().join('/') : ''}</td>
-                            <td className="p-2 border-r border-gray-200 text-right text-gray-400">-</td>
-                            <td className="p-2 border-r border-gray-200 text-right font-medium text-red-600">â‚¹{item.expenditure.toLocaleString()}</td>
-                            <td className="p-2 border-r border-gray-200 text-center">
-                              <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full ${
-                                item.status === 'approved' ? 'bg-green-100 text-green-800' : 
-                                item.status === 'rejected' ? 'bg-red-100 text-red-800' : 
-                                'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {item.status}
-                              </span>
-                            </td>
-                            <td className="p-2 text-right font-bold text-blue-600">â‚¹{runningBalance.toLocaleString()}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-gray-100 font-bold border-t-2 border-gray-300">
-                        <td colSpan={2} className="p-2 border-r border-gray-200 text-right">Total</td>
-                        <td className="p-2 border-r border-gray-200 text-right text-emerald-700">â‚¹{group.totalAllocation.toLocaleString()}</td>
-                        <td className="p-2 border-r border-gray-200 text-right text-red-700">â‚¹{totalExp.toLocaleString()}</td>
-                        <td className="p-2 border-r border-gray-200 text-center text-gray-400">-</td>
-                        <td className="p-2 text-right text-blue-700">â‚¹{runningBalance.toLocaleString()}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            );
-          })}
-          {sortedGroups.length === 0 && (
-            <div className="p-8 text-center text-gray-500 border border-gray-300 rounded-lg bg-gray-50">No allocation data available for ledger.</div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-emerald-50">
-        <div className="animate-pulse flex flex-col items-center">
-          <TreePine className="h-20 w-20 text-emerald-600 mb-4" />
-          <h2 className="text-xl font-semibold text-emerald-800">Forest Budget Control</h2>
-          <p className="text-emerald-600/70 mt-2">Loading your dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4 sm:p-6 relative">
-        {/* Top-side Refresh Button on Login Page */}
-        <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-10 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleForceAppRefresh}
-            disabled={isRefreshingApp}
-            title="Purge local cache and sync the latest version of the application"
-            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-emerald-50 text-emerald-800 hover:text-emerald-900 border border-emerald-200 hover:border-emerald-300 rounded-xl shadow-sm text-xs font-bold transition-all transform active:scale-95 cursor-pointer group disabled:opacity-60"
-          >
-            <RefreshCw className={`w-4 h-4 text-emerald-600 ${isRefreshingApp ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
-            <span>{isRefreshingApp ? 'Updating...' : 'Refresh App'}</span>
-          </button>
-        </div>
-
-        <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-100 max-w-md w-full text-center space-y-6">
-          <img src="/logo.png" alt="Forest Budget Logo" className="h-16 w-auto mx-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} />
-          <Landmark className="h-16 w-16 text-emerald-600 mx-auto hidden" />
-          <h1 className="text-3xl font-bold text-gray-900">Forest Budget Control</h1>
-          <p className="text-gray-500">Please sign in to access the financial management system.</p>
-          
-          <form onSubmit={handleLogin} className="space-y-4 text-left">
-            {loginError && <div className="p-3 bg-red-50 text-red-600 rounded text-sm">{loginError}</div>}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ID / Email</label>
-              <input 
-                type="text" 
-                required
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="e.g. DA123 or admin@email.com"
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input 
-                type="password" 
-                required
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex justify-between items-center">
-                <span>Financial Year (FY)</span>
-                <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">Select FY for Login</span>
-              </label>
-              <select
-                value={loginFY}
-                onChange={(e) => {
-                  setLoginFY(e.target.value);
-                  setSelectedFY(e.target.value);
-                }}
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-semibold text-gray-800 cursor-pointer shadow-sm"
-              >
-                {fyOptions.map(fyName => (
-                  <option key={fyName} value={fyName}>{fyName}</option>
-                ))}
-              </select>
-            </div>
-            
-            <div className="flex justify-between items-center text-xs font-semibold text-emerald-700">
-              <button 
-                type="button"
-                onClick={() => {
-                  if (!loginEmail) {
-                    setLoginError('Please enter your User ID or Email first.');
-                    return;
-                  }
-                  let emailToUse = loginEmail.trim();
-                  if (!emailToUse.includes('@')) {
-                    emailToUse = `${emailToUse}@rajgarhforest.app`;
-                  }
-                  handleResetPassword(emailToUse);
-                }}
-                className="hover:underline"
-              >
-                Forgot Password?
-              </button>
-            </div>
-
-            <button 
-              type="submit"
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02]"
-            >
-              Sign In
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  if (user && !userRole) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 text-center">
-        <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-100 max-w-md w-full space-y-4">
-          <Shield className="h-16 w-16 text-amber-500 mx-auto" />
-          <h2 className="text-2xl font-bold">Access Pending</h2>
-          <p className="text-gray-500">Your account ({user.email}) is registered but has no assigned role. Please contact an administrator to grant you access.</p>
-          <button onClick={handleLogout} className="text-emerald-600 font-semibold hover:underline">Sign Out</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans text-gray-800">
-      <div className="max-w-7xl mx-auto space-y-6 overflow-visible">
-        
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200">
-          <div 
-            className="flex items-center gap-2 md:gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => {
-              setActiveTab('Dashboard');
-              setSearchTerm('');
-              setEditingItem(null);
-              setIsFormExpanded(window.innerWidth > 1024);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          >
-            <img src="/logo.png" alt="Forest Budget Logo" className="h-8 md:h-10 w-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} />
-            <Landmark className="h-8 md:h-10 w-8 md:w-10 text-emerald-600 hidden" />
-            <div>
-              <h1 className="text-lg md:text-2xl font-bold text-gray-900 leading-tight">Forest Budget Control</h1>
-              <p className="text-[10px] md:text-sm text-gray-500">Financial Management System</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-between md:justify-end">
-            {isAdmin() ? (
-              <div className="flex items-center gap-1.5 bg-emerald-50 px-2 md:px-3 py-1.5 md:py-2 rounded-lg border border-emerald-100">
-                <span className="text-xs md:text-sm font-semibold text-emerald-800">FY:</span>
-                <select 
-                  value={selectedFY} 
-                  onChange={(e) => setSelectedFY(e.target.value)}
-                  className="bg-transparent border-none focus:ring-0 text-emerald-700 font-bold cursor-pointer text-xs md:text-sm"
-                >
-                  {fyOptions.map(fyName => <option key={fyName} value={fyName}>{fyName}</option>)}
-                </select>
-              </div>
-            ) : (
-              !isFyHiddenForUsers && (
-                <div className="flex items-center gap-1.5 bg-gray-100 px-2 md:px-3 py-1.5 md:py-2 rounded-lg border border-gray-200" title="Financial Year selected at login">
-                  <Lock className="w-3.5 h-3.5 text-gray-500" />
-                  <span className="text-xs md:text-sm font-semibold text-gray-600">FY:</span>
-                  <span className="text-xs md:text-sm font-bold text-gray-800">{selectedFY}</span>
-                </div>
-              )
-            )}
-
-            <div className="flex items-center gap-2 w-full md:w-auto">
-                {activeTab !== 'Dashboard' && (
-                  <div className="relative flex-1 md:flex-none">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-8 pr-3 py-1.5 text-xs md:text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-48 lg:w-64 bg-white shadow-sm"
-                    />
-                  </div>
-                )}
-              {userRole === 'admin' && currentSchemes.length === 0 && (
-                <button
-                  onClick={async () => {
-                    await preloadDatabase(selectedFY);
-                    showAlert('Preloaded data added successfully!');
-                  }}
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm text-sm"
-                >
-                  Load Preloaded Data
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={handleForceAppRefresh}
-                disabled={isRefreshingApp}
-                title="Purge local cache and sync the latest version of the application"
-                className="flex items-center gap-1.5 bg-gray-50 hover:bg-emerald-50 text-gray-700 hover:text-emerald-800 px-2.5 md:px-3 py-1.5 md:py-2 rounded-lg border border-gray-200 hover:border-emerald-300 font-semibold transition-all text-xs md:text-sm cursor-pointer shadow-xs group disabled:opacity-60"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-600 ${isRefreshingApp ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
-                <span className="hidden sm:inline">{isRefreshingApp ? 'Updating...' : 'Refresh'}</span>
-              </button>
-              {isInstallable && (
-                <button
-                  onClick={handleInstallClick}
-                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm text-sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Install
-                </button>
-              )}
-              <div className="flex items-center gap-2 bg-gray-50 px-2 md:px-3 py-1.5 rounded-lg border border-gray-200">
-                <div className="flex items-center gap-1.5 md:gap-2">
-                  <div className="bg-emerald-100 p-1 md:p-1.5 rounded-full">
-                    <User className="w-3 h-3 md:w-4 md:h-4 text-emerald-600" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs md:text-sm font-bold text-gray-800 leading-none truncate max-w-[80px] md:max-w-none">{user.displayName || user.email?.split('@')[0]}</span>
-                    <span className="text-[8px] md:text-[10px] font-medium text-gray-500 uppercase tracking-wider">{userRole}</span>
-                  </div>
-                </div>
-                <div className="w-px h-5 md:h-6 bg-gray-300 mx-0.5 md:mx-1"></div>
-                <button 
-                  onClick={handleLogout}
-                  className="flex items-center gap-1 text-gray-500 hover:text-red-600 transition-colors text-xs md:text-sm font-medium"
-                  title="Logout"
-                >
-                  <LogOut className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <div className="bg-gray-800 rounded-lg shadow-sm mb-6 sticky top-0 z-50 overflow-visible">
-          <div className="lg:hidden flex items-center justify-between p-4 border-b border-gray-700">
-            <span className="text-white font-medium">Menu: {activeTab}</span>
-            <button 
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2 text-gray-400 hover:text-white transition-colors"
-            >
-              <Menu className="w-6 h-6" />
-            </button>
-          </div>
-          
-          <div className={`${menuOpen ? 'grid' : 'hidden'} lg:flex grid-cols-2 sm:grid-cols-3 lg:flex-row flex-wrap gap-1 p-2 overflow-visible`}>
-            {menuItems.map((item) => {
-              if (!item.children) {
-                return (
-                  <button 
-                    key={item.name} 
-                    id={`tab-${item.name}`}
-                    onClick={() => {
-                      setActiveTab(item.name);
-                      setSearchTerm('');
-                      setEditingItem(null);
-                      setMenuOpen(false);
-                      setIsFormExpanded(window.innerWidth > 1024);
-                      setCurrentPage(1);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className={`px-3 py-2 text-xs sm:text-sm font-medium rounded transition-all text-left lg:text-center flex items-center gap-2 ${activeTab === item.name ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
-                  >
-                    {item.icon}
-                    <span className="truncate">{item.name}</span>
-                  </button>
-                );
-              } else {
-                const isActive = item.children.some(child => child.name === activeTab);
-                const isOpen = openDropdown === item.name;
-                return (
-                  <div 
-                    key={item.name}
-                    className={`relative group ${isOpen ? 'z-[60]' : 'z-10'} hover:z-[60]`}
-                    onMouseEnter={() => setOpenDropdown(item.name)}
-                    onMouseLeave={() => setOpenDropdown(null)}
-                  >
-                    <button 
-                      onClick={() => setOpenDropdown(isOpen ? null : item.name)}
-                      className={`px-3 py-2 text-xs sm:text-sm font-medium rounded transition-all text-left lg:text-center flex items-center gap-2 w-full ${isActive ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
-                    >
-                      {item.icon}
-                      <span className="truncate">{item.name}</span>
-                      <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    
-                    <div className={`absolute top-full left-0 bg-gray-800 border border-gray-700 rounded shadow-xl min-w-[180px] z-[100] ${isOpen ? 'block' : 'hidden'} group-hover:block`}>
-                      {item.children.map(child => (
-                        <button
-                          key={child.name}
-                          onClick={() => {
-                            setActiveTab(child.name);
-                            setSearchTerm('');
-                            setEditingItem(null);
-                            setMenuOpen(false);
-                            setOpenDropdown(null);
-                            setIsFormExpanded(window.innerWidth > 1024);
-                            setCurrentPage(1);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }}
-                          className={`w-full px-4 py-2.5 text-xs sm:text-sm font-medium text-left flex items-center gap-2 hover:bg-gray-700 transition-colors ${activeTab === child.name ? 'text-emerald-400 bg-gray-700/50' : 'text-gray-300'}`}
-                        >
-                          {child.icon}
-                          {child.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }
-            })}
-          </div>
-        </div>
-
-        {/* Tab Content */}
-        {activeTab === 'Dashboard' && renderDashboard()}
-        {(activeTab === 'Notifications' || activeTab === 'notifications') && renderNotificationsTab()}
-        
-        {/* Scroll to Top Button */}
-        {showScrollTop && (
-          <button
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="fixed bottom-8 right-8 bg-emerald-600 text-white p-3 rounded-full shadow-lg hover:bg-emerald-700 transition-all z-[60] animate-in fade-in zoom-in"
-            title="Scroll to Top"
-          >
-            <ChevronUp className="w-6 h-6" />
-          </button>
-        )}
-        
-        {activeTab === 'Financial Years' && renderSimpleManager(
-          'Financial Year', 
-          fys, 
-          [{key: 'name', label: 'Financial Year (e.g. 2025-26)'}], 
-          handleAddFy, 
-          (id) => handleDelete('financialYears', id), 
-          <input name="name" required defaultValue={editingItem?.type === 'Financial Year' ? editingItem.item.name : ''} placeholder="Financial Year (e.g. 2025-26)" className="w-full p-2 border rounded" />,
-          (item) => setEditingItem({ type: 'Financial Year', item })
-        )}
-
-        {activeTab === 'Ranges' && renderSimpleManager(
-          'Range', 
-          ranges, 
-          [{key: 'name', label: 'Range Name', render: (val) => val === 'Rajgarh Forest Division' ? 'Division' : val}], 
-          handleAddRange, 
-          (id) => handleDelete('ranges', id), 
-          <input name="name" required defaultValue={editingItem?.type === 'Range' ? editingItem.item.name : ''} placeholder="Range Name" className="w-full p-1.5 border rounded text-sm" />,
-          (item) => setEditingItem({ type: 'Range', item })
-        )}
-
-        {activeTab === 'Schemes' && renderSimpleManager(
-          'Scheme', 
-          schemes, 
-          [
-            {key: 'name', label: 'Scheme Name'}
-          ], 
-          handleAddScheme, 
-          (id) => handleDelete('schemes', id), 
-          <>
-            <input name="name" required defaultValue={editingItem?.type === 'Scheme' ? editingItem.item.name : ''} placeholder="Scheme Name" className="w-full p-1.5 border rounded text-sm" />
-          </>,
-          (item) => setEditingItem({ type: 'Scheme', item })
-        )}
-
-        {activeTab === 'Sectors' && renderSimpleManager(
-          'Sector', 
-          sectors, 
-          [
-            {key: 'schemeId', label: 'Scheme', 
-              searchableText: (val) => schemes.find(s => s.id === val)?.name || '',
-              render: (val) => schemes.find(s => s.id === val)?.name
-            },
-            {key: 'name', label: 'Sector Name'}
-          ], 
-          handleAddSector, 
-          (id) => handleDelete('sectors', id), 
-          <>
-            <div className="flex gap-2">
-              <select name="schemeId" required defaultValue={editingItem?.type === 'Sector' ? editingItem.item.schemeId : ''} className="w-full p-1.5 border rounded text-sm">
-                <option value="">Select Scheme</option>
-                {currentSchemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              <button type="button" onClick={() => document.getElementById('tab-Schemes')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Scheme">+</button>
-            </div>
-            <input name="name" required defaultValue={editingItem?.type === 'Sector' ? editingItem.item.name : ''} placeholder="Sector Name (e.g. CA, NPV)" className="w-full p-1.5 border rounded text-sm" />
-          </>,
-          (item) => setEditingItem({ type: 'Sector', item })
-        )}
-
-        {activeTab === 'Activities' && renderSimpleManager(
-          'Activity', 
-          activities, 
-          [
-            {key: 'parent', label: 'Scheme / Sector', 
-              searchableText: (_, item) => {
-                if (item.sectorId) {
-                  const sec = sectors.find(s => s.id === item.sectorId);
-                  const sch = schemes.find(s => s.id === sec?.schemeId);
-                  return `[${sch?.name}] ${sec?.name}`;
-                }
-                const sch = schemes.find(s => s.id === item.schemeId);
-                return sch?.name || '';
-              },
-              render: (_, item) => {
-              if (item.sectorId) {
-                const sec = sectors.find(s => s.id === item.sectorId);
-                const sch = schemes.find(s => s.id === sec?.schemeId);
-                return `[${sch?.name}] ${sec?.name}`;
-              } else {
-                const sch = schemes.find(s => s.id === item.schemeId);
-                return `[${sch?.name}] (Direct)`;
-              }
-            }},
-            {key: 'name', label: 'Activity Name'}
-          ], 
-          handleAddActivity, 
-          (id) => handleDelete('activities', id), 
-          <ActivityFormContent 
-            schemes={currentSchemes} 
-            sectors={currentSectors} 
-            editingItem={editingItem} 
-          />,
-          (item) => setEditingItem({ type: 'Activity', item }),
-          (item) => userRole === 'admin' || userRole === 'deo' || user?.email?.toLowerCase() === 'admin@rajgarhforest.app' || user?.email?.toLowerCase() === 'sharmaanuj860@gmail.com'
-        )}
-
-        {activeTab === 'Sub-Activities' && renderSimpleManager(
-          'Sub-Activity', 
-          subActivities, 
-          [
-            {key: 'activityId', label: 'Hierarchy', 
-              searchableText: (val) => {
-                const act = activities.find(a => a.id === val);
-                const sec = sectors.find(s => s.id === act?.sectorId);
-                const sch = schemes.find(s => s.id === (act?.schemeId || sec?.schemeId));
-                let text = '';
-                if (sch) text += `[${sch.name}] `;
-                if (sec) text += `${sec.name} > `;
-                if (act) text += act.name;
-                return text;
-              },
-              render: (val) => {
-                const act = activities.find(a => a.id === val);
-                const sec = sectors.find(s => s.id === act?.sectorId);
-                const sch = schemes.find(s => s.id === (act?.schemeId || sec?.schemeId));
-                return (
-                  <div className="text-xs text-gray-500">
-                    {sch && <div className="font-medium text-gray-700">{sch.name}</div>}
-                    {sec && <div>Sector: {sec.name}</div>}
-                    {act && <div>Activity: {act.name}</div>}
-                  </div>
-                );
-            }},
-            {key: 'name', label: 'Sub-Activity Name'}
-          ], 
-          handleAddSubActivity, 
-          (id) => handleDelete('subActivities', id), 
-          <CascadingDropdowns 
-            schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={currentExpenses}
-            editingItem={editingItem} type="Sub-Activity" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
-          >
-            <input name="name" required defaultValue={editingItem?.type === 'Sub-Activity' ? editingItem.item.name : ''} placeholder="Sub-Activity Name" className="w-full p-1.5 border rounded text-sm" />
-          </CascadingDropdowns>,
-          (item) => setEditingItem({ type: 'Sub-Activity', item }),
-          (item) => userRole === 'admin' || userRole === 'deo' || user?.email?.toLowerCase() === 'admin@rajgarhforest.app' || user?.email?.toLowerCase() === 'sharmaanuj860@gmail.com'
-        )}
-
-        {activeTab === 'SOE Heads' && renderSOEHeads()}
-        {activeTab === 'Allocations' && (
-          <div className="space-y-6">
-            {!userRangeId && renderBudgetTracker()}
-            {renderSimpleManager(
-              'Allocation', 
-              currentAllocations, 
-              [
-                {key: 'hierarchy', label: 'Hierarchy / Unit', render: (_, item) => {
-                  const r = ranges.find(r => r.id === item.rangeId);
-                  const hText = getHierarchyText(item);
-                  return (
-                    <div className="max-w-[180px]">
-                      <div className="font-bold text-gray-900 truncate leading-tight">{r?.name === 'Rajgarh Forest Division' ? 'Division' : r?.name}</div>
-                      <div className="text-[9px] text-gray-500 truncate" title={hText}>{hText}</div>
-                    </div>
-                  );
-                }, searchableText: (_, item) => getHierarchyText(item)},
-                {key: 'rangeId', label: 'Range', render: (val) => ranges.find(r => r.id === val)?.name, searchableText: (val) => ranges.find(r => r.id === val)?.name || ''},
-                {key: 'amount', label: 'Sanctioned Amount', render: (val, item) => (
-                  <div className="flex flex-col min-w-[80px]">
-                    <span className="font-bold text-gray-900">â‚¹{val.toLocaleString()}</span>
-                    <div className="mt-1 space-y-0.5 border-t pt-1">
-                      {item.fundedSOEs && item.fundedSOEs.length > 0 ? (
-                        item.fundedSOEs.map((f: any, idx: number) => {
-                          const s = soes.find(soe => soe.id === f.soeId);
-                          return (
-                            <div key={idx} className="text-[8px] text-gray-400 flex justify-between gap-1 leading-none">
-                              <span className="truncate max-w-[40px]">{s?.name || 'Unnamed'}:</span>
-                              <span>â‚¹{f.amount.toLocaleString()}</span>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-[8px] text-orange-400 italic">No SOE funding</div>
-                      )}
-                    </div>
-                  </div>
-                )},
-                {
-                  key: 'expenditure', 
-                  label: 'Expenditure', 
-                  render: (_, item) => {
-                    // Row-specific expenditure (only expenses linked to this specific allocation ID)
-                    const expenditure = baseExpenses
-                      .filter(e => e.allocationId === item.id && e.status !== 'rejected')
-                      .reduce((sum, e) => sum + e.amount, 0);
-                    return <span className="font-medium text-red-600">â‚¹{expenditure.toLocaleString()}</span>;
-                  }
-                },
-                {
-                  key: 'balance', 
-                  label: 'Net Balance', 
-                  render: (_, item) => {
-                    const expenditure = baseExpenses
-                      .filter(e => e.allocationId === item.id && e.status !== 'rejected')
-                      .reduce((sum, e) => sum + e.amount, 0);
-                    
-                    // Calculate surrenders for this specific allocation
-                    const surrendered = surrenders
-                      .filter(s => 
-                        s.rangeId === item.rangeId && 
-                        s.schemeId === item.schemeId &&
-                        (s.sectorId || '') === (item.sectorId || '') &&
-                        (s.activityId || '') === (item.activityId || '') &&
-                        (s.subActivityId || '') === (item.subActivityId || '')
-                      )
-                      .reduce((sum, s) => sum + s.amount, 0);
-
-                    const netSanctioned = item.amount - surrendered;
-                    const balance = netSanctioned - expenditure;
-                    
-                    return (
-                      <div className="flex flex-col">
-                        <span className={`font-bold ${balance < 0 ? 'text-red-700' : 'text-blue-700'}`}>â‚¹{balance.toLocaleString()}</span>
-                        <div className="flex flex-col text-[8px] text-gray-400 uppercase leading-tight">
-                          <span>Net: â‚¹{netSanctioned.toLocaleString()}</span>
-                          {surrendered > 0 && <span className="text-orange-500">Surr: â‚¹{surrendered.toLocaleString()}</span>}
-                        </div>
-                      </div>
-                    );
-                  }
-                },
-                {key: 'remarks', label: 'Description / Remarks', render: (val) => <div className="text-[10px] italic text-gray-500 max-w-[150px] whitespace-normal break-words" title={val}>{val || '-'}</div>},
-                {key: 'status', label: 'Funding Status', render: (val, item) => (
-                  <div className="flex flex-col">
-                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full w-fit ${val === 'Funded' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}>
-                      {val}
-                    </span>
-                    <div className="mt-1 space-y-1">
-                      {item.fundedSOEs && item.fundedSOEs.length > 0 ? (
-                        item.fundedSOEs.map((f: any, idx: number) => {
-                          const s = soes.find(soe => soe.id === f.soeId);
-                          return (
-                            <div key={idx} className="text-[10px] text-gray-500 flex justify-between gap-2">
-                              <span>{s?.name || 'Unnamed SOE'}:</span>
-                              <span className="font-medium">â‚¹{f.amount.toLocaleString()}</span>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-[10px] text-orange-400 italic">Pending funding assignment</div>
-                      )}
-                    </div>
-                  </div>
-                )},
-                {key: 'actions', label: 'Funding', render: (_, item) => (
-                  userRole === 'admin' && item.status === 'Pending SOE Funds' && (
-                    <button
-                      onClick={() => setFundingAllocation(item)}
-                      className="bg-emerald-600 text-white px-3 py-1 rounded text-xs hover:bg-emerald-700 transition-colors"
-                    >
-                      Assign SOE Funds
-                    </button>
-                  )
-                )}
-              ], 
-              handleAddAllocation, 
-              (id) => handleDelete('allocations', id), 
-              <CascadingDropdowns 
-                schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={currentExpenses}
-                editingItem={editingItem} type="Allocation" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
-                onSelectionChange={setAllocationFormFilters}
-              >
-                <input 
-                  name="amount" 
-                  type="number" 
-                  required 
-                  value={allocationAmount}
-                  onChange={(e) => setAllocationAmount(e.target.value)}
-                  placeholder="Amount (â‚¹)" 
-                  className={`w-full p-1.5 border rounded text-sm ${isAllocationInvalid ? 'border-red-500 bg-red-50' : ''}`} 
-                />
-                <div className="flex justify-between items-center px-1">
-                  <span className="text-[10px] text-gray-500 font-medium">
-                    Remaining Budget: â‚¹{allocationBudgetStatus.remaining.toLocaleString()}
-                  </span>
-                  {isAllocationInvalid && (
-                    <span className="text-[10px] text-red-600 font-bold animate-pulse">
-                      {allocationBudgetStatus.error || 'Amount exceeds available budget!'}
-                    </span>
-                  )}
-                </div>
-                <textarea name="remarks" defaultValue={editingItem?.type === 'Allocation' ? editingItem.item.remarks : ''} placeholder="Remarks / Description (Optional)" className="w-full p-1.5 border rounded text-sm" rows={2} />
-              </CascadingDropdowns>,
-              (item) => setEditingItem({ type: 'Allocation', item }),
-              (item) => isAdmin() || isDEO(),
-              null,
-              null,
-              isAllocationInvalid,
-              isAllocFilterExpanded,
-              setIsAllocFilterExpanded,
-              <>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
-                  <select 
-                    value={allocFilters.schemeId}
-                    onChange={(e) => { setAllocFilters({ ...allocFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: '', soeId: '' }); setCurrentPage(1); }}
-                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                  >
-                    <option value="">All Schemes</option>
-                    {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
-                  <select 
-                    value={allocFilters.sectorId}
-                    onChange={(e) => { setAllocFilters({ ...allocFilters, sectorId: e.target.value, activityId: '', subActivityId: '', soeId: '' }); setCurrentPage(1); }}
-                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                  >
-                    <option value="">All Sectors</option>
-                    {sectors.filter(s => !allocFilters.schemeId || s.schemeId === allocFilters.schemeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
-                  <select 
-                    value={allocFilters.activityId}
-                    onChange={(e) => { setAllocFilters({ ...allocFilters, activityId: e.target.value, subActivityId: '', soeId: '' }); setCurrentPage(1); }}
-                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                  >
-                    <option value="">All Activities</option>
-                    {activities.filter(a => {
-                      if (allocFilters.sectorId) return a.sectorId === allocFilters.sectorId;
-                      if (allocFilters.schemeId) return a.schemeId === allocFilters.schemeId || sectors.find(s => s.id === a.sectorId)?.schemeId === allocFilters.schemeId;
-                      return true;
-                    }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
-                  <select 
-                    value={allocFilters.subActivityId}
-                    onChange={(e) => { setAllocFilters({ ...allocFilters, subActivityId: e.target.value, soeId: '' }); setCurrentPage(1); }}
-                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                  >
-                    <option value="">All Sub-Activities</option>
-                    {subActivities.filter(sa => !allocFilters.activityId || sa.activityId === allocFilters.activityId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
-                  <select 
-                    value={allocFilters.rangeId}
-                    onChange={(e) => { setAllocFilters({ ...allocFilters, rangeId: e.target.value }); setCurrentPage(1); }}
-                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                  >
-                    <option value="">All Ranges</option>
-                    {ranges.map(s => <option key={s.id} value={s.id}>{s.name === 'Rajgarh Forest Division' ? 'Division' : s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE Head</label>
-                  <select 
-                    value={allocFilters.soeId}
-                    onChange={(e) => { setAllocFilters({ ...allocFilters, soeId: e.target.value }); setCurrentPage(1); }}
-                    className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                  >
-                    <option value="">All SOEs</option>
-                    {soes.filter(s => {
-                      if (allocFilters.subActivityId) return s.subActivityId === allocFilters.subActivityId;
-                      if (allocFilters.activityId) return s.activityId === allocFilters.activityId;
-                      if (allocFilters.sectorId) return s.sectorId === allocFilters.sectorId;
-                      if (allocFilters.schemeId) return s.schemeId === allocFilters.schemeId;
-                      return true;
-                    }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-              </>,
-              () => {
-                setAllocFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '', soeId: '' });
-                setSearchTerm('');
-              }
-            )}
-          </div>
-        )}
-
-        {activeTab === 'Expenditures' && (
-          <div className="space-y-4">
-            <div className="flex gap-4 mb-2 border-b pb-2">
-              <button 
-                onClick={() => setExpenditureSubTab('list')}
-                className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'list' ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Expenditure List
-                {expenditureSubTab === 'list' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
-              </button>
-              {(userRole === 'admin' || userRole === 'deo') && (
-                <button 
-                  onClick={() => setExpenditureSubTab('bills')}
-                  className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'bills' ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Bill Creation
-                  {expenditureSubTab === 'bills' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
-                </button>
-              )}
-              {(userRole === 'admin' || userRole === 'deo' || userRangeId) && (
-                <button 
-                  onClick={() => setExpenditureSubTab('payees')}
-                  className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'payees' ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Add Payee
-                  {expenditureSubTab === 'payees' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
-                </button>
-              )}
-              <button 
-                onClick={() => setExpenditureSubTab('memo')}
-                className={`pb-2 px-4 text-sm font-medium transition-colors relative ${expenditureSubTab === 'memo' ? 'text-emerald-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Memo for Fund
-                {expenditureSubTab === 'memo' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
-              </button>
-            </div>
-
-            {expenditureSubTab === 'list' && (
-              renderSimpleManager(
-                'Expenditure', 
-                currentExpenses, 
-                [
-                  {key: 'date', label: 'Date', render: (val) => val ? val.split('-').reverse().join('/') : ''},
-                  {key: 'payeeId', label: 'Payee Details', 
-                    searchableText: (val, item) => {
-                      const p = payees.find(p => p.id === val);
-                      return `${p?.name || item.payeeName || ''} ${p?.accountNumber || ''} ${p?.ifscCode || ''} ${p?.treasuryCode || ''}`;
-                    },
-                    render: (val, item) => {
-                      const p = payees.find(p => p.id === val);
-                      if (p) {
-                        return (
-                          <div className="flex flex-col gap-0.5 min-w-[150px]">
-                            <div className="font-bold text-emerald-800 leading-tight">{p.name}</div>
-                            <div className="flex items-center gap-2">
-                              {p.treasuryCode && (
-                                <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded border border-emerald-100">
-                                  {p.treasuryCode}
-                                </span>
-                              )}
-                              <div className="text-[9px] font-mono text-gray-500">
-                                {p.accountNumber} <span className="text-gray-400">({p.ifscCode})</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }
-                      if (item.payeeName) {
-                        return <div className="font-medium text-blue-700">{item.payeeName}</div>;
-                      }
-                      return <span className="text-gray-400 italic">No Payee</span>;
-                    }
-                  },
-                  {key: 'allocationId', label: 'Unit / Hierarchy / SOE', 
-                    searchableText: (val, item) => {
-                      const al = allocations.find(a => a.id === val);
-                      const r = ranges.find(r => r.id === al?.rangeId);
-                      const s = soes.find(s => s.id === item.soeId);
-                      const hierarchy = al ? getHierarchyText(al) : 'N/A';
-                      return `${hierarchy} ${r?.name} ${s?.name}`;
-                    },
-                    render: (val, item) => {
-                      const al = allocations.find(a => a.id === val);
-                      const r = ranges.find(r => r.id === al?.rangeId);
-                      const s = soes.find(s => s.id === item.soeId);
-                      const hierarchy = al ? getHierarchyText(al) : 'N/A';
-                      return (
-                        <div className="max-w-[180px]">
-                          <div className="font-bold text-gray-900 truncate leading-tight">{r?.name === 'Rajgarh Forest Division' ? 'Division' : r?.name} / {s?.name || 'N/A'}</div>
-                          <div className="text-[9px] text-gray-500 truncate" title={hierarchy}>{hierarchy}</div>
-                        </div>
-                      );
-                    }
-                  },
-                  {key: 'description', label: 'Description', render: (val, item) => (
-                    <div className="max-w-[200px] whitespace-normal break-words">
-                      <div className="text-xs italic text-gray-500">{val}</div>
-                      {item.syncedMemoNo && (
-                        <div className="mt-1 flex items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded text-[10px] font-bold">
-                            <RefreshCw className="w-3 h-3 text-emerald-600" /> Memo #{item.syncedMemoNo}
-                          </span>
-                          {userRole === 'admin' && (
-                            <button
-                              type="button"
-                              onClick={() => handleUnsyncExpense(item.id)}
-                              className="p-0.5 text-red-500 hover:bg-red-50 rounded cursor-pointer"
-                              title="Admin: Remove Memo Sync Link"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {item.approvalReason && (
-                        <div className="text-[10px] text-gray-400 italic mt-1 border-t pt-1">
-                          Action Reason: {item.approvalReason}
-                        </div>
-                      )}
-                    </div>
-                  )},
-                  {key: 'status', label: 'Status', render: (val) => {
-                    const colors = {
-                      pending: 'bg-yellow-100 text-yellow-800',
-                      approved: 'bg-green-100 text-green-800',
-                      rejected: 'bg-red-100 text-red-800'
-                    };
-                    return (
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${colors[val as keyof typeof colors] || 'bg-gray-100'}`}>
-                        {val || 'pending'}
-                      </span>
-                    );
-                  }},
-                  {key: 'approvalId', label: 'Approval ID', render: (val) => val ? `#${val}` : '-'},
-                  {key: 'isBilled', label: 'Billed', 
-                    searchableText: (_, item) => {
-                      const bill = bills.find(b => b.expenseIds.includes(item.id));
-                      return bill ? `Yes ${bill.billNo}` : 'No';
-                    },
-                    render: (_, item) => {
-                      const bill = bills.find(b => b.expenseIds.includes(item.id));
-                      if (!bill) {
-                        return (
-                          <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-gray-100 text-gray-800">
-                            No
-                          </span>
-                        );
-                      }
-                      return (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenBillQR(bill);
-                          }}
-                          className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                          title={`Bill #${bill.billNo} â€¢ Click to View QR Verification Pass`}
-                        >
-                          <QrCode className="w-3 h-3 text-emerald-600 shrink-0" />
-                          <span>{bill.billNo}</span>
-                        </button>
-                      );
-                    }
-                  },
-                  {key: 'amount', label: 'Amount', searchableText: (val) => String(val), render: (val, item) => {
-                    const totalAmt = Number(val) || 0;
-                    const tds = Math.round(item.tdsAmount || 0);
-                    const gstTds = Math.round(item.tdsGstAmount || 0);
-                    const totalDeducted = Math.round(item.deductedAmount || (tds + gstTds));
-                    const netPayable = Math.round(item.netAmount ?? (totalAmt - totalDeducted));
-
-                    if (totalDeducted > 0) {
-                      return (
-                        <div className="flex flex-col text-xs leading-tight min-w-[130px] space-y-0.5">
-                          <div className="flex justify-between items-center gap-2">
-                            <span className="text-[10px] text-gray-500 font-medium">Total:</span>
-                            <span className="font-bold text-gray-900">â‚¹{totalAmt.toLocaleString('en-IN')}</span>
-                          </div>
-                          {tds > 0 && (
-                            <div className="flex justify-between items-center gap-2 text-[10px] text-red-600">
-                              <span>TDS (1%):</span>
-                              <span className="font-semibold">-â‚¹{tds.toLocaleString('en-IN')}</span>
-                            </div>
-                          )}
-                          {gstTds > 0 && (
-                            <div className="flex justify-between items-center gap-2 text-[10px] text-purple-600">
-                              <span>TDS GST (2%):</span>
-                              <span className="font-semibold">-â‚¹{gstTds.toLocaleString('en-IN')}</span>
-                            </div>
-                          )}
-                          {tds === 0 && gstTds === 0 && (
-                            <div className="flex justify-between items-center gap-2 text-[10px] text-red-600">
-                              <span>TDS:</span>
-                              <span className="font-semibold">-â‚¹{totalDeducted.toLocaleString('en-IN')}</span>
-                            </div>
-                          )}
-                          <div className="flex justify-between items-center gap-2 border-t border-gray-200 pt-0.5 font-bold text-emerald-700">
-                            <span className="text-[10px]">Net to Pay:</span>
-                            <span>â‚¹{netPayable.toLocaleString('en-IN')}</span>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div className="flex flex-col">
-                        <span className="text-gray-900 font-bold">â‚¹{totalAmt.toLocaleString('en-IN')}</span>
-                      </div>
-                    );
-                  }},
-                  {key: 'updatedBy', label: 'Modified By', 
-                    searchableText: (val, item) => {
-                      const u = users.find(u => u.id === val || u.email === val);
-                      const creator = users.find(u => u.id === item.createdBy || u.email === item.createdBy);
-                      return `${u?.email || val || ''} ${creator?.email || item.createdBy || ''}`;
-                    },
-                    render: (val, item) => {
-                      const u = users.find(u => u.id === val || u.email === val);
-                      const creator = users.find(u => u.id === item.createdBy || u.email === item.createdBy);
-                      return (
-                        <div className="text-[9px] leading-tight">
-                          <div className="text-gray-400">Created: {creator?.email?.split('@')[0] || 'System'}</div>
-                          {val && val !== item.createdBy && (
-                            <div className="text-blue-500 font-medium">Edited: {u?.email?.split('@')[0] || 'System'}</div>
-                          )}
-                        </div>
-                      );
-                    }
-                  },
-                  {key: 'balance', label: 'Balance', 
-                    searchableText: (_, item) => {
-                      const alloc = allocations.find(a => a.id === item.allocationId);
-                      if (!alloc) return 'N/A';
-                      
-                      const soeName = soes.find(s => s.id === item.soeId)?.name;
-                      if (!soeName) return 'N/A';
-
-                      // Aggregate allocation for this hierarchy and SOE Name
-                      const totalAllocatedForSoe = baseAllocations.filter(a => 
-                        a.rangeId === alloc.rangeId &&
-                        a.schemeId === alloc.schemeId &&
-                        (a.sectorId || null) === (alloc.sectorId || null) &&
-                        (a.activityId || null) === (alloc.activityId || null) &&
-                        (a.subActivityId || null) === (alloc.subActivityId || null)
-                      ).reduce((sum, a) => {
-                        const funded = a.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === soeName);
-                        return sum + (funded?.amount || 0);
-                      }, 0);
-
-                      // Aggregate expenditure for this hierarchy and SOE Name
-                      const totalSpentForSoe = baseExpenses.filter(e => {
-                        const eAlloc = allocations.find(a => a.id === e.allocationId);
-                        const eSoeName = soes.find(s => s.id === e.soeId)?.name;
-                        return (
-                          eAlloc &&
-                          eAlloc.rangeId === alloc.rangeId &&
-                          eAlloc.schemeId === alloc.schemeId &&
-                          (eAlloc.sectorId || null) === (alloc.sectorId || null) &&
-                          (eAlloc.activityId || null) === (alloc.activityId || null) &&
-                          (eAlloc.subActivityId || null) === (alloc.subActivityId || null) &&
-                          eSoeName === soeName &&
-                          e.status !== 'rejected'
-                        );
-                      }).reduce((sum, e) => sum + e.amount, 0);
-
-                      return String(totalAllocatedForSoe - totalSpentForSoe);
-                    },
-                    render: (_, item) => {
-                      const alloc = allocations.find(a => a.id === item.allocationId);
-                      if (!alloc) return 'N/A';
-                      
-                      const soeName = soes.find(s => s.id === item.soeId)?.name;
-                      if (!soeName) return 'N/A';
-
-                      // Aggregate allocation for this hierarchy and SOE Name
-                      const totalAllocatedForSoe = baseAllocations.filter(a => 
-                        a.rangeId === alloc.rangeId &&
-                        a.schemeId === alloc.schemeId &&
-                        (a.sectorId || null) === (alloc.sectorId || null) &&
-                        (a.activityId || null) === (alloc.activityId || null) &&
-                        (a.subActivityId || null) === (alloc.subActivityId || null)
-                      ).reduce((sum, a) => {
-                        const funded = a.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === soeName);
-                        return sum + (funded?.amount || 0);
-                      }, 0);
-
-                      // Aggregate expenditure for this hierarchy and SOE Name
-                      const totalSpentForSoe = baseExpenses.filter(e => {
-                        const eAlloc = allocations.find(a => a.id === e.allocationId);
-                        const eSoeName = soes.find(s => s.id === e.soeId)?.name;
-                        return (
-                          eAlloc &&
-                          eAlloc.rangeId === alloc.rangeId &&
-                          eAlloc.schemeId === alloc.schemeId &&
-                          (eAlloc.sectorId || null) === (alloc.sectorId || null) &&
-                          (eAlloc.activityId || null) === (alloc.activityId || null) &&
-                          (eAlloc.subActivityId || null) === (alloc.subActivityId || null) &&
-                          eSoeName === soeName &&
-                          e.status !== 'rejected'
-                        );
-                      }).reduce((sum, e) => sum + e.amount, 0);
-
-                      const balance = totalAllocatedForSoe - totalSpentForSoe;
-                      return <span className={`font-bold ${balance < 0 ? 'text-red-700' : 'text-blue-700'}`}>â‚¹{balance.toLocaleString()}</span>;
-                    }
-                  }
-                ], 
-                handleAddExpense, 
-                (id) => handleDelete('expenditures', id), 
-                <CascadingDropdowns 
-                  schemes={currentSchemes} sectors={currentSectors} activities={currentActivities} subActivities={currentSubActivities} soes={currentSoes} soeBudgets={[]} allocations={baseAllocations} surrenders={surrenders} ranges={ranges} expenses={baseExpenses}
-                  editingItem={editingItem} type="Expenditure" userRangeId={userRangeId} userRole={userRole} showConfirm={showConfirm}
-                  onBalanceChange={setCurrentSoeBalance}
-                  onSelectionChange={setExpenseFormSelection}
-                >
-                  {isMemoSyncEnabled && !editingItem && (
-                    <div className="mb-3 p-2.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg flex items-center justify-between shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 bg-emerald-600 text-white rounded-md shadow-xs">
-                          <RefreshCw className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-emerald-950">Sync with Memo For Fund</div>
-                          <div className="text-[10px] text-emerald-800">
-                            {selectedSyncedMemo ? (
-                              <span className="font-bold text-emerald-900 bg-emerald-200/60 px-1.5 py-0.5 rounded">
-                                âœ“ Synced with Memo #{selectedSyncedMemo.memoNo}
-                              </span>
-                            ) : (
-                              'Import payee, amount & scheme directly from an issued Memo'
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {selectedSyncedMemo ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedSyncedMemo(null);
-                              setExpenseAmount('');
-                              setExpenseDescription('');
-                              setSelectedPayeesForExpense([]);
-                            }}
-                            className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-                          >
-                            <X className="w-3 h-3" /> Clear Sync
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setShowMemoSyncModal(true)}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs rounded-md font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" /> Sync Memo
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2 mt-2 border-t pt-2">
-                    {editingItem?.type === 'Expenditure' ? (
-                      <div className="space-y-2">
-                        <div className="space-y-1">
-                          <label className="block text-[10px] font-bold text-gray-500 uppercase">Payee</label>
-                          <select name="payeeId" defaultValue={editingItem.item.payeeId || ''} className="w-full p-2 border rounded text-sm">
-                            <option value="">Select Payee (Optional)</option>
-                            {filteredPayeesList.map((p, idx) => <option key={`exp-edit-p-${p.id}-${idx}`} value={p.id}>{p.name} ({p.accountNumber})</option>)}
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-[10px] font-bold text-gray-500 uppercase">Manual Payee Name</label>
-                          <input name="payeeName" type="text" defaultValue={editingItem.item.payeeName || ''} placeholder="Enter name if no payee selected" className="w-full p-2 border rounded text-sm" />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <PayeeSelector 
-                          payees={filteredPayeesList}
-                          selectedPayees={selectedPayeesForExpense}
-                          onSelect={(payeeId) => setSelectedPayeesForExpense([...selectedPayeesForExpense, { payeeId, amount: '' }])}
-                          onRemove={(payeeId) => setSelectedPayeesForExpense(selectedPayeesForExpense.filter(p => p.payeeId !== payeeId))}
-                          onAmountChange={(payeeId, amount) => {
-                            const updated = selectedPayeesForExpense.map(p => p.payeeId === payeeId ? { ...p, amount } : p);
-                            setSelectedPayeesForExpense(updated);
-                            
-                            // Auto-sync deduction checkboxes based on amounts entered
-                            const anyAbove30k = updated.some(p => (parseFloat(p.amount) || 0) > 30000);
-                            const anyAbove250k = updated.some(p => (parseFloat(p.amount) || 0) > 250000);
-                            
-                            setSelectedDeductions(prev => {
-                              const next = [...prev];
-                              if (anyAbove30k && !next.includes('TDS')) next.push('TDS');
-                              if (!anyAbove30k && next.includes('TDS')) {
-                                const idx = next.indexOf('TDS');
-                                if (idx !== -1) next.splice(idx, 1);
-                              }
-                              if (anyAbove250k && !next.includes('TDS_GST')) next.push('TDS_GST');
-                              if (!anyAbove250k && next.includes('TDS_GST')) {
-                                const idx = next.indexOf('TDS_GST');
-                                if (idx !== -1) next.splice(idx, 1);
-                              }
-                              return next;
-                            });
-                          }}
-                          ranges={ranges}
-                          availableBalance={currentSoeBalance}
-                          selectedDeductions={selectedDeductions}
-                          gstNumber={gstNumber}
-                        />
-                        {selectedPayeesForExpense.length === 0 && (
-                          <div className="space-y-1">
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Manual Payee Name</label>
-                            <input name="payeeName" type="text" placeholder="Enter name if no payee selected" className="w-full p-2 border rounded text-sm" />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Date</label>
-                        <input 
-                          name="date" 
-                          type="date" 
-                          max={new Date().toISOString().split('T')[0]} 
-                          required 
-                          value={expenseDate}
-                          onChange={(e) => setExpenseDate(e.target.value)}
-                          className="w-full p-2 border rounded text-sm" 
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase">Amount (â‚¹)</label>
-                        {selectedPayeesForExpense.length === 0 ? (
-                          <input 
-                            name="amount" 
-                            type="number" 
-                            required={editingItem?.type === 'Expenditure'} 
-                            value={expenseAmount}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setExpenseAmount(val);
-                              const num = parseFloat(val) || 0;
-                              setSelectedDeductions(prev => {
-                                const next = [...prev];
-                                if (num > 30000 && !next.includes('TDS')) next.push('TDS');
-                                if (num <= 30000 && next.includes('TDS')) {
-                                  const idx = next.indexOf('TDS');
-                                  if (idx !== -1) next.splice(idx, 1);
-                                }
-                                if (num > 250000 && !next.includes('TDS_GST')) next.push('TDS_GST');
-                                if (num <= 250000 && next.includes('TDS_GST')) {
-                                  const idx = next.indexOf('TDS_GST');
-                                  if (idx !== -1) next.splice(idx, 1);
-                                }
-                                return next;
-                              });
-                            }}
-                            placeholder="0.00" 
-                            className={`w-full p-2 border rounded text-sm ${isExpenseInvalid ? 'border-red-500 bg-red-50' : ''}`} 
-                          />
-                        ) : (
-                          <div className="p-2 bg-gray-50 border rounded text-sm text-gray-500 font-bold">
-                            â‚¹{selectedPayeesForExpense.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toLocaleString()}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Deductions (Optional)</label>
-                      <div className="flex flex-wrap gap-2">
-                        <label className="flex items-center gap-2 p-2 border rounded text-xs cursor-pointer hover:bg-gray-50">
-                          <input 
-                            type="checkbox" 
-                            checked={selectedDeductions.includes('TDS')}
-                            onChange={(e) => {
-                              if (e.target.checked) setSelectedDeductions([...selectedDeductions, 'TDS']);
-                              else setSelectedDeductions(selectedDeductions.filter(d => d !== 'TDS'));
-                            }}
-                          />
-                          <span>TDS (1% &gt; 30k)</span>
-                        </label>
-                        <label className="flex items-center gap-2 p-2 border rounded text-xs cursor-pointer hover:bg-gray-50">
-                          <input 
-                            type="checkbox" 
-                            checked={selectedDeductions.includes('TDS_GST')}
-                            onChange={(e) => {
-                              if (e.target.checked) setSelectedDeductions([...selectedDeductions, 'TDS_GST']);
-                              else setSelectedDeductions(selectedDeductions.filter(d => d !== 'TDS_GST'));
-                            }}
-                          />
-                          <span>TDS on GST (2% &gt; 250k)</span>
-                        </label>
-                      </div>
-
-                      {(selectedDeductions.length > 0) && (
-                        <div className="bg-blue-50 p-2 rounded border border-blue-100 space-y-2">
-                          <table className="w-full text-[10px]">
-                            <thead>
-                              <tr className="text-gray-500 uppercase font-bold border-b border-blue-200">
-                                <th className="text-left pb-1">Type</th>
-                                <th className="text-right pb-1">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(() => {
-                                let totalGross = 0;
-                                let totalTds = 0;
-                                let totalGstTds = 0;
-
-                                if (selectedPayeesForExpense.length > 0) {
-                                  selectedPayeesForExpense.forEach(sp => {
-                                    const p = payees.find(payee => payee.id === sp.payeeId);
-                                    const pAmt = parseFloat(sp.amount) || 0;
-                                    const pGst = p?.gstNumber || gstNumber;
-                                    totalGross += pAmt;
-                                    if (selectedDeductions.includes('TDS') && pAmt > 30000) {
-                                      totalTds += Math.round(pAmt * 0.01);
-                                    }
-                                    if (selectedDeductions.includes('TDS_GST') && pAmt > 250000) {
-                                      totalGstTds += Math.round(pAmt * 0.02);
-                                    }
-                                  });
-                                } else {
-                                  const amt = parseFloat(expenseAmount) || 0;
-                                  totalGross = amt;
-                                  const hasGst = Boolean(gstNumber && gstNumber.trim());
-                                  if (selectedDeductions.includes('TDS') && amt > 30000) {
-                                    totalTds = Math.round(amt * 0.01);
-                                  }
-                                  if (selectedDeductions.includes('TDS_GST') && amt > 250000) {
-                                    totalGstTds = Math.round(amt * 0.02);
-                                  }
-                                }
-
-                                totalGross = Math.round(totalGross);
-                                const totalDeduction = totalTds + totalGstTds;
-                                const netPayable = totalGross - totalDeduction;
-
-                                return (
-                                  <>
-                                    {selectedDeductions.includes('TDS') && (
-                                      <tr>
-                                        <td className="py-1">TDS (1% &gt; â‚¹30,000)</td>
-                                        <td className="py-1 text-right font-bold text-red-600">
-                                          â‚¹{totalTds.toLocaleString('en-IN')}
-                                        </td>
-                                      </tr>
-                                    )}
-                                    {selectedDeductions.includes('TDS_GST') && (
-                                      <tr>
-                                        <td className="py-1">TDS on GST (2% &gt; â‚¹2,50,000 + GSTIN)</td>
-                                        <td className="py-1 text-right font-bold text-purple-600">
-                                          â‚¹{totalGstTds.toLocaleString('en-IN')}
-                                        </td>
-                                      </tr>
-                                    )}
-                                    <tr className="border-t border-blue-200 font-bold text-blue-900">
-                                      <td className="pt-1">Total Deductions</td>
-                                      <td className="pt-1 text-right text-red-600">â‚¹{totalDeduction.toLocaleString('en-IN')}</td>
-                                    </tr>
-                                    <tr className="text-emerald-800 font-black">
-                                      <td className="pt-1">Net Amount to Pay (RTGS)</td>
-                                      <td className="pt-1 text-right text-sm">â‚¹{netPayable.toLocaleString('en-IN')}</td>
-                                    </tr>
-                                  </>
-                                );
-                              })()}
-                            </tbody>
-                          </table>
-                          
-                          <div className="grid grid-cols-2 gap-2">
-                            {selectedDeductions.includes('TDS') && (
-                              <div>
-                                <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">PAN Number</label>
-                                <input 
-                                  type="text" 
-                                  value={panNumber}
-                                  onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
-                                  placeholder="ABCDE1234F"
-                                  className="w-full p-1.5 border rounded text-xs"
-                                />
-                              </div>
-                            )}
-                            {selectedDeductions.includes('TDS_GST') && (
-                              <div>
-                                <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">GST Number</label>
-                                <input 
-                                  type="text" 
-                                  value={gstNumber}
-                                  onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
-                                  placeholder="22AAAAA0000A1Z5"
-                                  className="w-full p-1.5 border rounded text-xs"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Description / Remarks</label>
-                      <textarea 
-                        name="description" 
-                        required 
-                        value={expenseDescription}
-                        onChange={(e) => setExpenseDescription(e.target.value)}
-                        placeholder="Purpose of expenditure..." 
-                        className="w-full p-2 border rounded text-sm" 
-                        rows={2} 
-                      />
-                    </div>
-                  </div>
-                </CascadingDropdowns>,
-                (item) => setEditingItem({ type: 'Expenditure', item }),
-                undefined,
-                (userRole === 'admin' || userRole === 'DA' || userRole === 'approver') && (
-                  <div className="flex justify-end mb-2">
-                    <button
-                      onClick={handleResetUnbilledExpenses}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors shadow-sm"
-                      title="Reset all approved expenditures that are not part of any bill back to pending status"
-                    >
-                      <RefreshCcw className="w-3.5 h-3.5" />
-                      RESET UNBILLED APPROVED TO PENDING
-                    </button>
-                  </div>
-                ),
-                (item) => (
-                  <div className="flex gap-1">
-                    {item.status === 'pending' && (userRole === 'approver' || userRole === 'admin' || userRole === 'DA') && (
-                      <button 
-                        onClick={() => {
-                          setSelectedExpenseForApproval(item);
-                          setApprovalStatus('approved');
-                          setIsApprovalModalOpen(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 p-1 border border-blue-100 rounded bg-blue-50"
-                        title="Take Action"
-                      >
-                        <ShieldCheck className="w-4 h-4" />
-                      </button>
-                    )}
-                    {item.isLocked && (userRole === 'admin' || userRole === 'approver' || (userRole === 'DA' && item.status === 'approved' && !bills.some(b => b.expenseIds.includes(item.id)))) && (
-                      <button 
-                        onClick={() => {
-                          const isBilled = bills.some(b => b.expenseIds.includes(item.id));
-                          if (isBilled) {
-                            showAlert("This expenditure is already part of a bill and cannot be reset.");
-                            return;
-                          }
-                          showConfirm(item.status === 'approved' ? "Reset this approved expenditure to pending?" : "Unlock this expenditure?", () => handleUpdateExpenseStatus(item.id, item.status === 'approved' ? 'pending' : item.status, false));
-                        }}
-                        className="text-orange-600 hover:text-orange-800 p-1 border border-orange-100 rounded bg-orange-50"
-                        title={item.status === 'approved' ? "Reset to Pending" : "Unlock"}
-                      >
-                        <RefreshCcw className="w-4 h-4" />
-                      </button>
-                    )}
-                    {!item.isLocked && (userRole === 'admin' || userRole === 'approver') && item.status === 'approved' && (
-                      <button 
-                        onClick={() => handleUpdateExpenseStatus(item.id, 'approved', true)}
-                        className="text-gray-600 hover:text-gray-800 p-1 border border-gray-100 rounded bg-gray-50"
-                        title="Lock Expenditure"
-                      >
-                        <Lock className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ),
-                isExpenseInvalid,
-                isExpFilterExpanded,
-                setIsExpFilterExpanded,
-                <>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
-                    <select 
-                      value={expFilters.schemeId}
-                      onChange={(e) => setExpFilters({ ...expFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: '' })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Schemes</option>
-                      {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
-                    <select 
-                      value={expFilters.sectorId}
-                      onChange={(e) => setExpFilters({ ...expFilters, sectorId: e.target.value, activityId: '', subActivityId: '' })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Sectors</option>
-                      {sectors.filter(s => !expFilters.schemeId || s.schemeId === expFilters.schemeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
-                    <select 
-                      value={expFilters.activityId}
-                      onChange={(e) => setExpFilters({ ...expFilters, activityId: e.target.value, subActivityId: '' })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Activities</option>
-                      {activities.filter(a => {
-                        if (expFilters.sectorId) return a.sectorId === expFilters.sectorId;
-                        if (expFilters.schemeId) return a.schemeId === expFilters.schemeId || sectors.find(s => s.id === a.sectorId)?.schemeId === expFilters.schemeId;
-                        return true;
-                      }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
-                    <select 
-                      value={expFilters.subActivityId}
-                      onChange={(e) => setExpFilters({ ...expFilters, subActivityId: e.target.value })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Sub-Activities</option>
-                      {subActivities.filter(sa => !expFilters.activityId || sa.activityId === expFilters.activityId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
-                    <select 
-                      value={expFilters.rangeId}
-                      onChange={(e) => setExpFilters({ ...expFilters, rangeId: e.target.value })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Ranges</option>
-                      {ranges.map(s => <option key={s.id} value={s.id}>{s.name === 'Rajgarh Forest Division' ? 'Division' : s.name}</option>)}
-                    </select>
-                  </div>
-                </>,
-                () => {
-                  setExpFilters({ schemeId: '', sectorId: '', activityId: '', subActivityId: '', rangeId: '' });
-                  setSearchTerm('');
-                },
-                false,
-                null,
-                (item) => {
-                  const creator = users.find(u => u.id === item.createdBy);
-                  if (creator?.role === 'admin' || item.createdByRole === 'admin') return 'bg-green-50/50';
-                  if (creator?.role === 'deo' || item.createdByRole === 'deo') return 'bg-blue-50/50';
-                  return 'bg-white';
-                },
-                undefined,
-                undefined,
-                (item) => {
-                  if (userRole === 'admin') return true;
-                  if (item.isLocked) return false;
-                  
-                  if (userRole === 'deo') return true; // DEO can edit any unlocked entry (including admin's)
-                  
-                  // Regular users can only edit their own pending entries
-                  return item.createdBy === user?.uid && item.status === 'pending';
-                },
-                (item) => {
-                  if (userRole === 'admin') return true;
-                  if (item.isLocked) return false;
-                  if (item.status !== 'pending') return false; // Non-admins can only delete pending entries
-                  
-                  // DEO cannot delete admin entries
-                  if (item.createdByRole === 'admin') return false;
-                  
-                  if (userRole === 'deo') {
-                    // For old entries without role field, only allow if it's their own
-                    if (!item.createdByRole && item.createdBy !== user?.uid) return false;
-                    return true;
-                  }
-                  
-                  // Regular users can only delete their own pending entries
-                  return item.createdBy === user?.uid;
-                }
-              )
-            )}
-
-            {expenditureSubTab === 'bills' && (userRole === 'admin' || userRole === 'deo' || userRangeId) && (() => {
-              const billedExpenseIds = new Set(bills.flatMap(b => b.expenseIds));
-              const availableApprovedExpenses = expenses.filter(e => 
-                e.status === 'approved' && 
-                e.financialYear === selectedFY && 
-                !billedExpenseIds.has(e.id)
-              );
-              const firstSelectedExp = expenses.find(e => selectedExpensesForBill.includes(e.id));
-              const lockedSoeId = firstSelectedExp?.soeId;
-
-              const filteredForSoeList = availableApprovedExpenses.filter(e => {
-                const al = allocations.find(a => a.id === e.allocationId);
-                if (billExpFilters.rangeId && al?.rangeId !== billExpFilters.rangeId) return false;
-                if (billExpFilters.schemeId && al?.schemeId !== billExpFilters.schemeId) return false;
-                if (billExpFilters.sectorId && al?.sectorId !== billExpFilters.sectorId) return false;
-                if (billExpFilters.activityId && al?.activityId !== billExpFilters.activityId) return false;
-                if (billExpFilters.subActivityId && al?.subActivityId !== billExpFilters.subActivityId) return false;
-                return true;
-              });
-              const availableSoeIds = Array.from(new Set(filteredForSoeList.map(e => e.soeId)));
-              const availableSoesForBill = soes.filter(s => availableSoeIds.includes(s.id));
-
-              const filteredBills = bills.filter(b => {
-                const matchesBillNo = !billFilters.billNo || b.billNo.toLowerCase().includes(billFilters.billNo.toLowerCase());
-                
-                const firstExp = expenses.find(e => b.expenseIds.includes(e.id));
-                const al = allocations.find(a => a.id === firstExp?.allocationId);
-                const matchesRange = !billFilters.rangeId || al?.rangeId === billFilters.rangeId;
-                const matchesSoe = !billFilters.soeId || firstExp?.soeId === billFilters.soeId;
-                const matchesAmount = !billFilters.amount || b.totalAmount.toString().includes(billFilters.amount);
-
-                const matchesSearch = !billSearchTerm || (
-                  b.billNo.toLowerCase().includes(billSearchTerm.toLowerCase()) ||
-                  (b.remarks || '').toLowerCase().includes(billSearchTerm.toLowerCase())
-                );
-
-                return matchesBillNo && matchesRange && matchesSoe && matchesAmount && matchesSearch;
-              });
-
-              const isBillNoDuplicate = (billNo: string, currentId?: string) => {
-                return bills.some(b => b.billNo.toLowerCase() === billNo.toLowerCase() && b.id !== currentId);
-              };
-
-              return renderSimpleManager(
-                'Bill',
-                filteredBills,
-                [
-                  {key: 'billNo', label: 'Bill No', render: (val, item) => (
-                    <span className={`font-bold ${isBillNoDuplicate(val, item.id) ? 'text-red-600 bg-red-50 px-1 rounded' : 'text-emerald-700'}`}>
-                      {val}
-                    </span>
-                  )},
-                  {key: 'billDate', label: 'Bill Date', render: (val) => val ? val.split('-').reverse().join('/') : ''},
-                  {key: 'rangeId', label: 'Range', render: (_, item: Bill) => {
-                    const firstExp = expenses.find(e => item.expenseIds.includes(e.id));
-                    const al = allocations.find(a => a.id === firstExp?.allocationId);
-                    const r = ranges.find(r => r.id === al?.rangeId);
-                    return <span className="text-[10px] font-bold text-gray-600">{r?.name || 'N/A'}</span>
-                  }},
-                  {key: 'soeId', label: 'SOE', render: (_, item: Bill) => {
-                    const firstExp = expenses.find(e => item.expenseIds.includes(e.id));
-                    const s = soes.find(s => s.id === firstExp?.soeId);
-                    return <span className="text-[10px] font-bold text-gray-600">{s?.name || 'N/A'}</span>
-                  }},
-                  {key: 'expenseIds', label: 'Expenditures', render: (val: string[], item: Bill) => (
-                    <div className="space-y-1">
-                      <div className="text-[10px] text-gray-500 font-bold uppercase">{val.length} Entries</div>
-                      <div className="max-h-32 overflow-y-auto border rounded p-1 bg-gray-50 space-y-1">
-                        {val.map(id => {
-                          const exp = expenses.find(e => e.id === id);
-                          if (!exp) return null;
-                          const s = soes.find(s => s.id === exp.soeId);
-                          return (
-                            <div key={id} className="text-[9px] flex justify-between items-center bg-white p-1 rounded border border-gray-100">
-                              <span className="truncate flex-1">
-                                {exp.date ? exp.date.split('-').reverse().join('/') : 'N/A'} - {s?.name} - â‚¹{exp.amount.toLocaleString()}
-                              </span>
-                              {(userRole === 'admin' || (userRole === 'deo' && item.status === 'draft')) && (
-                                <button 
-                                  onClick={() => handleRemoveExpenseFromBill(item.id, id)}
-                                  className="text-red-500 hover:text-red-700 ml-1"
-                                  title="Remove from Bill"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )},
-                  {key: 'totalAmount', label: 'Total Amount', render: (val) => <span className="text-emerald-600 font-bold">â‚¹{val.toLocaleString()}</span>},
-                  {key: 'status', label: 'Status', render: (val) => (
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${val === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
-                      {val}
-                    </span>
-                  )},
-                  {key: 'qrVerify', label: 'QR Verify', render: (_, item: Bill) => (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenBillQR(item)}
-                      className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
-                      title="Generate & View QR Code for Mobile Verification"
-                    >
-                      <QrCode className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>QR Pass</span>
-                    </button>
-                  )}
-                ],
-                handleCreateBill,
-                (id) => handleDelete('bills', id),
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="relative">
-                      <input 
-                        name="billNo" 
-                        required 
-                        defaultValue={editingItem?.type === 'Bill' ? editingItem.item.billNo : ''} 
-                        placeholder="Bill Number (e.g. TRY-123)" 
-                        className={`w-full p-2 border rounded text-sm ${editingItem?.type === 'Bill' && isBillNoDuplicate(editingItem.item.billNo, editingItem.item.id) ? 'border-red-500 bg-red-50' : ''}`}
-                        onChange={(e) => {
-                          if (isBillNoDuplicate(e.target.value, editingItem?.item?.id)) {
-                            e.target.classList.add('border-red-500', 'bg-red-50');
-                          } else {
-                            e.target.classList.remove('border-red-500', 'bg-red-50');
-                          }
-                        }}
-                      />
-                      {editingItem?.type === 'Bill' && isBillNoDuplicate(editingItem.item.billNo, editingItem.item.id) && (
-                        <div className="text-[8px] text-red-600 font-bold mt-0.5">Duplicate Bill Number!</div>
-                      )}
-                    </div>
-                    <input name="billDate" type="date" required defaultValue={editingItem?.type === 'Bill' ? editingItem.item.billDate : new Date().toISOString().split('T')[0]} className="p-2 border rounded text-sm" />
-                  </div>
-                  <textarea name="remarks" defaultValue={editingItem?.type === 'Bill' ? editingItem.item.remarks : ''} placeholder="Remarks (optional)" className="w-full p-2 border rounded text-sm" rows={2} />
-                  
-                  <div className="mt-4 border-t pt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-xs font-bold text-gray-600 uppercase">Select Expenditures</label>
-                      <div className="flex gap-1">
-                        <select 
-                          value={billExpFilters.rangeId} 
-                          onChange={(e) => setBillExpFilters({...billExpFilters, rangeId: e.target.value, schemeId: '', sectorId: '', activityId: '', subActivityId: '', soeId: ''})}
-                          className="text-[10px] p-1 border rounded bg-white"
-                        >
-                          <option value="">All Ranges</option>
-                          {ranges.map(r => <option key={r.id} value={r.id}>{r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}</option>)}
-                        </select>
-                        <select 
-                          value={billExpFilters.soeId} 
-                          onChange={(e) => setBillExpFilters({...billExpFilters, soeId: e.target.value})}
-                          className="text-[10px] p-1 border rounded bg-white"
-                        >
-                          <option value="">All SOEs</option>
-                          {availableSoesForBill.filter(s => {
-                            if (!billExpFilters.rangeId) return true;
-                            return availableApprovedExpenses.some(e => {
-                              const al = allocations.find(a => a.id === e.allocationId);
-                              return al?.rangeId === billExpFilters.rangeId && e.soeId === s.id;
-                            });
-                          }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-1 mb-1">
-                      <select 
-                        value={billExpFilters.schemeId} 
-                        onChange={(e) => setBillExpFilters({...billExpFilters, schemeId: e.target.value, sectorId: '', activityId: '', subActivityId: ''})}
-                        className="text-[10px] p-1 border rounded bg-white"
-                      >
-                        <option value="">All Schemes</option>
-                        {schemes.filter(s => {
-                          if (!billExpFilters.rangeId) return true;
-                          return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.schemeId === s.id);
-                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                      <select 
-                        value={billExpFilters.sectorId} 
-                        onChange={(e) => setBillExpFilters({...billExpFilters, sectorId: e.target.value, activityId: '', subActivityId: ''})}
-                        className="text-[10px] p-1 border rounded bg-white"
-                      >
-                        <option value="">All Sectors</option>
-                        {sectors.filter(s => {
-                          if (billExpFilters.schemeId && s.schemeId !== billExpFilters.schemeId) return false;
-                          if (billExpFilters.rangeId) {
-                            return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.sectorId === s.id);
-                          }
-                          return true;
-                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1 mb-2">
-                      <select 
-                        value={billExpFilters.activityId} 
-                        onChange={(e) => setBillExpFilters({...billExpFilters, activityId: e.target.value, subActivityId: ''})}
-                        className="text-[10px] p-1 border rounded bg-white"
-                      >
-                        <option value="">All Activities</option>
-                        {activities.filter(a => {
-                          if (billExpFilters.sectorId && a.sectorId !== billExpFilters.sectorId) return false;
-                          if (billExpFilters.rangeId) {
-                            return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.activityId === a.id);
-                          }
-                          return true;
-                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                      <select 
-                        value={billExpFilters.subActivityId} 
-                        onChange={(e) => setBillExpFilters({...billExpFilters, subActivityId: e.target.value})}
-                        className="text-[10px] p-1 border rounded bg-white"
-                      >
-                        <option value="">All Sub-Activities</option>
-                        {subActivities.filter(sa => {
-                          if (billExpFilters.activityId && sa.activityId !== billExpFilters.activityId) return false;
-                          if (billExpFilters.rangeId) {
-                            return allocations.some(a => a.rangeId === billExpFilters.rangeId && a.subActivityId === sa.id);
-                          }
-                          return true;
-                        }).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </div>
-
-                    <div className={`${isBillFormFullScreen ? 'max-h-[60vh]' : 'max-h-60'} overflow-y-auto border rounded divide-y bg-gray-50 custom-scrollbar`}>
-                      {expenses
-                        .filter(e => e.status === 'approved' && e.financialYear === selectedFY)
-                        .filter(e => {
-                          const isAlreadyInBill = bills.some(b => b.expenseIds.includes(e.id) && b.id !== editingItem?.item?.id);
-                          if (isAlreadyInBill) return false;
-                          
-                          // SOE Restriction
-                          if (lockedSoeId && e.soeId !== lockedSoeId) return false;
-
-                          const al = allocations.find(a => a.id === e.allocationId);
-                          if (billExpFilters.rangeId && al?.rangeId !== billExpFilters.rangeId) return false;
-                          if (billExpFilters.soeId && e.soeId !== billExpFilters.soeId) return false;
-                          if (billExpFilters.schemeId && al?.schemeId !== billExpFilters.schemeId) return false;
-                          if (billExpFilters.sectorId && al?.sectorId !== billExpFilters.sectorId) return false;
-                          if (billExpFilters.activityId && al?.activityId !== billExpFilters.activityId) return false;
-                          if (billExpFilters.subActivityId && al?.subActivityId !== billExpFilters.subActivityId) return false;
-                          
-                          return true;
-                        })
-                        .map(exp => {
-                          const s = soes.find(s => s.id === exp.soeId);
-                          const al = allocations.find(a => a.id === exp.allocationId);
-                          const r = ranges.find(r => r.id === al?.rangeId);
-                          const isSelected = selectedExpensesForBill.includes(exp.id);
-                          
-                          let hierarchy = '';
-                          if (al?.subActivityId) {
-                            const sa = subActivities.find(sa => sa.id === al.subActivityId);
-                            const act = activities.find(a => a.id === sa?.activityId);
-                            const sec = sectors.find(sec => sec.id === act?.sectorId);
-                            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-                            hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
-                          } else if (al?.activityId) {
-                            const act = activities.find(a => a.id === al.activityId);
-                            const sec = sectors.find(sec => sec.id === act?.sectorId);
-                            const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-                            hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
-                          }
-
-                          return (
-                            <div 
-                              key={exp.id} 
-                              onClick={() => {
-                                setSelectedExpensesForBill(prev => 
-                                  prev.includes(exp.id) ? prev.filter(id => id !== exp.id) : [...prev, exp.id]
-                                );
-                              }}
-                              className={`p-2 text-[10px] cursor-pointer transition-colors flex items-start gap-2 ${isSelected ? 'bg-emerald-50 border-l-2 border-emerald-500' : 'hover:bg-white'}`}
-                            >
-                              <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-gray-300'}`}>
-                                {isSelected && <Check className="w-3 h-3" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-start mb-1">
-                                  <span className="font-bold text-gray-900">{exp.date ? exp.date.split('-').reverse().join('/') : 'N/A'}</span>
-                                  <span className="font-bold text-emerald-600">â‚¹{exp.amount.toLocaleString()}</span>
-                                </div>
-                                <div className="text-gray-600 font-medium mb-1">Range: {r?.name} | SOE: {s?.name}</div>
-                                <div className="text-gray-500 text-[9px] mb-1 italic">{hierarchy}</div>
-                                <div className="text-gray-400 truncate">{exp.description}</div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      {expenses.filter(e => e.status === 'approved' && e.financialYear === selectedFY).length === 0 && (
-                        <div className="p-4 text-center text-gray-500 italic text-xs">No approved expenditures available.</div>
-                      )}
-                    </div>
-                    <div className="mt-2 p-2 bg-gray-50 rounded flex justify-between items-center">
-                      <span className="text-[10px] font-bold text-gray-600 uppercase">
-                        {selectedExpensesForBill.length} Selected
-                      </span>
-                      <span className="text-xs font-bold text-emerald-700">
-                        Total: â‚¹{expenses.filter(e => selectedExpensesForBill.includes(e.id)).reduce((sum, e) => sum + e.amount, 0).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>,
-                (item) => {
-                  setEditingItem({ type: 'Bill', item });
-                  setSelectedExpensesForBill(item.expenseIds);
-                },
-                (item) => isAdmin() || (isDEO() && item.status === 'draft') || (userRangeId && item.rangeId === userRangeId && item.status === 'draft'),
-                (
-                  <div className="bg-gradient-to-r from-emerald-900 to-teal-900 rounded-2xl p-4 text-white shadow-md border border-emerald-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 bg-emerald-800/80 border border-emerald-600/50 rounded-xl text-emerald-200 shrink-0">
-                        <QrCode className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                          <span>Mobile QR Code Verification System</span>
-                          <span className="text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Field Ready</span>
-                        </h4>
-                        <p className="text-xs text-emerald-100/80 mt-0.5">
-                          Every treasury bill includes a secure QR code on PDFs and verification passes. Field officers can scan on any smartphone to verify official status, SOE, and items without manual entry.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                      <div className="relative flex-1 sm:w-56">
-                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-300" />
-                        <input
-                          type="text"
-                          placeholder="Verify Bill No or ID..."
-                          value={verifySearchInput}
-                          onChange={(e) => setVerifySearchInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && verifySearchInput.trim()) {
-                              setVerifyingBillId(verifySearchInput.trim());
-                              setVerifySearchInput('');
-                            }
-                          }}
-                          className="w-full pl-8 pr-3 py-1.5 bg-emerald-950/60 border border-emerald-700/60 rounded-xl text-xs text-white placeholder-emerald-300/60 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (verifySearchInput.trim()) {
-                            setVerifyingBillId(verifySearchInput.trim());
-                            setVerifySearchInput('');
-                          } else if (filteredBills.length > 0) {
-                            handleOpenBillQR(filteredBills[0]);
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
-                      >
-                        <Scan className="w-3.5 h-3.5" />
-                        <span>Verify</span>
-                      </button>
-                    </div>
-                  </div>
-                ),
-                (item) => (
-                  <div className="flex gap-1 items-center">
-                    <button 
-                      type="button"
-                      onClick={() => handleOpenBillQR(item)}
-                      className="p-1 border border-emerald-300 rounded text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors"
-                      title="Generate & View QR Code for Mobile Verification"
-                    >
-                      <QrCode className="w-4 h-4" />
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => handleViewBill(item)}
-                      className="p-1 border border-gray-200 rounded text-emerald-600 hover:bg-emerald-50 transition-colors"
-                      title="View Bill PDF"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => handleDownloadBill(item)}
-                      className="p-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50 transition-colors"
-                      title="Download Bill PDF"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
-                    {(userRole === 'admin' || userRole === 'deo' || (userRangeId && item.rangeId === userRangeId)) && (
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          const newStatus = item.status === 'draft' ? 'finalized' : 'draft';
-                          updateDoc(doc(db, 'bills', item.id), { status: newStatus, updatedAt: Date.now() });
-                        }}
-                        className={`p-1 border rounded transition-colors ${item.status === 'finalized' ? 'text-blue-600 border-blue-100 bg-blue-50' : 'text-emerald-600 border-emerald-100 bg-emerald-50'}`}
-                        title={item.status === 'finalized' ? 'Mark as Draft' : 'Finalize Bill'}
-                      >
-                        {item.status === 'finalized' ? <RefreshCcw className="w-4 h-4" /> : <Check className="w-4 h-4" />}
-                      </button>
-                    )}
-                  </div>
-                ),
-                false,
-                isExpFilterExpanded,
-                setIsExpFilterExpanded,
-                <>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
-                    <select 
-                      value={billFilters.rangeId}
-                      onChange={(e) => setBillFilters({ ...billFilters, rangeId: e.target.value })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Ranges</option>
-                      {ranges.map(r => <option key={r.id} value={r.id}>{r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Bill Number</label>
-                    <input 
-                      type="text"
-                      value={billFilters.billNo}
-                      onChange={(e) => setBillFilters({ ...billFilters, billNo: e.target.value })}
-                      placeholder="Search Bill No..."
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE Head</label>
-                    <select 
-                      value={billFilters.soeId}
-                      onChange={(e) => setBillFilters({ ...billFilters, soeId: e.target.value })}
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All SOEs</option>
-                      {soes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Amount</label>
-                    <input 
-                      type="text"
-                      value={billFilters.amount}
-                      onChange={(e) => setBillFilters({ ...billFilters, amount: e.target.value })}
-                      placeholder="Search Amount..."
-                      className="w-full p-1.5 border border-gray-300 rounded text-xs bg-white"
-                    />
-                  </div>
-                </>,
-                () => setBillFilters({ billNo: '', rangeId: '', soeId: '', amount: '' }),
-                isBillFormFullScreen,
-                setIsBillFormFullScreen,
-                undefined,
-                billSearchTerm,
-                setBillSearchTerm
-              )
-            })()}
-
-            {expenditureSubTab === 'payees' && (userRole === 'admin' || userRole === 'deo' || userRole === 'approver' || userRole === 'DA' || userRangeId) && (
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm gap-3">
-                  <div>
-                    <h3 className="text-base font-bold text-gray-800">Payee Directory & Account Exports</h3>
-                    <p className="text-xs text-gray-500">Download payee account, IFSC code, PAN, and GST details for your logged-in range/role.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowPayeePrintModal(true)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
-                    >
-                      <Printer className="w-4 h-4" /> Print / Preview
-                    </button>
-                    <button
-                      type="button"
-                      onClick={downloadPayeesPDF}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" /> Export PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={downloadPayeesWord}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
-                    >
-                      <FileText className="w-4 h-4" /> Export Word (.doc)
-                    </button>
-                  </div>
-                </div>
-
-                {renderSimpleManager(
-                  'Payee',
-                  filteredPayeesList,
-                  [
-                    { key: 'name', label: 'Name', searchableText: (val) => val },
-                    { key: 'address', label: 'Address', searchableText: (val) => val },
-                    { 
-                      key: 'accountNumber', 
-                      label: 'Bank Account Details', 
-                      searchableText: (val, item) => `${val} ${item.ifscCode}`,
-                      render: (val, item) => (
-                        <div className="flex flex-col gap-0.5">
-                          <div className="font-mono font-bold text-gray-900">{val}</div>
-                          <div className="font-mono text-[10px] text-gray-500">{item.ifscCode || 'No IFSC'}</div>
-                        </div>
-                      )
-                    },
-                    { 
-                      key: 'treasuryCode', 
-                      label: 'Try Code', 
-                      searchableText: (val) => val || 'N/A', 
-                      render: (val) => val ? (
-                        <span className="font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px]">
-                          {val}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400 italic text-[11px]">Not Assigned</span>
-                      )
-                    },
-                    { key: 'panNumber', label: 'PAN Number', searchableText: (val) => val || 'N/A', render: (val) => val || <span className="text-gray-400 italic">N/A</span> },
-                    { key: 'gstNumber', label: 'GST Number', searchableText: (val) => val || 'N/A', render: (val) => val || <span className="text-gray-400 italic">N/A</span> },
-                    { 
-                      key: 'rangeId', 
-                      label: 'Range', 
-                      searchableText: (val) => ranges.find(r => r.id === val)?.name || 'N/A',
-                      render: (val) => ranges.find(r => r.id === val)?.name || <span className="text-gray-400 italic">Not Specified</span>
-                    }
-                  ],
-                  handleAddPayee,
-                  (id) => handleDelete('payees', id),
-                  <>
-                    <input name="name" type="text" required defaultValue={editingItem?.type === 'Payee' ? editingItem.item.name : ''} placeholder="Payee Name" className="w-full p-2 border rounded text-sm" />
-                    <input name="address" type="text" required defaultValue={editingItem?.type === 'Payee' ? editingItem.item.address : ''} placeholder="Address" className="w-full p-2 border rounded text-sm" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input name="accountNumber" type="text" required defaultValue={editingItem?.type === 'Payee' ? editingItem.item.accountNumber : ''} placeholder="Account Number" className="w-full p-2 border rounded text-sm font-mono" />
-                      <input name="ifscCode" type="text" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.ifscCode : ''} placeholder="IFSC Code" className="w-full p-2 border rounded text-sm font-mono" />
-                    </div>
-                    {(isAdmin() || isDEO()) && (
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-emerald-800 uppercase">
-                          Treasury Code / Try Code (DEO & Admin Only)
-                        </label>
-                        <input 
-                          name="treasuryCode" 
-                          type="text" 
-                          defaultValue={editingItem?.type === 'Payee' ? (editingItem.item.treasuryCode || '') : ''} 
-                          placeholder="e.g. TRY-109284" 
-                          className="w-full p-2 border border-emerald-300 bg-emerald-50/40 rounded text-sm font-mono text-emerald-950 focus:ring-2 focus:ring-emerald-500" 
-                        />
-                      </div>
-                    )}
-                    <input name="panNumber" type="text" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.panNumber : ''} placeholder="PAN Number (Optional)" className="w-full p-2 border rounded text-sm font-mono uppercase" />
-                    <input name="gstNumber" type="text" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.gstNumber : ''} placeholder="GST Number (Optional)" className="w-full p-2 border rounded text-sm font-mono uppercase" />
-                    {(isAdmin() || isDEO()) ? (
-                      <select name="rangeId" defaultValue={editingItem?.type === 'Payee' ? editingItem.item.rangeId : ''} className="w-full p-2 border rounded text-sm">
-                        <option value="">Select Range (Optional)</option>
-                        {ranges.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
-                    ) : (
-                      <input type="hidden" name="rangeId" value={userRangeId || ''} />
-                    )}
-                  </>,
-                  (item) => setEditingItem({ type: 'Payee', item }),
-                  (item) => isAdmin() || isDEO() || (userRangeId && item.rangeId === userRangeId),
-                  undefined,
-                  (item) => (
-                    <div className="flex items-center gap-1.5">
-                      {(isAdmin() || isDEO()) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTreasuryCodeModalPayee(item);
-                            setTreasuryCodeInput(item.treasuryCode || '');
-                          }}
-                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold border border-emerald-200 flex items-center gap-1 transition-colors cursor-pointer"
-                          title="Add / Update Treasury Portal ID"
-                        >
-                          <Building2 className="w-3 h-3" />
-                          <span>{item.treasuryCode ? 'Edit Treasury Code' : '+ Treasury Code'}</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedMemoPayeeId(item.id);
-                          setExpenditureSubTab('memo');
-                        }}
-                        className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[10px] font-bold border border-blue-200 flex items-center gap-1 transition-colors cursor-pointer"
-                        title="Generate Memo for Fund for this Payee"
-                      >
-                        <FileText className="w-3 h-3" />
-                        <span>Memo</span>
-                      </button>
-                    </div>
-                  ),
-                  false,
-                  undefined,
-                  undefined,
-                  undefined,
-                  undefined,
-                  undefined,
-                  undefined,
-                  undefined,
-                  payeeSearchTerm,
-                  setPayeeSearchTerm
-                )}
-              </div>
-            )}
-
-            {expenditureSubTab === 'memo' && (
-              <div className="space-y-8">
-                {isMemoLockedForUser && (
-                  <div className="bg-amber-50 border-2 border-amber-300 p-5 rounded-2xl flex items-center gap-4 shadow-sm">
-                    <div className="p-3 bg-amber-100 text-amber-800 rounded-xl">
-                      <Lock className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-amber-950 text-sm">Memo For Fund Module is Locked</h4>
-                      <p className="text-xs text-amber-800">
-                        Creation and editing of Memo for Fund entries has been locked for {userRangeName || 'your role'} by the Division Administrator.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Header Banner */}
-                <div className="no-print bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-emerald-600" />
-                      Memo for Fund Generator & Register
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Create, edit, and lock formal Memo for Fund letters for multiple payees (10, 20+ payees per memo) with income tax deduction calculations.
-                    </p>
-                  </div>
-                  {editingMemo && (
-                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
-                      <span className="text-xs font-bold text-amber-800">
-                        Editing Memo No. {editingMemo.memoNo} ({editingMemo.status})
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleResetMemoForm}
-                        className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded text-xs font-bold"
-                      >
-                        Cancel Editing
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Main 2-Column Grid: Memo Form + Side Table */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  {/* Left Panel: Memo Creation Form (7 cols) */}
-                  <div className="lg:col-span-7 bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-6">
-                    <div className="border-b pb-3 flex justify-between items-center">
-                      <h4 className="text-sm font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
-                        <PlusCircle className="w-4 h-4 text-emerald-600" />
-                        {editingMemo ? '1. Edit Memo Details' : '1. Create New Memo for Fund'}
-                      </h4>
-                      <span className="text-xs text-gray-400 font-medium">* Required fields</span>
-                    </div>
-
-                    {/* Duplicate / Copied Memo Banner */}
-                    {copiedFromMemoInfo && (
-                      <div className="p-4 bg-emerald-50/90 rounded-xl border-2 border-emerald-300 text-xs shadow-xs space-y-2 animate-in fade-in">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 font-black text-emerald-950">
-                            <Copy className="w-4 h-4 text-emerald-700 shrink-0" />
-                            <span>Duplicated from Memo #{copiedFromMemoInfo.memoNo}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleResetMemoForm}
-                            className="text-[11px] text-emerald-800 hover:text-emerald-950 font-bold underline cursor-pointer"
-                          >
-                            Discard Duplicate
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-emerald-900 font-medium leading-relaxed">
-                          This is a new editable draft with next sequential <strong>Memo #{memoNoInput}</strong>. All payees from Memo #{copiedFromMemoInfo.memoNo} are pre-populated. You can adjust amounts, delete unwanted payees, or add new payees before saving or submitting.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Pulled Back Banner if editing a pulled back memo */}
-                    {editingMemo && editingMemo.pulledBack && (
-                      <div className="p-4 bg-orange-50/90 rounded-xl border-2 border-orange-300 text-xs shadow-xs space-y-2 animate-in fade-in">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 font-black text-orange-950">
-                            <Undo2 className="w-4 h-4 text-orange-700 shrink-0" />
-                            <span>Memo Pulled Back to Draft {editingMemo.pulledBackBy ? `by ${editingMemo.pulledBackBy}` : ''}</span>
-                          </div>
-                          {editingMemo.pulledBackAt && (
-                            <span className="text-[10px] text-orange-800 font-bold bg-orange-200/70 px-2 py-0.5 rounded">
-                              {new Date(editingMemo.pulledBackAt).toLocaleDateString('en-GB')}
-                            </span>
-                          )}
-                        </div>
-                        {editingMemo.pullBackRemarks && (
-                          <div className="p-2.5 bg-white/95 rounded-lg border border-orange-300 text-orange-950 font-semibold text-[11px] leading-relaxed shadow-2xs">
-                            Reason: "{editingMemo.pullBackRemarks}"
-                          </div>
-                        )}
-                        <p className="text-[11px] text-orange-800 font-medium">
-                          You can now modify payees or amounts and click <strong>"Submit & Lock Memo"</strong> once ready.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Correction Remarks Banner if editing a returned memo */}
-                    {editingMemo && (editingMemo.status === 'correction' || editingMemo.correctionRemarks) && (
-                      <div className="p-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 rounded-xl border-2 border-amber-300 text-xs shadow-xs space-y-2 animate-in fade-in">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 font-black text-amber-950">
-                            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-                            <span>Correction Remarks from {editingMemo.correctionRemarksBy || 'Admin / DEO'}:</span>
-                          </div>
-                          {editingMemo.correctionRemarksAt && (
-                            <span className="text-[10px] text-amber-800 font-bold bg-amber-200/70 px-2 py-0.5 rounded">
-                              Returned: {new Date(editingMemo.correctionRemarksAt).toLocaleDateString('en-GB')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="p-3 bg-white/95 rounded-lg border border-amber-300 text-amber-950 font-semibold leading-relaxed shadow-2xs whitespace-pre-wrap">
-                          "{editingMemo.correctionRemarks || editingMemo.remarks}"
-                        </div>
-                        <p className="text-[11px] text-amber-800 font-medium flex items-center gap-1.5">
-                          <CheckCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                          <span>Make the necessary corrections to payees, amounts, or SOE heads below, then click <strong>"Submit & Lock Memo"</strong> to re-submit.</span>
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Step 1: Letter Header Configuration */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200 text-xs">
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700">
-                          Memo Ref Number <span className="text-gray-400 font-normal">(Auto-generated)</span>
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={memoNoInput}
-                          className="w-full p-2 border border-gray-300 rounded-lg font-mono bg-gray-100 font-bold text-gray-700 cursor-not-allowed outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700">
-                          Memo Date <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="date"
-                          value={memoDateInput}
-                          onChange={(e) => setMemoDateInput(e.target.value)}
-                          className="w-full p-2 border border-gray-300 rounded-lg font-mono bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700">
-                          For Month / Period <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={memoMonthYearInput}
-                          onChange={(e) => setMemoMonthYearInput(e.target.value)}
-                          placeholder="e.g. August 2026 or 08/2026"
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700">Select Scheme</label>
-                        <select
-                          value={memoSchemeIdInput}
-                          onChange={(e) => {
-                            setMemoSchemeIdInput(e.target.value);
-                            setMemoSectorIdInput('');
-                            setMemoSoeIdInput('');
-                          }}
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
-                        >
-                          <option value="">-- All / Select Scheme --</option>
-                          {currentSchemes.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700">Select Sector (Optional)</label>
-                        <select
-                          value={memoSectorIdInput}
-                          onChange={(e) => {
-                            setMemoSectorIdInput(e.target.value);
-                            setMemoSoeIdInput('');
-                          }}
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
-                        >
-                          <option value="">-- All Sectors --</option>
-                          {currentSectors
-                            .filter(sec => !memoSchemeIdInput || sec.schemeId === memoSchemeIdInput)
-                            .map(sec => (
-                              <option key={sec.id} value={sec.id}>{sec.name}</option>
-                            ))
-                          }
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700 flex items-center justify-between">
-                          <span>Select SOE Head</span>
-                          <span className="text-gray-400 font-normal text-[10px]">(Allotted heads only)</span>
-                        </label>
-                        <select
-                          value={memoSoeIdInput}
-                          onChange={(e) => setMemoSoeIdInput(e.target.value)}
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
-                        >
-                          <option value="">-- All / Select SOE (Optional) --</option>
-                          {memoAvailableSoes.length === 0 ? (
-                            <option disabled value="">No SOE heads have budget allotted for selected Scheme/Sector</option>
-                          ) : (
-                            memoAvailableSoes.map(s => (
-                              <option key={s.id} value={s.id}>
-                                {s.name} â€” SOE Funding: â‚¹{s.allocatedAmount.toLocaleString('en-IN')} | Spent: â‚¹{s.spentAmount.toLocaleString('en-IN')} | Remaining: â‚¹{s.availableAmount.toLocaleString('en-IN')}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block font-bold text-gray-700 flex items-center justify-between">
-                          <span>From Authority</span>
-                          <span className="text-gray-400 font-normal text-[10px]">
-                            {userRole === 'admin' || userRole === 'deo' ? '(Select Range)' : '(Auto-locked)'}
-                          </span>
-                        </label>
-                        {userRole === 'admin' || userRole === 'deo' ? (
-                          <select
-                            value={memoFromInput}
-                            onChange={(e) => setMemoFromInput(e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded-lg bg-white font-bold text-gray-800 focus:ring-2 focus:ring-emerald-500 outline-none"
-                          >
-                            <option value="RFO Sarahan">RFO Sarahan (SRH)</option>
-                            <option value="RFO Narag">RFO Narag (NRG)</option>
-                            <option value="RFO Habban">RFO Habban (HBN)</option>
-                            <option value="RFO Rajgarh">RFO Rajgarh (RJG)</option>
-                            <option value="Division Office">Division Office (DIV)</option>
-                          </select>
-                        ) : (
-                          <input
-                            type="text"
-                            readOnly
-                            value={memoFromInput}
-                            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 font-bold text-gray-800 cursor-not-allowed outline-none"
-                          />
-                        )}
-                      </div>
-
-                      <div className="sm:col-span-2 space-y-1">
-                        <label className="block font-bold text-gray-700">To (Authority)</label>
-                        <input
-                          type="text"
-                          value={memoToInput}
-                          onChange={(e) => setMemoToInput(e.target.value)}
-                          placeholder="DCF Rajgarh"
-                          className="w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-gray-900"
-                        />
-                      </div>
-
-                      {/* Live Budget Allocation Monitor for Memo for Fund */}
-                      {memoBudgetInfo.allocatedBudget > 0 && (
-                        <div className="sm:col-span-2 mt-1 p-3 rounded-xl border transition-all text-xs bg-slate-50 border-slate-200 shadow-sm">
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2 mb-2">
-                            <div className="flex flex-wrap items-center gap-1.5 font-bold text-gray-800">
-                              <DollarSign className="w-4 h-4 text-emerald-600" />
-                              <span>SOE Budget:</span>
-                              <span className="text-emerald-950 bg-emerald-100/80 px-2 py-0.5 rounded text-[11px] font-extrabold">
-                                {memoSoeIdInput ? (soes.find(s => s.id === memoSoeIdInput)?.name || 'Selected SOE') : (memoSectorIdInput ? 'Selected Sector' : 'Selected Scheme')}
-                              </span>
-                              <span className="text-emerald-900 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
-                                SOE Funding: â‚¹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')} | Spent: â‚¹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')} | Remaining: â‚¹{memoBudgetInfo.availableBudget.toLocaleString('en-IN')}
-                              </span>
-                            </div>
-                            {memoBudgetInfo.isExceeded ? (
-                              <span className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
-                                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                                Budget Exceeded by â‚¹{(memoBudgetInfo.currentMemoTotal - memoBudgetInfo.availableBudget).toLocaleString('en-IN')}
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                Within Budget (â‚¹{memoBudgetInfo.remainingAfterMemo.toLocaleString('en-IN')} balance remaining)
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                            <div className="bg-white p-2 rounded-lg border border-slate-200">
-                              <span className="text-[10px] text-gray-500 block font-semibold">SOE Funding</span>
-                              <span className="font-extrabold text-gray-900 text-xs">â‚¹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')}</span>
-                            </div>
-                            <div className="bg-white p-2 rounded-lg border border-slate-200">
-                              <span className="text-[10px] text-gray-500 block font-semibold">Spent</span>
-                              <span className="font-extrabold text-amber-900 text-xs">â‚¹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')}</span>
-                            </div>
-                            <div className="bg-white p-2 rounded-lg border border-slate-200">
-                              <span className="text-[10px] text-gray-500 block font-semibold">Remaining</span>
-                              <span className="font-extrabold text-blue-900 text-xs">â‚¹{memoBudgetInfo.availableBudget.toLocaleString('en-IN')}</span>
-                            </div>
-                            <div className={`p-2 rounded-lg border ${memoBudgetInfo.isExceeded ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-300'}`}>
-                              <span className="text-[10px] text-gray-500 block font-semibold">Current Memo Total</span>
-                              <span className={`font-black text-xs ${memoBudgetInfo.isExceeded ? 'text-red-700' : 'text-emerald-950'}`}>
-                                â‚¹{memoBudgetInfo.currentMemoTotal.toLocaleString('en-IN')}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Step 2: Payee Row Input Section */}
-                    <div className="border-t pt-4 space-y-3">
-                      <div className="flex justify-between items-center">
-                        <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-1.5">
-                          <Users className="w-4 h-4 text-emerald-600" />
-                          2. Add Payee to Memo ({memoPayeeEntries.length} Payees Added)
-                        </h4>
-                        {editingEntryIndex !== null && (
-                          <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                            Editing Row #{editingEntryIndex + 1}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Live SOE Budget Meter directly above Payee Details */}
-                      {memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && (
-                        <div className={`p-3 rounded-xl border transition-all text-xs shadow-sm ${
-                          memoBudgetInfo.isTypingExceeded 
-                            ? 'bg-red-50/95 border-red-300 ring-2 ring-red-400' 
-                            : 'bg-gradient-to-r from-slate-50 via-emerald-50/40 to-slate-50 border-emerald-200'
-                        }`}>
-                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-gray-200">
-                            <div className="flex flex-wrap items-center gap-1.5 font-bold text-gray-800">
-                              <DollarSign className="w-4 h-4 text-emerald-600" />
-                              <span>Live SOE Budget Meter:</span>
-                              <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-extrabold text-[11px]">
-                                {soes.find(s => s.id === memoSoeIdInput)?.name || 'Selected SOE'}
-                              </span>
-                              <span className="text-emerald-900 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
-                                SOE Funding: â‚¹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')} | Spent: â‚¹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')} | Remaining: â‚¹{memoBudgetInfo.availableBudget.toLocaleString('en-IN')}
-                              </span>
-                            </div>
-                            {memoBudgetInfo.isTypingExceeded ? (
-                              <span className="px-2.5 py-1 rounded-md text-[11px] font-black bg-red-600 text-white flex items-center gap-1 shadow-sm animate-pulse">
-                                <AlertTriangle className="w-3.5 h-3.5" />
-                                Budget Exhausted! Over limit by â‚¹{(-memoBudgetInfo.liveRemainingAfterTyping).toLocaleString('en-IN')}
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1">
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-700" />
-                                Max Available for This Payee: â‚¹{memoBudgetInfo.availableForCurrentPayee.toLocaleString('en-IN')}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-                            <div className="bg-white/90 p-2 rounded-lg border border-gray-200">
-                              <span className="text-[10px] text-gray-500 block font-semibold">SOE Funding</span>
-                              <span className="font-extrabold text-gray-900 text-xs">â‚¹{memoBudgetInfo.allocatedBudget.toLocaleString('en-IN')}</span>
-                            </div>
-                            <div className="bg-white/90 p-2 rounded-lg border border-gray-200">
-                              <span className="text-[10px] text-gray-500 block font-semibold">Spent (Actuals)</span>
-                              <span className="font-extrabold text-amber-900 text-xs">â‚¹{memoBudgetInfo.totalSpent.toLocaleString('en-IN')}</span>
-                            </div>
-                            <div className="bg-white/90 p-2 rounded-lg border border-gray-200">
-                              <span className="text-[10px] text-gray-500 block font-semibold">Other Payees in Memo</span>
-                              <span className="font-extrabold text-indigo-900 text-xs">â‚¹{memoBudgetInfo.memoTotalWithoutEditingRow.toLocaleString('en-IN')}</span>
-                            </div>
-                            <div className={`p-2 rounded-lg border font-bold ${
-                              memoBudgetInfo.liveRemainingAfterTyping < 0 
-                                ? 'bg-red-100 border-red-300 text-red-900' 
-                                : 'bg-emerald-100 border-emerald-300 text-emerald-950'
-                            }`}>
-                              <span className="text-[10px] text-gray-600 block font-semibold">Live Remaining Balance</span>
-                              <span className="font-black text-xs">
-                                {memoBudgetInfo.liveRemainingAfterTyping < 0 ? '-' : ''}â‚¹{Math.abs(memoBudgetInfo.liveRemainingAfterTyping).toLocaleString('en-IN')}
-                              </span>
-                            </div>
-                          </div>
-
-                          {memoBudgetInfo.isTypingExceeded && (
-                            <div className="mt-2.5 p-2 bg-red-100/90 border border-red-300 rounded-lg text-red-800 text-[11px] font-bold flex items-center gap-2">
-                              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
-                              <span>
-                                Cannot add payee: Amount â‚¹{memoBudgetInfo.typedAmount.toLocaleString('en-IN')} exceeds remaining available SOE balance of â‚¹{Math.max(0, memoBudgetInfo.availableForCurrentPayee).toLocaleString('en-IN')} by â‚¹{(-memoBudgetInfo.liveRemainingAfterTyping).toLocaleString('en-IN')}.
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Option to choose payee already added with Instant Search Results List */}
-                      <div className="bg-gradient-to-r from-emerald-50/70 via-slate-50 to-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2.5 text-xs shadow-xs">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                          <label className="font-bold text-emerald-950 flex items-center gap-1.5 text-xs">
-                            <Search className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>Quick Search & Select Payee from Directory</span>
-                            <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                              {filteredPayeesList.length} Registered Payees
-                            </span>
-                          </label>
-                          <div className="flex items-center gap-2">
-                            {filteredPayeesList.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setShowMemoPayeeDropdown(!showMemoPayeeDropdown)}
-                                className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer bg-white px-2 py-0.5 rounded border border-emerald-200 shadow-2xs hover:bg-emerald-50 transition-colors"
-                              >
-                                {showMemoPayeeDropdown ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                <span>{showMemoPayeeDropdown ? 'Hide Directory List' : 'Browse All Payees'}</span>
-                              </button>
-                            )}
-                            {entryPayeeId && (
-                              <button
-                                type="button"
-                                onClick={() => handleSelectPayeeForMemoEntry('')}
-                                className="text-[11px] font-bold text-red-600 hover:text-red-800 flex items-center gap-1 hover:underline cursor-pointer"
-                              >
-                                <X className="w-3 h-3" /> Clear / Custom Payee
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Search Input Box */}
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={memoPayeeSearchTerm}
-                            onChange={(e) => {
-                              setMemoPayeeSearchTerm(e.target.value);
-                              if (!showMemoPayeeDropdown && e.target.value.trim().length > 0) {
-                                setShowMemoPayeeDropdown(true);
-                              }
-                            }}
-                            onFocus={() => {
-                              if (filteredPayeesList.length > 0) {
-                                setShowMemoPayeeDropdown(true);
-                              }
-                            }}
-                            placeholder="Type to search: e.g. Laxmi, Account No, IFSC, Try Code, PAN, Range..."
-                            className="w-full pl-8 pr-8 py-2 border border-emerald-300 rounded-lg bg-white text-xs font-semibold text-gray-900 focus:ring-2 focus:ring-emerald-500 outline-none shadow-xs placeholder:font-normal placeholder:text-gray-400"
-                          />
-                          <Search className="w-4 h-4 text-emerald-600 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          {memoPayeeSearchTerm && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setMemoPayeeSearchTerm('');
-                              }}
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-0.5"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Instant Search Results / Directory List (Shown when typing or browsing) */}
-                        {(showMemoPayeeDropdown || memoPayeeSearchTerm.trim().length > 0) && (
-                          <div className="bg-white rounded-xl border border-emerald-300 shadow-md overflow-hidden animate-in fade-in duration-150">
-                            <div className="p-2 bg-emerald-900 text-white flex items-center justify-between text-[11px] font-bold">
-                              <span className="flex items-center gap-1.5">
-                                <Users className="w-3.5 h-3.5 text-emerald-400" />
-                                {memoPayeeSearchTerm.trim() 
-                                  ? `Search Results for "${memoPayeeSearchTerm}" (${searchedMemoPayees.length} found)`
-                                  : `Select Payee from Registered Directory (${searchedMemoPayees.length})`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setShowMemoPayeeDropdown(false)}
-                                className="text-emerald-200 hover:text-white text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer"
-                              >
-                                <X className="w-3 h-3" /> Close
-                              </button>
-                            </div>
-
-                            <div className="max-h-56 overflow-y-auto divide-y divide-gray-100 text-xs">
-                              {searchedMemoPayees.length === 0 ? (
-                                <div className="p-4 text-center text-gray-500 space-y-1">
-                                  <p className="font-semibold text-gray-700">No payee found matching "{memoPayeeSearchTerm}"</p>
-                                  <p className="text-[11px] text-gray-400">You can enter custom payee details manually in the form fields below.</p>
-                                </div>
-                              ) : (
-                                searchedMemoPayees.map((p) => {
-                                  const isSelected = entryPayeeId === p.id;
-                                  const pRangeName = ranges.find(r => r.id === p.rangeId)?.name;
-                                  return (
-                                    <div
-                                      key={`search-payee-${p.id}`}
-                                      onClick={() => handleSelectPayeeForMemoEntry(p.id)}
-                                      className={`p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-emerald-50 cursor-pointer transition-colors ${
-                                        isSelected ? 'bg-emerald-100/70 font-semibold' : ''
-                                      }`}
-                                    >
-                                      <div className="space-y-0.5 flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <span className="font-bold text-gray-900 text-xs">{p.name}</span>
-                                          {p.treasuryCode && (
-                                            <span className="px-1.5 py-0.2 bg-emerald-50 text-emerald-800 text-[10px] font-mono font-bold rounded border border-emerald-200">
-                                              Try: {p.treasuryCode}
-                                            </span>
-                                          )}
-                                          {pRangeName && (
-                                            <span className="px-1.5 py-0.2 bg-blue-50 text-blue-800 text-[10px] font-medium rounded border border-blue-200">
-                                              Range: {pRangeName}
-                                            </span>
-                                          )}
-                                          {isSelected && (
-                                            <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[10px] font-bold rounded flex items-center gap-0.5">
-                                              <Check className="w-2.5 h-2.5" /> Selected
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center gap-2 text-[11px] text-gray-600 font-mono flex-wrap">
-                                          <span>A/C: <strong className="text-gray-900">{p.accountNumber}</strong></span>
-                                          <span>â€¢</span>
-                                          <span>IFSC: <strong className="text-gray-900">{p.ifscCode || 'N/A'}</strong></span>
-                                          {p.panNumber && (
-                                            <>
-                                              <span>â€¢</span>
-                                              <span>PAN: <strong className="text-gray-900">{p.panNumber}</strong></span>
-                                            </>
-                                          )}
-                                        </div>
-                                        {p.address && (
-                                          <div className="text-[10px] text-gray-500 truncate">
-                                            Address: {p.address}
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleSelectPayeeForMemoEntry(p.id);
-                                        }}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                                          isSelected
-                                            ? 'bg-emerald-700 text-white shadow-xs'
-                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                                        }`}
-                                      >
-                                        <Check className="w-3 h-3" />
-                                        <span>{isSelected ? 'Selected' : 'Select Payee'}</span>
-                                      </button>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Notice if locked */}
-                        {entryPayeeId && (
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-amber-50/90 border border-amber-200 rounded-lg text-amber-900 text-[11px] font-medium animate-in fade-in">
-                            <div className="flex items-start sm:items-center gap-1.5">
-                              <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
-                              <span>
-                                <strong>Master Payee Details Locked:</strong> Bank details for <strong>{entryName}</strong> (A/C: <span className="font-mono">{entryAccountNo}</span>) are locked to ensure correctness.
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleSelectPayeeForMemoEntry('')}
-                              className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded-md font-bold text-[10px] shrink-0 transition-colors self-start sm:self-auto cursor-pointer"
-                            >
-                              Change / Unlock
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Individual Payee Entry Inputs */}
-                      <form onSubmit={handleAddOrUpdatePayeeEntry} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs">
-                        <div className="space-y-1">
-                          <label className="block font-bold text-gray-700 flex items-center gap-1">
-                            <span>Payee Name</span>
-                            <span className="text-red-500">*</span>
-                            {entryPayeeId && (
-                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5">
-                                <Lock className="w-2.5 h-2.5" /> Locked
-                              </span>
-                            )}
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            readOnly={Boolean(entryPayeeId)}
-                            value={entryName}
-                            onChange={(e) => setEntryName(e.target.value)}
-                            placeholder="e.g. Hemant Kumar"
-                            className={`w-full p-2 border rounded-lg outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block font-bold text-gray-700 flex items-center gap-1">
-                            <span>Address / Remarks</span>
-                            {entryPayeeId && (
-                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5">
-                                <Lock className="w-2.5 h-2.5" /> Locked
-                              </span>
-                            )}
-                          </label>
-                          <input
-                            type="text"
-                            readOnly={Boolean(entryPayeeId)}
-                            value={entryAddress}
-                            onChange={(e) => setEntryAddress(e.target.value)}
-                            placeholder="e.g. Sarahan"
-                            className={`w-full p-2 border rounded-lg outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider flex items-center gap-1">
-                            <span>Account No & IFSC Code</span>
-                            <span className="text-red-500">*</span>
-                            {entryPayeeId && (
-                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5 normal-case">
-                                <Lock className="w-2.5 h-2.5" /> Locked
-                              </span>
-                            )}
-                          </label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              required
-                              readOnly={Boolean(entryPayeeId)}
-                              value={entryAccountNo}
-                              onChange={(e) => setEntryAccountNo(e.target.value)}
-                              placeholder="Account No"
-                              className={`w-full p-2 border rounded-lg font-mono outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
-                            />
-                            <input
-                              type="text"
-                              required
-                              readOnly={Boolean(entryPayeeId)}
-                              value={entryIfsc}
-                              onChange={(e) => setEntryIfsc(e.target.value)}
-                              placeholder="IFSC Code"
-                              className={`w-full p-2 border rounded-lg font-mono outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider flex items-center gap-1">
-                            <span>Try Code / PAN Number</span>
-                            {entryPayeeId && (
-                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5 normal-case">
-                                <Lock className="w-2.5 h-2.5" /> Locked
-                              </span>
-                            )}
-                          </label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              readOnly={Boolean(entryPayeeId)}
-                              value={entryTreasuryCode}
-                              onChange={(e) => setEntryTreasuryCode(e.target.value)}
-                              placeholder="Try Code"
-                              className={`w-full p-2 border rounded-lg font-mono outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-emerald-50/50 border-emerald-200 focus:ring-2 focus:ring-emerald-500'}`}
-                            />
-                            <input
-                              type="text"
-                              readOnly={Boolean(entryPayeeId)}
-                              value={entryPan}
-                              onChange={(e) => setEntryPan(e.target.value.toUpperCase())}
-                              placeholder="PAN Number"
-                              className={`w-full p-2 border rounded-lg font-mono uppercase outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1 sm:col-span-2">
-                          <label className="block font-bold text-gray-700 uppercase text-[9px] tracking-wider flex items-center gap-1">
-                            <span>GST Number (Optional)</span>
-                            {entryPayeeId && (
-                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-200 inline-flex items-center gap-0.5 normal-case">
-                                <Lock className="w-2.5 h-2.5" /> Locked
-                              </span>
-                            )}
-                          </label>
-                          <input
-                            type="text"
-                            readOnly={Boolean(entryPayeeId)}
-                            value={entryGst}
-                            onChange={(e) => setEntryGst(e.target.value.toUpperCase())}
-                            placeholder="e.g. 02ABCDE1234F1Z5"
-                            className={`w-full p-2 border rounded-lg font-mono uppercase outline-none ${Boolean(entryPayeeId) ? 'bg-gray-100 text-gray-700 border-gray-300 cursor-not-allowed select-none font-medium' : 'bg-white focus:ring-2 focus:ring-emerald-500'}`}
-                          />
-                        </div>
-
-                        {/* Expenditure Amount & Sub-Vouchers Breakdown */}
-                        <div className="space-y-2 sm:col-span-2 bg-gradient-to-br from-slate-50 to-gray-100 p-3.5 rounded-xl border border-slate-300 shadow-sm">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                            <label className="block font-bold text-gray-800 flex items-center gap-1.5 text-xs">
-                              <Lock className="w-3.5 h-3.5 text-amber-600" />
-                              <span>Total Expenditure Amount (â‚¹)</span>
-                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
-                                Locked (Read-Only)
-                              </span>
-                            </label>
-                            <span className="text-[10px] text-gray-500 font-medium">
-                              Auto-calculated from Sub-Vouchers Breakdown below
-                            </span>
-                          </div>
-
-                          <div className="relative">
-                            <input
-                              type="text"
-                              readOnly
-                              value={entryTotalAmount ? `â‚¹ ${Number(entryTotalAmount).toLocaleString('en-IN')}` : 'â‚¹ 0 (Add sub-vouchers below)'}
-                              placeholder="â‚¹ 0 (Auto-calculated)"
-                              className="w-full p-2.5 pl-3 border border-slate-300 rounded-lg font-black text-lg bg-gray-100 text-slate-900 cursor-not-allowed select-none shadow-inner outline-none"
-                            />
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-slate-400">
-                              <Lock className="w-4 h-4 text-slate-400" />
-                            </div>
-                          </div>
-
-                          {/* Sub-Vouchers Breakdown Box - Always Open and Prominent */}
-                          <div className="mt-3 p-3.5 bg-white border border-emerald-200 rounded-xl space-y-3 shadow-sm">
-                            <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
-                              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wide flex items-center gap-1.5">
-                                <FileText className="w-4 h-4 text-emerald-700" />
-                                Voucher / Bill Breakup Form
-                                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                                  {entrySubVouchers.length} {entrySubVouchers.length === 1 ? 'Voucher' : 'Vouchers'} Added
-                                </span>
-                              </span>
-                              <span className="text-[11px] text-emerald-800 font-bold">
-                                Total Sum: â‚¹{entrySubVouchers.reduce((s, v) => s + v.amount, 0).toLocaleString('en-IN')}
-                              </span>
-                            </div>
-
-                            {/* Sub-voucher input row */}
-                            <div className={`p-2.5 rounded-lg border items-end transition-all ${editingSubVoucherId ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300' : 'bg-emerald-50/50 border-emerald-200'}`}>
-                              {editingSubVoucherId && (
-                                <div className="flex items-center justify-between pb-2 mb-2 border-b border-amber-200 text-xs">
-                                  <span className="font-bold text-amber-800 flex items-center gap-1.5 text-[11px]">
-                                    <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                                    Editing Sub-Voucher Details
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={handleCancelEditSubVoucher}
-                                    className="text-[10px] font-bold text-gray-600 hover:text-gray-900 bg-white hover:bg-gray-100 border border-gray-300 px-2 py-0.5 rounded cursor-pointer transition-colors"
-                                  >
-                                    Cancel Edit
-                                  </button>
-                                </div>
-                              )}
-                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-                                <div className="sm:col-span-3 space-y-1">
-                                  <label className="block text-[10px] font-bold text-gray-700">Voucher / Bill No. <span className="text-red-500">*</span></label>
-                                  <input
-                                    type="text"
-                                    value={subVoucherNoInput}
-                                    onChange={(e) => setSubVoucherNoInput(e.target.value)}
-                                    placeholder="e.g. V-01 / Bill-104"
-                                    className="w-full p-2 border border-gray-300 rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                                  />
-                                </div>
-                                <div className="sm:col-span-5 space-y-1">
-                                  <label className="block text-[10px] font-bold text-gray-700">Work Description / Purpose</label>
-                                  <input
-                                    type="text"
-                                    value={subVoucherDescInput}
-                                    onChange={(e) => setSubVoucherDescInput(e.target.value)}
-                                    placeholder="e.g. Nursery labour / Soil works"
-                                    className="w-full p-2 border border-gray-300 rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                                  />
-                                </div>
-                                <div className="sm:col-span-2 space-y-1">
-                                  <label className="block text-[10px] font-bold text-gray-700">Amount (â‚¹) <span className="text-red-500">*</span></label>
-                                  <input
-                                    type="number"
-                                    step="1"
-                                    value={subVoucherAmountInput}
-                                    onChange={(e) => setSubVoucherAmountInput(e.target.value)}
-                                    placeholder="e.g. 5000"
-                                    className="w-full p-2 border border-gray-300 rounded text-xs font-bold bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleAddSubVoucher();
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                <div className="sm:col-span-2 flex gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={handleAddSubVoucher}
-                                    className={`flex-1 py-2 text-white rounded text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm active:scale-95 ${editingSubVoucherId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-                                  >
-                                    {editingSubVoucherId ? (
-                                      <>
-                                        <Check className="w-3.5 h-3.5" /> Update
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Plus className="w-3.5 h-3.5" /> Add Voucher
-                                      </>
-                                    )}
-                                  </button>
-                                  {editingSubVoucherId && (
-                                    <button
-                                      type="button"
-                                      onClick={handleCancelEditSubVoucher}
-                                      className="px-2 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs font-bold transition-all flex items-center justify-center cursor-pointer shadow-sm"
-                                      title="Cancel Edit"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* List of added sub-vouchers */}
-                            {entrySubVouchers.length > 0 ? (
-                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                                {entrySubVouchers.map((sv, idx) => (
-                                  <div
-                                    key={sv.id}
-                                    className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-colors ${editingSubVoucherId === sv.id ? 'bg-amber-50/90 border-amber-400 ring-1 ring-amber-300' : 'bg-slate-50 hover:bg-emerald-50/40 border-slate-200'}`}
-                                  >
-                                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                      <span className="font-bold text-slate-400 text-[10px] w-5">#{idx + 1}</span>
-                                      <span className="font-bold text-slate-800 font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
-                                        {sv.voucherNo || 'Sub-voucher'}
-                                      </span>
-                                      {sv.description && (
-                                        <span className="text-slate-600 text-[11px] truncate" title={sv.description}>
-                                          {sv.description}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                                      <span className="font-black text-emerald-800 text-xs mr-1">
-                                        â‚¹{Math.round(sv.amount).toLocaleString('en-IN')}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleStartEditSubVoucher(sv)}
-                                        className={`p-1 rounded cursor-pointer transition-colors ${editingSubVoucherId === sv.id ? 'text-amber-700 bg-amber-200' : 'text-blue-600 hover:text-blue-800 hover:bg-blue-50'}`}
-                                        title="Edit sub-voucher description / amount"
-                                      >
-                                        <Edit2 className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveSubVoucher(sv.id)}
-                                        className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded cursor-pointer transition-colors"
-                                        title="Remove sub-voucher"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                                <div className="flex justify-between items-center px-3 py-2 text-xs font-bold text-slate-800 bg-emerald-50 rounded-lg border border-emerald-200">
-                                  <span>Total Auto-Calculated Expenditure:</span>
-                                  <span className="text-emerald-900 font-black text-sm">
-                                    â‚¹{entrySubVouchers.reduce((s, v) => s + v.amount, 0).toLocaleString('en-IN')}
-                                  </span>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="p-3 text-center bg-slate-50 border border-dashed border-slate-300 rounded-lg text-slate-500 text-xs">
-                                <p className="font-semibold text-slate-600">No vouchers added yet for this payee.</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5">Enter Voucher / Bill No. and Amount above and click "+ Add Voucher" to populate expenditure.</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Deductions Checkboxes */}
-                        <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-100 p-2.5 rounded-lg border border-slate-200">
-                          <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-gray-200 hover:border-emerald-400 transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={entryDeductITax}
-                              onChange={(e) => setEntryDeductITax(e.target.checked)}
-                              className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500"
-                            />
-                            <div className="text-[11px]">
-                              <span className="font-bold text-gray-800 block">Deduct I/Tax @ 1%</span>
-                              <span className="text-[10px] text-gray-500">Applicable above â‚¹30,000</span>
-                            </div>
-                          </label>
-
-                          <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-gray-200 hover:border-emerald-400 transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={entryDeductGst}
-                              onChange={(e) => setEntryDeductGst(e.target.checked)}
-                              className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500"
-                            />
-                            <div className="text-[11px]">
-                              <span className="font-bold text-gray-800 block">Deduct GST TDS @ 2%</span>
-                              <span className="text-[10px] text-gray-500">Applicable above â‚¹2,50,000</span>
-                            </div>
-                          </label>
-                        </div>
-
-                        {/* Calculated amounts preview & Add button */}
-                        <div className="sm:col-span-2 pt-2 flex flex-col sm:flex-row justify-between items-center gap-3 bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
-                          {(() => {
-                            const tot = parseFloat(entryTotalAmount) || 0;
-                            const isITax = entryDeductITax && tot > 30000;
-                            const isGst = entryDeductGst && tot > 250000;
-                            const iTaxAmt = isITax ? Math.round((tot * (parseFloat(entryITaxPercent) || 1)) / 100) : 0;
-                            const gstAmt = isGst ? Math.round((tot * (parseFloat(entryGstPercent) || 2)) / 100) : 0;
-                            const netRtgs = Math.round(tot) - iTaxAmt - gstAmt;
-
-                            return (
-                              <div className="text-xs text-emerald-900 font-medium grid grid-cols-2 sm:grid-cols-4 gap-2 w-full sm:w-auto">
-                                <div>
-                                  <span className="text-[10px] text-gray-500 block">Gross Amt:</span>
-                                  <strong className="text-gray-900">â‚¹{tot.toLocaleString('en-IN')}</strong>
-                                </div>
-                                <div>
-                                  <span className="text-[10px] text-red-600 block">I/Tax (1%):</span>
-                                  <strong className="text-red-700">
-                                    -â‚¹{iTaxAmt.toLocaleString('en-IN')}
-                                  </strong>
-                                </div>
-                                <div>
-                                  <span className="text-[10px] text-purple-600 block">GST TDS (2%):</span>
-                                  <strong className="text-purple-700">
-                                    -â‚¹{gstAmt.toLocaleString('en-IN')}
-                                  </strong>
-                                </div>
-                                <div>
-                                  <span className="text-[10px] text-emerald-700 block">Net RTGS:</span>
-                                  <strong className="text-emerald-950 text-sm">
-                                    â‚¹{netRtgs.toLocaleString('en-IN')}
-                                  </strong>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                          <button
-                            type="submit"
-                            disabled={Boolean(memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && memoBudgetInfo.isTypingExceeded)}
-                            className={`w-full sm:w-auto px-5 py-2.5 rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-1.5 shrink-0 ${
-                              memoSoeIdInput && memoBudgetInfo.allocatedBudget > 0 && memoBudgetInfo.isTypingExceeded
-                                ? 'bg-gray-300 text-gray-600 cursor-not-allowed border border-gray-400 opacity-80'
-                                : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95 cursor-pointer'
-                            }`}
-                            title={memoBudgetInfo.isTypingExceeded ? `Exceeds available balance of â‚¹${memoBudgetInfo.availableForCurrentPayee.toLocaleString('en-IN')}` : undefined}
-                          >
-                            <Plus className="w-4 h-4" />
-                            <span>
-                              {memoBudgetInfo.isTypingExceeded
-                                ? `Exceeds SOE Balance (Max: â‚¹${memoBudgetInfo.availableForCurrentPayee.toLocaleString('en-IN')})`
-                                : (editingEntryIndex !== null ? 'Update Payee Row' : '+ Add Payee to Memo')}
-                            </span>
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-
-                    {/* Step 3: Added Payees Table inside Form */}
-                    <div className="border-t pt-4 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wide">
-                            3. Payees Included in Memo ({memoPayeeEntries.length})
-                          </h4>
-                          {memoPayeeEntries.length > 0 && (
-                            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">
-                              Total: â‚¹{memoPayeeEntries.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0).toLocaleString('en-IN')}
-                            </span>
-                          )}
-                        </div>
-                        {memoPayeeEntries.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setIsMemoPayeeListFullScreen(true)}
-                            className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-all border border-emerald-300 cursor-pointer shadow-sm ml-auto"
-                            title="Expand to Full Screen to view and edit complete payee details in one go"
-                          >
-                            <Maximize2 className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>Full Screen (View & Edit)</span>
-                          </button>
-                        )}
-                      </div>
-
-                      {memoPayeeEntries.length > 0 ? (
-                        <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
-                          <table className="w-full text-left text-[11px] border-collapse">
-                            <thead>
-                              <tr className="bg-gray-100 font-bold text-gray-800 border-b border-gray-200">
-                                <th className="p-2 w-8 text-center border-r">#</th>
-                                <th className="p-2 border-r min-w-[130px]">Name & Address</th>
-                                <th className="p-2 border-r">Try Code</th>
-                                <th className="p-2 border-r">Bank Account Details</th>
-                                <th className="p-2 border-r text-right font-bold">Total Amt (â‚¹)</th>
-                                <th className="p-2 border-r min-w-[140px]">Sub Voucher Details</th>
-                                <th className="p-2 border-r text-right">Deductions (IT+GST)</th>
-                                <th className="p-2 border-r text-right font-bold text-emerald-900">Net RTGS (â‚¹)</th>
-                                <th className="p-2 border-r">PAN & GSTIN</th>
-                                <th className="p-2 text-center w-16">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                              {memoPayeeEntries.map((entry, idx) => {
-                                const iTax = Math.round(Number(entry.iTaxAmount) || 0);
-                                const gst = Math.round(Number(entry.gstAmount) || 0);
-                                const totDed = iTax + gst;
-
-                                return (
-                                  <tr key={idx} className={editingEntryIndex === idx ? 'bg-amber-50 font-medium' : 'hover:bg-gray-50'}>
-                                    <td className="p-2 text-center font-bold text-gray-500 border-r">{idx + 1}</td>
-                                    <td className="p-2 border-r">
-                                      <div className="font-bold text-gray-900">{entry.name}</div>
-                                      {entry.address && <div className="text-[10px] text-gray-500">{entry.address}</div>}
-                                    </td>
-                                    {(() => {
-                                      // Auto lookup for missing Try Code
-                                      const lookupPayee = payees.find(p => 
-                                        (entry.payeeId && p.id === entry.payeeId) || 
-                                        (p.accountNumber === entry.accountNumber && p.name === entry.name)
-                                      );
-                                      const displayTreasuryCode = entry.treasuryCode || lookupPayee?.treasuryCode || '-';
-                                      
-                                      return (
-                                        <td className="p-2 border-r font-mono text-[10px] font-bold text-emerald-800">
-                                          {displayTreasuryCode}
-                                        </td>
-                                      );
-                                    })()}
-                                    <td className="p-2 border-r font-mono text-[10px]">
-                                      <div className="font-bold text-gray-900">{entry.accountNumber || '-'}</div>
-                                      <div className="text-gray-500 text-[9px]">{entry.ifscCode || '-'}</div>
-                                    </td>
-                                    <td className="p-2 text-right font-bold border-r">
-                                      â‚¹{Math.round(Number(entry.totalAmount) || 0).toLocaleString('en-IN')}
-                                    </td>
-                                    <td className="p-2 border-r text-[10px]">
-                                      {entry.subVouchers && entry.subVouchers.length > 0 ? (
-                                        <div className="space-y-0.5 text-emerald-800">
-                                          {entry.subVouchers.map((sv, sIdx) => (
-                                            <div key={sIdx} className="leading-tight">
-                                              <span className="font-semibold">{sIdx + 1}.</span> {sv.voucherNo ? `[${sv.voucherNo}] ` : ''}â‚¹{Math.round(sv.amount).toLocaleString('en-IN')}{sv.description ? ` (${sv.description})` : ''}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <span className="text-gray-500 italic">Single Bill</span>
-                                      )}
-                                    </td>
-                                    <td className="p-2 text-right border-r">
-                                      {totDed > 0 ? (
-                                        <div>
-                                          <span className="font-bold text-red-700">â‚¹{totDed.toLocaleString('en-IN')}</span>
-                                          <div className="text-[9.5px] text-gray-500">
-                                            {iTax > 0 && <span>IT: â‚¹{iTax.toLocaleString('en-IN')} </span>}
-                                            {gst > 0 && <span>GST: â‚¹{gst.toLocaleString('en-IN')}</span>}
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <span className="text-gray-400">Nil (â‚¹0)</span>
-                                      )}
-                                    </td>
-                                    <td className="p-2 text-right font-black text-emerald-900 border-r">
-                                      â‚¹{Math.round(Number(entry.netRtgsAmount) || 0).toLocaleString('en-IN')}
-                                    </td>
-                                    <td className="p-2 border-r font-mono text-[10px]">
-                                      <div>PAN: {entry.panNumber || 'N/A'}</div>
-                                      {entry.gstNumber && <div className="text-gray-500">GST: {entry.gstNumber}</div>}
-                                    </td>
-                                    <td className="p-2 text-center">
-                                      <div className="flex items-center justify-center gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleEditPayeeEntryInForm(idx)}
-                                          className="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer"
-                                          title="Edit Row"
-                                        >
-                                          <Edit2 className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemovePayeeEntryFromForm(idx)}
-                                          className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
-                                          title="Remove Payee"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                            <tfoot>
-                              {(() => {
-                                const totGross = memoPayeeEntries.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0);
-                                const totIT = memoPayeeEntries.reduce((a, b) => a + (Number(b.iTaxAmount) || 0), 0);
-                                const totGST = memoPayeeEntries.reduce((a, b) => a + (Number(b.gstAmount) || 0), 0);
-                                const totNet = memoPayeeEntries.reduce((a, b) => a + (Number(b.netRtgsAmount) || 0), 0);
-                                return (
-                                  <tr className="bg-gray-100 font-extrabold text-gray-900 border-t-2 border-gray-300">
-                                    <td colSpan={4} className="p-2 text-right uppercase border-r">
-                                      Total: -
-                                    </td>
-                                    <td className="p-2 text-right text-xs text-gray-900 border-r">
-                                      â‚¹{Math.round(totGross).toLocaleString('en-IN')}
-                                    </td>
-                                    <td className="p-2 text-center border-r text-gray-400">-</td>
-                                    <td className="p-2 text-right text-xs text-red-700 border-r">
-                                      â‚¹{Math.round(totIT + totGST).toLocaleString('en-IN')}
-                                    </td>
-                                    <td className="p-2 text-right text-xs font-black text-emerald-900 border-r">
-                                      â‚¹{Math.round(totNet).toLocaleString('en-IN')}
-                                    </td>
-                                    <td colSpan={2}></td>
-                                  </tr>
-                                );
-                              })()}
-                            </tfoot>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="p-6 text-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 text-xs text-gray-500 space-y-1">
-                          <p className="font-semibold text-gray-700">No payees added to this memo yet.</p>
-                          <p>Fill out the form above and click <strong>"+ Add Payee to Memo"</strong> to append payees (10, 20+ allowed).</p>
-                        </div>
-                      )}
-
-                      {/* Full-Screen Payee List Modal */}
-                      {isMemoPayeeListFullScreen && (
-                        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm p-3 sm:p-6 flex flex-col items-center justify-center animate-fadeIn">
-                          <div className="w-full max-w-7xl max-h-[94vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-300">
-                            {/* Modal Header */}
-                            <div className="bg-gradient-to-r from-emerald-800 to-teal-900 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-3 shrink-0">
-                              <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white/10 rounded-xl">
-                                  <Users className="w-5 h-5 text-emerald-200" />
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h3 className="text-base sm:text-lg font-black text-white">
-                                      Payees Included in Memo â€” Complete Detailed View
-                                    </h3>
-                                    <span className="bg-emerald-600/60 border border-emerald-400/40 text-emerald-100 text-xs px-2.5 py-0.5 rounded-full font-bold">
-                                      {memoPayeeEntries.length} Payees
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-emerald-200 mt-0.5">
-                                    {memoNoInput ? `Memo Ref: ${memoNoInput} | ` : ''}Month/Year: {memoMonthYearInput || 'Current Period'}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setIsMemoPayeeListFullScreen(false)}
-                                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border border-white/20 cursor-pointer"
-                                >
-                                  <Minimize2 className="w-4 h-4" />
-                                  <span>Exit Full Screen</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsMemoPayeeListFullScreen(false)}
-                                  className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors cursor-pointer"
-                                  title="Close"
-                                >
-                                  <X className="w-5 h-5" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Summary Bar */}
-                            <div className="bg-emerald-50 px-5 py-2.5 border-b border-emerald-200 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
-                              <div className="flex flex-wrap items-center gap-4">
-                                <div>
-                                  <span className="text-gray-500 font-medium mr-1.5">Total Gross:</span>
-                                  <strong className="text-gray-900 text-sm font-bold">
-                                    â‚¹{memoPayeeEntries.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0).toLocaleString('en-IN')}
-                                  </strong>
-                                </div>
-                                <div className="h-4 w-px bg-emerald-200 hidden sm:block" />
-                                <div>
-                                  <span className="text-gray-500 font-medium mr-1.5">Total Deductions:</span>
-                                  <strong className="text-red-700 text-sm font-bold">
-                                    â‚¹{memoPayeeEntries.reduce((a, b) => a + (Number(b.iTaxAmount) || 0) + (Number(b.gstAmount) || 0), 0).toLocaleString('en-IN')}
-                                  </strong>
-                                </div>
-                                <div className="h-4 w-px bg-emerald-200 hidden sm:block" />
-                                <div>
-                                  <span className="text-gray-500 font-medium mr-1.5">Total Net RTGS:</span>
-                                  <strong className="text-emerald-950 text-sm font-black">
-                                    â‚¹{memoPayeeEntries.reduce((a, b) => a + (Number(b.netRtgsAmount) || 0), 0).toLocaleString('en-IN')}
-                                  </strong>
-                                </div>
-                              </div>
-                              <span className="text-[11px] text-emerald-800 font-medium bg-emerald-100/80 px-2.5 py-1 rounded-md border border-emerald-200">
-                                Tip: Click "Edit Row" on any payee to populate and update in the form
-                              </span>
-                            </div>
-
-                            {/* Table Container */}
-                            <div className="flex-1 overflow-auto p-4">
-                              <table className="w-full text-left text-xs border-collapse border border-gray-300 shadow-sm rounded-lg overflow-hidden">
-                                <thead>
-                                  <tr className="bg-gray-100 font-bold text-gray-800 border-b border-gray-300 sticky top-0 z-10">
-                                    <th className="p-2.5 w-10 text-center border-r bg-gray-100">#</th>
-                                    <th className="p-2.5 border-r min-w-[160px] bg-gray-100">Name & Address</th>
-                                    <th className="p-2.5 border-r w-24 text-center bg-gray-100">Try Code</th>
-                                    <th className="p-2.5 border-r min-w-[150px] bg-gray-100">Bank Account Details</th>
-                                    <th className="p-2.5 border-r text-right font-bold w-28 bg-gray-100">Total Amt (â‚¹)</th>
-                                    <th className="p-2.5 border-r min-w-[220px] bg-gray-100">Sub Voucher / Bill Breakup</th>
-                                    <th className="p-2.5 border-r text-right min-w-[130px] bg-gray-100">Deductions (IT+GST)</th>
-                                    <th className="p-2.5 border-r text-right font-bold text-emerald-950 w-28 bg-gray-100">Net RTGS (â‚¹)</th>
-                                    <th className="p-2.5 border-r min-w-[130px] bg-gray-100">PAN & GSTIN</th>
-                                    <th className="p-2.5 text-center w-28 bg-gray-100 sticky right-0">Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200">
-                                  {memoPayeeEntries.map((entry, idx) => {
-                                    const iTax = Math.round(Number(entry.iTaxAmount) || 0);
-                                    const gst = Math.round(Number(entry.gstAmount) || 0);
-                                    const totDed = iTax + gst;
-
-                                    const lookupPayee = payees.find(p => 
-                                      (entry.payeeId && p.id === entry.payeeId) || 
-                                      (p.accountNumber === entry.accountNumber && p.name === entry.name)
-                                    );
-                                    const displayTreasuryCode = entry.treasuryCode || lookupPayee?.treasuryCode || '-';
-
-                                    return (
-                                      <tr key={idx} className={`hover:bg-emerald-50/40 transition-colors ${editingEntryIndex === idx ? 'bg-amber-50/80 font-medium' : ''}`}>
-                                        <td className="p-2.5 text-center font-bold text-gray-500 border-r">{idx + 1}</td>
-                                        <td className="p-2.5 border-r">
-                                          <div className="font-bold text-gray-900 text-xs">{entry.name}</div>
-                                          {entry.address ? (
-                                            <div className="text-[11px] text-gray-500 mt-0.5">{entry.address}</div>
-                                          ) : (
-                                            <div className="text-[10px] text-gray-400 italic">No address provided</div>
-                                          )}
-                                        </td>
-                                        <td className="p-2.5 border-r text-center font-mono text-xs font-bold text-emerald-800">
-                                          {displayTreasuryCode}
-                                        </td>
-                                        <td className="p-2.5 border-r font-mono text-xs">
-                                          <div className="font-bold text-gray-900">{entry.accountNumber || '-'}</div>
-                                          <div className="text-gray-500 text-[10px] mt-0.5">IFSC: {entry.ifscCode || '-'}</div>
-                                        </td>
-                                        <td className="p-2.5 text-right font-bold border-r text-xs">
-                                          â‚¹{Math.round(Number(entry.totalAmount) || 0).toLocaleString('en-IN')}
-                                        </td>
-                                        <td className="p-2.5 border-r text-xs">
-                                          {entry.subVouchers && entry.subVouchers.length > 0 ? (
-                                            <div className="space-y-1 text-slate-800">
-                                              {entry.subVouchers.map((sv, sIdx) => (
-                                                <div key={sIdx} className="bg-white/80 p-1.5 rounded border border-slate-200">
-                                                  <div className="flex items-center justify-between gap-1">
-                                                    <span className="font-bold text-slate-700 font-mono text-[11px]">
-                                                      {sIdx + 1}. {sv.voucherNo || 'Sub-voucher'}
-                                                    </span>
-                                                    <span className="font-black text-emerald-700 text-[11px]">
-                                                      â‚¹{Math.round(sv.amount).toLocaleString('en-IN')}
-                                                    </span>
-                                                  </div>
-                                                  {sv.description && (
-                                                    <div className="text-[10.5px] text-slate-600 mt-0.5 italic">
-                                                      {sv.description}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <span className="text-gray-500 italic text-[11px]">Single Bill</span>
-                                          )}
-                                        </td>
-                                        <td className="p-2.5 text-right border-r text-xs">
-                                          {totDed > 0 ? (
-                                            <div>
-                                              <span className="font-bold text-red-700 block">â‚¹{totDed.toLocaleString('en-IN')}</span>
-                                              <div className="text-[10px] text-gray-500 mt-0.5 space-y-0.5">
-                                                {iTax > 0 && <div>IT (1%): â‚¹{iTax.toLocaleString('en-IN')}</div>}
-                                                {gst > 0 && <div>GST (2%): â‚¹{gst.toLocaleString('en-IN')}</div>}
-                                              </div>
-                                            </div>
-                                          ) : (
-                                            <span className="text-gray-400 text-[11px]">Nil (â‚¹0)</span>
-                                          )}
-                                        </td>
-                                        <td className="p-2.5 text-right font-black text-emerald-950 border-r text-xs">
-                                          â‚¹{Math.round(Number(entry.netRtgsAmount) || 0).toLocaleString('en-IN')}
-                                        </td>
-                                        <td className="p-2.5 border-r font-mono text-[11px]">
-                                          <div>PAN: {entry.panNumber || 'N/A'}</div>
-                                          {entry.gstNumber && <div className="text-gray-500 text-[10px] mt-0.5">GST: {entry.gstNumber}</div>}
-                                        </td>
-                                        <td className="p-2.5 text-center sticky right-0 bg-white shadow-sm">
-                                          <div className="flex items-center justify-center gap-1.5">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                handleEditPayeeEntryInForm(idx);
-                                                setIsMemoPayeeListFullScreen(false);
-                                              }}
-                                              className="flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs font-bold transition-colors cursor-pointer border border-blue-200"
-                                              title="Edit this payee entry"
-                                            >
-                                              <Edit2 className="w-3 h-3" />
-                                              <span>Edit</span>
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleRemovePayeeEntryFromForm(idx)}
-                                              className="p-1.5 text-red-600 hover:bg-red-50 rounded cursor-pointer transition-colors"
-                                              title="Remove Payee"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                                <tfoot>
-                                  {(() => {
-                                    const totGross = memoPayeeEntries.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0);
-                                    const totIT = memoPayeeEntries.reduce((a, b) => a + (Number(b.iTaxAmount) || 0), 0);
-                                    const totGST = memoPayeeEntries.reduce((a, b) => a + (Number(b.gstAmount) || 0), 0);
-                                    const totNet = memoPayeeEntries.reduce((a, b) => a + (Number(b.netRtgsAmount) || 0), 0);
-                                    return (
-                                      <tr className="bg-gray-100 font-extrabold text-gray-900 border-t-2 border-gray-400">
-                                        <td colSpan={4} className="p-3 text-right uppercase border-r text-xs">
-                                          Grand Total: -
-                                        </td>
-                                        <td className="p-3 text-right text-xs text-gray-900 border-r font-bold">
-                                          â‚¹{Math.round(totGross).toLocaleString('en-IN')}
-                                        </td>
-                                        <td className="p-3 text-center border-r text-gray-400 text-xs">-</td>
-                                        <td className="p-3 text-right text-xs text-red-700 border-r font-bold">
-                                          â‚¹{Math.round(totIT + totGST).toLocaleString('en-IN')}
-                                        </td>
-                                        <td className="p-3 text-right text-sm font-black text-emerald-950 border-r">
-                                          â‚¹{Math.round(totNet).toLocaleString('en-IN')}
-                                        </td>
-                                        <td colSpan={2} className="p-3 bg-gray-100"></td>
-                                      </tr>
-                                    );
-                                  })()}
-                                </tfoot>
-                              </table>
-                            </div>
-
-                            {/* Modal Footer */}
-                            <div className="bg-gray-50 px-5 py-3 border-t border-gray-200 flex items-center justify-between shrink-0">
-                              <span className="text-xs text-gray-500 font-medium">
-                                Showing all {memoPayeeEntries.length} Payees with complete billing details
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setIsMemoPayeeListFullScreen(false)}
-                                className="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-sm"
-                              >
-                                Close Full Screen
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Step 4: Form Actions (Save Draft / Submit) */}
-                    <div className="border-t pt-4 flex flex-wrap items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        onClick={handleResetMemoForm}
-                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all"
-                      >
-                        Reset / Clear Form
-                      </button>
-
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => handleSaveMemo('draft')}
-                          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-1.5"
-                        >
-                          <Save className="w-4 h-4" />
-                          <span>{editingMemo ? 'Update as Draft' : 'Save as Draft'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleSaveMemo('submitted')}
-                          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-1.5"
-                        >
-                          <Send className="w-4 h-4" />
-                          <span>Submit & Lock Memo</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Panel: Memos Summary Table / Register (5 cols) */}
-                  <div className="lg:col-span-5 bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4">
-                    <div className="border-b pb-3 flex flex-wrap justify-between items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-emerald-600" />
-                          Saved Memos ({filteredMemos.length})
-                        </h4>
-                        <span className="text-[11px] font-bold text-gray-500">FY: {selectedFY}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => resequenceDuplicateMemos(true)}
-                        className="px-2.5 py-1 bg-gray-50 hover:bg-emerald-50 text-gray-600 hover:text-emerald-700 rounded-lg text-[10px] font-bold border border-gray-200 hover:border-emerald-300 flex items-center gap-1 transition-all cursor-pointer"
-                        title="Check and re-sequence duplicate memo numbers chronologically (100, 101, 102...)"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Re-sequence Numbers</span>
-                      </button>
-                    </div>
-
-                    {filteredMemos.length > 0 ? (
-                      <div className="space-y-3 max-h-[800px] overflow-y-auto pr-1">
-                        {filteredMemos.map((m) => {
-                          const isSubmitted = m.status === 'submitted';
-                          const isCorrection = m.status === 'correction';
-                          const canEdit = userRole === 'admin' || userRole === 'deo' || !isSubmitted;
-
-                          return (
-                            <div
-                              key={m.id}
-                              className={`p-4 rounded-xl border transition-all ${
-                                editingMemo?.id === m.id
-                                  ? 'border-emerald-500 ring-2 ring-emerald-200 bg-emerald-50/30'
-                                  : isSubmitted
-                                  ? 'border-gray-200 bg-gray-50/80'
-                                  : isCorrection
-                                  ? 'border-amber-300 bg-amber-50/50'
-                                  : 'border-gray-200 bg-white hover:border-gray-300'
-                              }`}
-                            >
-                              {/* Header info */}
-                              <div className="flex justify-between items-start gap-2 mb-2">
-                                <div>
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    <span className="font-extrabold text-xs text-gray-900">
-                                      Memo #{m.memoNo}
-                                    </span>
-                                    {isSubmitted && (
-                                      <>
-                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                                          <Lock className="w-2.5 h-2.5" /> Submitted
-                                        </span>
-                                        {/* For Range User: Show Pending HQ Review or Reviewed or Approved */}
-                                        {isRangeUser ? (
-                                          m.isApproved ? (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs" title={`Approved by ${m.approvedBy || 'HQ'}${m.approvedAt ? ` on ${new Date(m.approvedAt).toLocaleDateString('en-GB')}` : ''}`}>
-                                              <CheckCircle2 className="w-2.5 h-2.5" /> Approved by HQ
-                                            </span>
-                                          ) : m.viewedByAdmin ? (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 flex items-center gap-1" title={`Reviewed by ${m.viewedBy || 'HQ'}${m.viewedAt ? ` on ${new Date(m.viewedAt).toLocaleDateString('en-GB')}` : ''}`}>
-                                              <Eye className="w-2.5 h-2.5 text-blue-700" /> Reviewed by HQ
-                                            </span>
-                                          ) : (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-1" title="Pending review by Headquarter / Admin. Can be pulled back by Range user.">
-                                              <Clock className="w-2.5 h-2.5 text-amber-700" /> Pending HQ Review
-                                            </span>
-                                          )
-                                        ) : (
-                                          /* For Admin / DEO: No 'Pending Review' tag! Show Approved or Read / New */
-                                          m.isApproved ? (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs" title={`Approved by ${m.approvedBy || 'Admin'}${m.approvedAt ? ` on ${new Date(m.approvedAt).toLocaleDateString('en-GB')}` : ''}`}>
-                                              <CheckCircle2 className="w-2.5 h-2.5" /> Approved
-                                            </span>
-                                          ) : m.viewedByAdmin ? (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 flex items-center gap-1" title={`Read / Reviewed by ${m.viewedBy || 'HQ'}${m.viewedAt ? ` on ${new Date(m.viewedAt).toLocaleDateString('en-GB')}` : ''}`}>
-                                              <Eye className="w-2.5 h-2.5 text-blue-700" /> Read / Reviewed
-                                            </span>
-                                          ) : (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-900 flex items-center gap-1" title="New submitted memo from Range waiting for your review & approval">
-                                              <Inbox className="w-2.5 h-2.5 text-purple-700" /> New for Review
-                                            </span>
-                                          )
-                                        )}
-                                      </>
-                                    )}
-                                    {isCorrection && (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
-                                        Needs Correction
-                                      </span>
-                                    )}
-                                    {m.status === 'draft' && (
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.pulledBack ? 'bg-orange-100 text-orange-900 border border-orange-200' : 'bg-gray-200 text-gray-700'}`}>
-                                        {m.pulledBack ? 'Draft (Pulled Back)' : 'Draft'}
-                                      </span>
-                                    )}
-                                    {m.copiedFromMemoNo && (
-                                      <span className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200" title={`Duplicated from Memo #${m.copiedFromMemoNo}`}>
-                                        From #{m.copiedFromMemoNo}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[11px] text-gray-500 font-medium mt-0.5">
-                                    Date: {m.date ? m.date.split('-').reverse().join('/') : ''} | Month: {m.monthYear}
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <div className="text-xs font-black text-emerald-950">
-                                    â‚¹{Math.round(Number(m.totalNetRtgs) || Number(m.totalAmount) || 0).toLocaleString('en-IN')}
-                                  </div>
-                                  <div className="text-[10px] text-gray-500 font-medium">
-                                    {m.payeeEntries ? m.payeeEntries.length : 0} Payee(s)
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Scheme, Sector & SOE info */}
-                              <div className="text-xs text-gray-700 bg-white/70 p-2 rounded-lg border border-gray-100 mb-2.5 space-y-0.5">
-                                <p><strong>Scheme:</strong> {m.schemeName || 'All Schemes'}</p>
-                                {m.sectorName && <p><strong>Sector:</strong> {m.sectorName}</p>}
-                                {m.soeName && (
-                                  <p>
-                                    <strong>SOE:</strong> <span className="font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">{m.soeName}</span>
-                                  </p>
-                                )}
-                                <p className="text-[10px] text-gray-500">From: {m.rangeName} &rarr; To: {m.toAuthority || 'DCF Rajgarh'}</p>
-                              </div>
-
-                              {/* Approved for Fund Status Banner */}
-                              {m.isApproved && (
-                                <div className="mb-2.5 p-2 bg-emerald-50 border border-emerald-300 rounded-lg text-xs text-emerald-950 flex items-center justify-between shadow-2xs">
-                                  <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                                    <span>Approved for Fund ({m.approvedBy || 'Headquarter'})</span>
-                                  </div>
-                                  {m.approvedAt ? (
-                                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100/90 px-2 py-0.5 rounded border border-emerald-200">
-                                      {new Date(m.approvedAt).toLocaleDateString('en-GB')}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              )}
-
-                              {/* Pulled Back Remarks Display in Card */}
-                              {m.pulledBack && m.pullBackRemarks && (
-                                <div className="mb-3 p-2.5 bg-orange-50 border border-orange-200 rounded-lg text-xs text-orange-950 space-y-1">
-                                  <div className="flex items-center justify-between text-[11px] font-bold text-orange-900">
-                                    <span className="flex items-center gap-1">
-                                      <Undo2 className="w-3.5 h-3.5 text-orange-700 shrink-0" />
-                                      <span>Pulled Back to Draft ({m.pulledBackBy || 'User'}):</span>
-                                    </span>
-                                    {m.pulledBackAt && (
-                                      <span className="text-[10px] text-orange-700 font-medium">
-                                        {new Date(m.pulledBackAt).toLocaleDateString('en-GB')}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] font-medium text-orange-900 bg-white/80 p-2 rounded border border-orange-100">
-                                    "{m.pullBackRemarks}"
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Correction Remarks Display in Card */}
-                              {(m.status === 'correction' || m.correctionRemarks) && (
-                                <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-950 space-y-1">
-                                  <div className="flex items-center justify-between text-[11px] font-bold text-amber-900">
-                                    <span className="flex items-center gap-1">
-                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                                      <span>Correction Remarks ({m.correctionRemarksBy || 'Admin / DEO'}):</span>
-                                    </span>
-                                    {m.correctionRemarksAt && (
-                                      <span className="text-[10px] text-amber-700 font-medium">
-                                        {new Date(m.correctionRemarksAt).toLocaleDateString('en-GB')}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] font-medium text-amber-900 bg-white/80 p-2 rounded border border-amber-100">
-                                    "{m.correctionRemarks || m.remarks}"
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Actions Bar */}
-                              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleViewMemo(m)}
-                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
-                                  >
-                                    <Printer className="w-3 h-3" />
-                                    <span>View & Print</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => downloadMemoPDF(m)}
-                                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
-                                    title="Download Memo PDF directly"
-                                  >
-                                    <Download className="w-3 h-3" />
-                                    <span>Download PDF</span>
-                                  </button>
-                                  {/* Download DOC Button for DEO and Admin only */}
-                                  {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => downloadMemoWord(m)}
-                                      className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
-                                      title="Download editable Memo Word Document (.doc) (DEO / Admin Only)"
-                                    >
-                                      <FileText className="w-3 h-3" />
-                                      <span>Download DOC</span>
-                                    </button>
-                                  )}
-                                  {/* Duplicate / Copy Memo Button for all users */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDuplicateMemo(m)}
-                                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
-                                    title="Duplicate / Copy this memo to create a new draft in sequence with same payees & editable amounts"
-                                  >
-                                    <Copy className="w-3 h-3 text-emerald-700" />
-                                    <span>Duplicate</span>
-                                  </button>
-                                </div>
-
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  {/* PULL BACK BUTTON: ONLY visible to Range users when memo is submitted and NOT yet viewed/approved by HQ */}
-                                  {isRangeUser && isSubmitted && !m.viewedByAdmin && !m.isApproved && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenPullBackModal(m)}
-                                      className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-900 border border-orange-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
-                                      title="Pull back this submitted memo to Draft with remarks (before Headquarter reviews it)"
-                                    >
-                                      <Undo2 className="w-3 h-3 text-orange-700" />
-                                      <span>Pull Back</span>
-                                    </button>
-                                  )}
-
-                                  {/* Range User Status indicators */}
-                                  {isRangeUser && isSubmitted && m.viewedByAdmin && !m.isApproved && (
-                                    <span
-                                      className="px-2 py-1 bg-blue-50 text-blue-900 rounded-lg text-[10px] font-bold border border-blue-200 flex items-center gap-1"
-                                      title={`Viewed by ${m.viewedBy || 'Headquarter'}${m.viewedAt ? ` on ${new Date(m.viewedAt).toLocaleDateString('en-GB')}` : ''}. Locked - cannot be pulled back.`}
-                                    >
-                                      <Eye className="w-2.5 h-2.5 text-blue-600" />
-                                      <span>Under HQ Review</span>
-                                    </span>
-                                  )}
-
-                                  {/* ADMIN & DEO ACTIONS: Read & Approve buttons */}
-                                  {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && isSubmitted && (
-                                    <>
-                                      {/* Mark as Read button if not yet viewed */}
-                                      {!m.viewedByAdmin && !m.isApproved && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleMarkMemoAsRead(m)}
-                                          className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
-                                          title="Mark this memo as Read / Reviewed"
-                                        >
-                                          <Eye className="w-3 h-3 text-blue-700" />
-                                          <span>Mark Read</span>
-                                        </button>
-                                      )}
-
-                                      {/* Approve Button / Revoke Approval button for Admin & DEO */}
-                                      {!m.isApproved ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleApproveMemo(m)}
-                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
-                                          title="Approve this Memo for Fund so the Range user can see the Approved status"
-                                        >
-                                          <CheckCircle2 className="w-3 h-3 text-white" />
-                                          <span>Approve Memo</span>
-                                        </button>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRevokeMemoApproval(m)}
-                                          className="px-2.5 py-1 bg-emerald-50 hover:bg-red-50 text-emerald-800 hover:text-red-700 border border-emerald-300 hover:border-red-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
-                                          title="Memo is Approved. Click to revoke approval if needed."
-                                        >
-                                          <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                                          <span>Approved âœ“</span>
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-
-                                  {/* Send back for correction button for Admin/DEO */}
-                                  {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && (isSubmitted || isCorrection) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenSendBackModal(m)}
-                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                                        isCorrection
-                                          ? 'bg-amber-200 hover:bg-amber-300 text-amber-950 border border-amber-300'
-                                          : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-200'
-                                      }`}
-                                      title={isCorrection ? "Update correction remarks" : "Return memo to user for correction with remarks"}
-                                    >
-                                      <AlertTriangle className="w-3 h-3 text-amber-700" />
-                                      <span>{isCorrection ? 'Edit Remarks' : 'Return for Correction'}</span>
-                                    </button>
-                                  )}
-
-                                  {/* Edit button */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleEditMemo(m)}
-                                    disabled={!canEdit}
-                                    className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                                      canEdit
-                                        ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
-                                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                    }`}
-                                    title={!canEdit ? 'Locked (Submitted)' : 'Edit Memo'}
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                    <span>Edit</span>
-                                  </button>
-
-                                  {/* Delete button */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteMemo(m)}
-                                    disabled={!canEdit}
-                                    className={`p-1 rounded-lg text-xs font-bold transition-all ${
-                                      canEdit
-                                        ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
-                                        : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                                    }`}
-                                    title={!canEdit ? 'Locked' : 'Delete Memo'}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="p-8 text-center border-2 border-dashed border-gray-200 rounded-xl text-gray-400 text-xs space-y-1">
-                        <FileText className="w-8 h-8 mx-auto text-gray-300" />
-                        <p className="font-semibold text-gray-600">No Memos created for FY {selectedFY}.</p>
-                        <p>Fill out the form on the left to generate a Memo for Fund.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Full-screen Printable Memo View Modal */}
-        {viewingMemo && (() => {
-          const rangeTitle = viewingMemo.rangeName
-            ? viewingMemo.rangeName.replace(/^RFO\s*/i, '').replace(/\s*Range$/i, '').replace(/\s*Office$/i, '')
-            : (userRangeName || 'Sarahan');
-          const totalGrossAmt = Math.round(Number(viewingMemo.totalAmount) || 0);
-          const totalITaxAmt = Math.round(Number(viewingMemo.totalITax) || 0);
-          const totalGstAmt = Math.round(Number(viewingMemo.totalGst) || 0);
-          const totalNetRtgsAmt = Math.round(Number(viewingMemo.totalNetRtgs) || totalGrossAmt);
-          const words = convertNumberToWords(totalNetRtgsAmt);
-
-          return (
-            <div
-              className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden"
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setViewingMemo(null);
-              }}
-            >
-              <div className="bg-white w-full max-w-4xl max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col my-auto relative">
-                {/* Sticky Top Modal Toolbar - Hidden in Print */}
-                <div className="no-print bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-white/20 p-2 rounded-lg">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-lg">Memo for Fund - Printable View</h3>
-                      <p className="text-xs text-emerald-100">Memo Ref: {viewingMemo.memoNo} | Period: {viewingMemo.monthYear}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* Admin / DEO Approve Button in Modal Toolbar */}
-                    {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && viewingMemo.status === 'submitted' && (
-                      !viewingMemo.isApproved ? (
-                        <button 
-                          onClick={() => handleApproveMemo(viewingMemo)}
-                          className="flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 border border-emerald-400/50 px-3 py-1.5 rounded-lg transition-all text-sm font-bold cursor-pointer text-white shadow-sm"
-                          title="Approve this memo for funding"
-                        >
-                          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                          <span>Approve for Fund</span>
-                        </button>
-                      ) : (
-                        <button 
-                          onClick={() => handleRevokeMemoApproval(viewingMemo)}
-                          className="flex items-center gap-1.5 bg-white/20 hover:bg-red-500/80 px-3 py-1.5 rounded-lg transition-colors text-sm font-bold cursor-pointer text-white"
-                          title="Memo is Approved. Click to revoke."
-                        >
-                          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                          <span>Approved âœ“</span>
-                        </button>
-                      )
-                    )}
-
-                    <button 
-                      onClick={() => downloadMemoPDF(viewingMemo)}
-                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                      title="Download PDF"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span className="hidden sm:inline">Download PDF</span>
-                    </button>
-                    {(userRole === 'admin' || userRole === 'deo' || isAdmin() || isDEO()) && (
-                      <button 
-                        onClick={() => downloadMemoWord(viewingMemo)}
-                        className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 px-3 py-1.5 rounded-lg transition-colors text-sm font-bold cursor-pointer text-white shadow-sm"
-                        title="Download editable Word Document (.doc) (DEO / Admin Only)"
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span className="hidden sm:inline">Download DOC</span>
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => handlePrintMemo(viewingMemo)}
-                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                      title="Print"
-                    >
-                      <Printer className="w-4 h-4" />
-                      <span className="hidden sm:inline">Print Letter</span>
-                    </button>
-                    <div className="w-px h-6 bg-white/20 mx-1"></div>
-                    <button 
-                      onClick={() => setViewingMemo(null)}
-                      className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
-                      title="Close"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Scrollable Letter Sheet */}
-                <div className="print-area overflow-y-auto flex-1 p-6 md:p-12 space-y-5 text-gray-900 bg-white font-sans">
-                  {/* Official Approval Status Banner on Letter if Approved */}
-                  {viewingMemo.isApproved && (
-                    <div className="p-3 bg-emerald-50 border-2 border-emerald-600 rounded-lg flex items-center justify-between text-xs font-bold text-emerald-950">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
-                        <div>
-                          <p className="uppercase tracking-wide text-emerald-900 font-extrabold text-[13px]">
-                            SANCTIONED & APPROVED FOR FUND RELEASE
-                          </p>
-                          <p className="text-[11px] text-emerald-800 font-normal">
-                            Approved by Headquarter ({viewingMemo.approvedBy || 'Office of DCF Rajgarh'})
-                          </p>
-                        </div>
-                      </div>
-                      {viewingMemo.approvedAt && (
-                        <div className="text-right text-[11px] text-emerald-800 font-medium">
-                          <span>Approval Date: </span>
-                          <span className="font-bold">{new Date(viewingMemo.approvedAt).toLocaleDateString('en-GB')}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Department Header */}
-                  <div className="text-center space-y-1 border-b-2 border-gray-900 pb-3">
-                    <h2 className="text-xs md:text-sm font-extrabold uppercase tracking-widest text-gray-800">
-                      H.P. FOREST DEPARTMENT
-                    </h2>
-                    <h1 className="text-base md:text-xl font-black uppercase tracking-wide text-gray-900">
-                      Office of the Range Forest Officer, {rangeTitle}
-                    </h1>
-                    <p className="text-xs text-gray-700 font-bold tracking-wide">
-                      Forest Division Rajgarh, District Sirmaur (H.P.)
-                    </p>
-                  </div>
-
-                  {/* Memo Ref & Date Header */}
-                  <div className="flex justify-between items-center text-xs font-bold text-gray-900 border-b border-gray-300 pb-2">
-                    <div>
-                      <span>No. </span>
-                      <span className="font-mono font-black text-sm">{viewingMemo.memoNo}</span>
-                    </div>
-                    <div>
-                      <span>Dated: </span>
-                      <span className="font-mono font-bold">{viewingMemo.date ? viewingMemo.date.split('-').reverse().join('.') : ''}</span>
-                    </div>
-                  </div>
-
-                  {/* Single Line From & To Header */}
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs font-semibold text-gray-900 border-b border-gray-200 pb-2 gap-2">
-                    <div>
-                      <strong>From:</strong> Range Forest Officer, {viewingMemo.rangeName || rangeTitle}.
-                    </div>
-                    <div className="sm:text-right">
-                      <strong>To:</strong> The Divisional Forest Officer, Rajgarh Forest Division (H.P.).
-                    </div>
-                  </div>
-
-                  {/* Subject */}
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-300 text-xs font-bold text-gray-900 leading-snug">
-                    <span>Subject: - </span>
-                    <span className="underline">
-                      Memo for Fund for the month of {viewingMemo.monthYear} under scheme {viewingMemo.schemeName || 'All Schemes'}{viewingMemo.sectorName ? ` (${viewingMemo.sectorName})` : ''}{viewingMemo.soeName ? ` [SOE: ${viewingMemo.soeName}]` : ''}.
-                    </span>
-                  </div>
-
-                  {/* Opening Letter Body */}
-                  <div className="text-xs leading-relaxed text-gray-900 space-y-2">
-                    <p className="font-bold">Sir,</p>
-                    <p className="text-justify leading-relaxed">
-                      It is submitted that this Range wishes to make payment to the payee(s) for the execution of departmental forestry works / liabilities for the month of <strong>{viewingMemo.monthYear}</strong> as per the details tabulated below.
-                    </p>
-                    <p className="text-justify leading-relaxed">
-                      You are kindly requested to sanction and release the total expenditure amount of <strong>â‚¹{totalGrossAmt.toLocaleString('en-IN')}</strong> (Total Net RTGS Amount: <strong>â‚¹{totalNetRtgsAmt.toLocaleString('en-IN')}</strong>) and arrange payment through RTGS / Treasury e-Transfer mode to the respective payees at the earliest.
-                    </p>
-                  </div>
-
-                  {/* Payees & Payment Details Table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse border border-gray-900 text-xs">
-                      <thead>
-                        <tr className="bg-gray-100 text-gray-900 font-bold border-b border-gray-900 text-center">
-                          <th className="p-2 border-r border-gray-900 w-8">Sr. No.</th>
-                          <th className="p-2 border-r border-gray-900 min-w-[130px]">Name & Address</th>
-                          <th className="p-2 border-r border-gray-900">Try Code</th>
-                          <th className="p-2 border-r border-gray-900">Bank Account Details</th>
-                          <th className="p-2 border-r border-gray-900 text-right">Total Amount</th>
-                          <th className="p-2 border-r border-gray-900 min-w-[150px]">Sub Voucher Details</th>
-                          <th className="p-2 border-r border-gray-900 text-right">Deductions (I.Tax + GST)</th>
-                          <th className="p-2 border-r border-gray-900 text-right font-black text-emerald-950">Net Amount RTGS</th>
-                          <th className="p-2">PAN & GSTIN</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800">
-                        {viewingMemo.payeeEntries && viewingMemo.payeeEntries.length > 0 ? (
-                          viewingMemo.payeeEntries.map((entry, idx) => {
-                            const iTax = Math.round(Number(entry.iTaxAmount) || 0);
-                            const gst = Math.round(Number(entry.gstAmount) || 0);
-                            const totDed = iTax + gst;
-
-                            // Automatically look up Try Code from directory if missing in existing memo
-                            const lookupPayee = payees.find(p => 
-                              (entry.payeeId && p.id === entry.payeeId) || 
-                              (p.accountNumber === entry.accountNumber && p.name === entry.name)
-                            );
-                            const displayTreasuryCode = entry.treasuryCode || lookupPayee?.treasuryCode || '-';
-
-                            return (
-                              <tr key={idx} className="border-b border-gray-400">
-                                <td className="p-2 border-r border-gray-900 text-center font-medium">{idx + 1}</td>
-                                <td className="p-2 border-r border-gray-900 font-semibold">
-                                  <div>{entry.name}</div>
-                                  {entry.address && <div className="text-[10px] text-gray-600 font-normal">{entry.address}</div>}
-                                </td>
-                                <td className="p-2 border-r border-gray-900 font-mono text-[11px] font-bold text-emerald-800 text-center">
-                                  {displayTreasuryCode}
-                                </td>
-                                <td className="p-2 border-r border-gray-900 font-mono text-[11px]">
-                                  <div className="font-bold text-gray-900">{entry.accountNumber || '-'}</div>
-                                  <div className="text-[9px] text-gray-500">{entry.ifscCode || '-'}</div>
-                                </td>
-                                <td className="p-2 border-r border-gray-900 text-right font-bold">
-                                  â‚¹{Math.round(Number(entry.totalAmount) || 0).toLocaleString('en-IN')}
-                                </td>
-                                <td className="p-2 border-r border-gray-900 text-[10.5px]">
-                                  {entry.subVouchers && entry.subVouchers.length > 0 ? (
-                                    <div className="space-y-0.5 text-emerald-900">
-                                      {entry.subVouchers.map((sv, sIdx) => (
-                                        <div key={sIdx} className="leading-tight">
-                                          <span className="font-semibold">{sIdx + 1}.</span> {sv.voucherNo ? `[${sv.voucherNo}] ` : ''}â‚¹{Math.round(sv.amount).toLocaleString('en-IN')}{sv.description ? ` (${sv.description})` : ''}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-500 italic">Single Bill</span>
-                                  )}
-                                </td>
-                                <td className="p-2 border-r border-gray-900 text-right">
-                                  {totDed > 0 ? (
-                                    <div>
-                                      <span className="font-bold text-red-800">â‚¹{totDed.toLocaleString('en-IN')}</span>
-                                      <div className="text-[9.5px] text-gray-600">
-                                        {iTax > 0 && <span>IT: â‚¹{iTax.toLocaleString('en-IN')} </span>}
-                                        {gst > 0 && <span>GST: â‚¹{gst.toLocaleString('en-IN')}</span>}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-400">Nil (â‚¹0)</span>
-                                  )}
-                                </td>
-                                <td className="p-2 border-r border-gray-900 text-right font-black text-emerald-950">
-                                  â‚¹{Math.round(Number(entry.netRtgsAmount) || 0).toLocaleString('en-IN')}
-                                </td>
-                                <td className="p-2 font-mono text-[10px]">
-                                  <div>PAN: {entry.panNumber || 'N/A'}</div>
-                                  {entry.gstNumber && <div className="text-gray-600">GST: {entry.gstNumber}</div>}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td colSpan={9} className="p-4 text-center text-gray-500 italic">No payee entries recorded.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                      <tfoot>
-                        <tr className="bg-gray-100 font-extrabold text-gray-900 border-t-2 border-gray-900">
-                          <td colSpan={4} className="p-2.5 text-right uppercase border-r border-gray-900">
-                            Total: -
-                          </td>
-                          <td className="p-2.5 text-right font-black text-xs border-r border-gray-900">
-                            â‚¹{totalGrossAmt.toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-2.5 text-center border-r border-gray-900 text-gray-400">-</td>
-                          <td className="p-2.5 text-right font-black text-xs text-red-800 border-r border-gray-900">
-                            â‚¹{(totalITaxAmt + totalGstAmt).toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-2.5 text-right font-black text-sm text-emerald-950 border-r border-gray-900">
-                            â‚¹{totalNetRtgsAmt.toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-2.5"></td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-
-                  {/* Amount in words display */}
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-300 text-xs font-bold text-gray-900">
-                    <span>Total Net Amount Payable (in words): </span>
-                    <span className="italic text-emerald-950 font-black">
-                      Rupees {words} Only
-                    </span>
-                  </div>
-
-                  {/* Bottom Signature Section - Range Stamp */}
-                  <div className="pt-16 flex justify-end text-xs font-bold text-gray-900">
-                    <div className="text-center space-y-1 min-w-[220px]">
-                      <div className="h-8"></div>
-                      <p className="text-sm font-black">Range Forest Officer</p>
-                      <p className="text-xs font-bold text-gray-800">{viewingMemo.rangeName || rangeTitle}</p>
-                      <p className="text-[11px] text-gray-600 font-normal">Rajgarh Forest Division</p>
-                    </div>
-                  </div>
-
-                  {/* Bottom Close Button Bar - Hidden in Print */}
-                  <div className="no-print pt-6 pb-2 flex justify-center items-center gap-3 border-t border-gray-200">
-                    <button
-                      type="button"
-                      onClick={() => handlePrintMemo(viewingMemo)}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
-                    >
-                      <Printer className="w-4 h-4" /> Print Letter
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadMemoPDF(viewingMemo)}
-                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" /> Download PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewingMemo(null)}
-                      className="px-5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-
-        {/* Sync Memo Modal */}
-        {showMemoSyncModal && (
-          <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col max-h-[85vh] animate-fade-in">
-              {/* Header */}
-              <div className="p-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2.5">
-                  <RefreshCw className="w-5 h-5 text-emerald-400" />
-                  <div>
-                    <h3 className="font-bold text-sm sm:text-base text-white">Sync Expenditure with Memo for Fund</h3>
-                    <p className="text-[11px] text-emerald-200">Select an issued Memo to auto-link and import details</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowMemoSyncModal(false)}
-                  className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Body / Search */}
-              <div className="p-4 space-y-3 overflow-y-auto flex-1 bg-gray-50/50">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search by Memo No, Month/Year, Scheme, or Payee..."
-                    value={memoSearchTerm}
-                    onChange={(e) => setMemoSearchTerm(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-white border border-gray-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 outline-none shadow-xs"
-                  />
-                </div>
-
-                {/* Memos List */}
-                {filteredMemosForSync.length === 0 ? (
-                  <div className="p-8 text-center bg-white rounded-xl border border-dashed border-gray-300">
-                    <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm font-semibold text-gray-600">No saved memos found</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {memoSearchTerm ? 'Try adjusting your search criteria' : `No memos created for Financial Year ${selectedFY} yet`}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {filteredMemosForSync.map((memo) => (
-                      <div
-                        key={memo.id}
-                        className="bg-white p-3.5 rounded-xl border border-gray-200 hover:border-emerald-500 hover:shadow-md transition-all space-y-2"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-black text-sm text-gray-900">Memo #{memo.memoNo}</span>
-                              <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
-                                {memo.monthYear}
-                              </span>
-                              {memo.schemeName && (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">
-                                  {memo.schemeName}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-gray-500 mt-0.5">
-                              Date: {memo.date ? memo.date.split('-').reverse().join('.') : 'N/A'} | Range: {memo.rangeName || userRangeName || 'N/A'}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs font-black text-emerald-800">
-                              â‚¹{(memo.totalNetRtgs || memo.totalAmount || 0).toLocaleString('en-IN')}
-                            </div>
-                            <div className="text-[10px] text-gray-400">Total Net Amount</div>
-                          </div>
-                        </div>
-
-                        {/* Payees snippet */}
-                        {memo.payeeEntries && memo.payeeEntries.length > 0 && (
-                          <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 text-[11px] space-y-1">
-                            <div className="font-semibold text-gray-700 flex justify-between text-[10px] uppercase text-gray-400">
-                              <span>Payees ({memo.payeeEntries.length})</span>
-                              <span>Net Amount</span>
-                            </div>
-                            {memo.payeeEntries.map((p, pIdx) => (
-                              <div key={pIdx} className="flex justify-between items-center text-gray-800">
-                                <span className="font-medium truncate max-w-[240px]">
-                                  {pIdx + 1}. {p.name} {p.accountNumber ? `(A/C: ${p.accountNumber})` : ''}
-                                </span>
-                                <span className="font-semibold text-emerald-950">â‚¹{(Number(p.netRtgsAmount) || Number(p.totalAmount) || 0).toLocaleString('en-IN')}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="flex justify-end items-center gap-2 pt-1 border-t border-gray-100">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedSyncedMemo({ memoId: memo.id, memoNo: memo.memoNo });
-
-                              if (!expenseDescription) {
-                                setExpenseDescription(`Expenditure as per Memo #${memo.memoNo} (${memo.monthYear})`);
-                              }
-
-                              const deductionsToSet: ('TDS' | 'TDS_GST')[] = [];
-                              const hasITax = (memo.totalITax || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductITax || (e.iTaxAmount && e.iTaxAmount > 0) || Number(e.totalAmount) > 30000);
-                              const hasGst = (memo.totalGst || 0) > 0 || (memo.payeeEntries || []).some(e => e.deductGst || (e.gstAmount && e.gstAmount > 0) || Number(e.totalAmount) > 250000);
-                              if (hasITax) deductionsToSet.push('TDS');
-                              if (hasGst) deductionsToSet.push('TDS_GST');
-                              setSelectedDeductions(deductionsToSet);
-
-                              if (memo.payeeEntries && memo.payeeEntries.length > 0) {
-                                const matchedPayees: { payeeId: string; amount: string }[] = [];
-                                memo.payeeEntries.forEach(entry => {
-                                  const matched = payees.find(p =>
-                                    (entry.payeeId && p.id === entry.payeeId) ||
-                                    (p.accountNumber && entry.accountNumber && p.accountNumber.trim() === entry.accountNumber.trim()) ||
-                                    (p.name && entry.name && p.name.trim().toLowerCase() === entry.name.trim().toLowerCase())
-                                  );
-                                  if (matched) {
-                                    matchedPayees.push({
-                                      payeeId: matched.id,
-                                      amount: String(entry.totalAmount || entry.netRtgsAmount || '')
-                                    });
-                                  }
-                                });
-                                if (matchedPayees.length > 0) {
-                                  setSelectedPayeesForExpense(matchedPayees);
-                                }
-                              }
-
-                              setShowMemoSyncModal(false);
-                              showAlert(`Successfully synced with Memo #${memo.memoNo}!`);
-                            }}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
-                          >
-                            <Check className="w-3.5 h-3.5" /> Sync Memo #{memo.memoNo}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="p-3 bg-gray-100 border-t flex justify-end shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowMemoSyncModal(false)}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Expenditure List Print Modal Overlay */}
-        {showExpenditurePrintModal && (
-          <div
-            className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setShowExpenditurePrintModal(false);
-            }}
-          >
-            <div className="bg-white w-full max-w-5xl h-[92vh] max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col my-auto relative">
-              {/* Modal Toolbar - Hidden during print */}
-              <div className="no-print bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white/20 p-2 rounded-lg">
-                    <Printer className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-lg">Expenditure List Preview</h3>
-                    <p className="text-xs text-emerald-100">Total Entries: {currentExpenses.length} | Financial Year: {selectedFY}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={downloadExpenditureListPDF}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                    title="Download PDF"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Download</span>
-                  </button>
-                  <button 
-                    onClick={handlePrintExpenditureReport}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                    title="Print"
-                  >
-                    <Printer className="w-4 h-4" />
-                    <span className="hidden sm:inline">Print</span>
-                  </button>
-                  <div className="w-px h-6 bg-white/20 mx-1"></div>
-                  <button 
-                    onClick={() => setShowExpenditurePrintModal(false)}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
-                    title="Close"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Printable Area */}
-              <div id="expenditure-print-area" className="print-area flex-1 overflow-y-auto p-6 md:p-10 space-y-6 bg-white text-gray-900 font-sans">
-                <div className="text-center space-y-1 border-b pb-4">
-                  <h1 className="text-xl font-black uppercase tracking-wide text-gray-900">Department of Forests, Himachal Pradesh</h1>
-                  <h2 className="text-base font-bold text-gray-800">Rajgarh Forest Division â€” Expenditure Report List</h2>
-                  <p className="text-xs text-gray-500 font-medium">Financial Year: {selectedFY} | Date Generated: {new Date().toLocaleDateString('en-GB')}</p>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  <div><span className="font-bold text-gray-600">Total Entries:</span> {currentExpenses.length}</div>
-                  <div><span className="font-bold text-gray-600">Total Amount:</span> â‚¹{currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toLocaleString('en-IN')}</div>
-                  <div><span className="font-bold text-gray-600">Range:</span> {ranges.find(r => r.id === userRangeId)?.name || userRangeName}</div>
-                  <div><span className="font-bold text-gray-600">Print Date:</span> {new Date().toLocaleDateString('en-GB')}</div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-gray-300 text-xs">
-                    <thead>
-                      <tr className="bg-gray-100 text-gray-800 font-bold border-b border-gray-300">
-                        <th className="p-2 border-r border-gray-300 w-8 text-center">#</th>
-                        <th className="p-2 border-r border-gray-300 whitespace-nowrap">Date</th>
-                        <th className="p-2 border-r border-gray-300">Payee Name & Account</th>
-                        <th className="p-2 border-r border-gray-300">Unit / Range / SOE</th>
-                        <th className="p-2 border-r border-gray-300">Description / Particulars</th>
-                        <th className="p-2 border-r border-gray-300 text-right">Amount (â‚¹)</th>
-                        <th className="p-2 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentExpenses.map((exp, idx) => {
-                        const p = payees.find(p => p.id === exp.payeeId);
-                        const payeeName = p?.name || exp.payeeName || 'N/A';
-                        const payeeAcc = p?.accountNumber ? `A/C: ${p.accountNumber}` : '';
-                        const al = allocations.find(a => a.id === exp.allocationId);
-                        const r = ranges.find(r => r.id === al?.rangeId);
-                        const s = soes.find(s => s.id === exp.soeId);
-
-                        return (
-                          <tr key={exp.id} className="border-b border-gray-200 hover:bg-gray-50">
-                            <td className="p-2 border-r border-gray-200 text-center font-medium">{idx + 1}</td>
-                            <td className="p-2 border-r border-gray-200 whitespace-nowrap">{exp.date ? exp.date.split('-').reverse().join('/') : ''}</td>
-                            <td className="p-2 border-r border-gray-200 font-medium">
-                              <div>{payeeName}</div>
-                              {payeeAcc && <div className="text-[10px] text-gray-500 font-mono">{payeeAcc}</div>}
-                            </td>
-                            <td className="p-2 border-r border-gray-200">
-                              <div className="font-semibold">{r?.name || 'N/A'} / {s?.name || 'N/A'}</div>
-                            </td>
-                            <td className="p-2 border-r border-gray-200 text-gray-700 italic">{exp.description || '-'}</td>
-                            <td className="p-2 border-r border-gray-200 text-right">
-                              {(() => {
-                                const totalAmt = Number(exp.amount) || 0;
-                                const tds = Math.round(exp.tdsAmount || 0);
-                                const gstTds = Math.round(exp.tdsGstAmount || 0);
-                                const totalDeducted = Math.round(exp.deductedAmount || (tds + gstTds));
-                                const netPayable = Math.round(exp.netAmount ?? (totalAmt - totalDeducted));
-
-                                if (totalDeducted > 0) {
-                                  return (
-                                    <div className="flex flex-col text-[11px] leading-tight text-right space-y-0.5">
-                                      <div className="font-bold text-gray-900">Total: â‚¹{totalAmt.toLocaleString('en-IN')}</div>
-                                      {tds > 0 && <div className="text-[10px] text-red-600 font-medium">TDS: -â‚¹{tds.toLocaleString('en-IN')}</div>}
-                                      {gstTds > 0 && <div className="text-[10px] text-purple-600 font-medium">GST TDS: -â‚¹{gstTds.toLocaleString('en-IN')}</div>}
-                                      {tds === 0 && gstTds === 0 && <div className="text-[10px] text-red-600 font-medium">TDS: -â‚¹{totalDeducted.toLocaleString('en-IN')}</div>}
-                                      <div className="font-bold text-emerald-800 border-t border-gray-300 pt-0.5">Net to Pay: â‚¹{netPayable.toLocaleString('en-IN')}</div>
-                                    </div>
-                                  );
-                                }
-                                return <span className="font-bold text-gray-900">â‚¹{totalAmt.toLocaleString('en-IN')}</span>;
-                              })()}
-                            </td>
-                            <td className="p-2 text-center capitalize font-semibold">{exp.status || 'pending'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
-                        <td colSpan={5} className="p-2.5 text-right uppercase border-r border-gray-300">Total Expenditure Amount:</td>
-                        <td className="p-2.5 text-right text-emerald-800 text-sm font-black border-r border-gray-300">
-                          â‚¹{currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toLocaleString('en-IN')}
-                        </td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-
-                <div className="pt-12 flex justify-between items-end text-xs">
-                  <div>
-                    <p className="font-bold">Prepared By:</p>
-                    <p className="text-gray-500 mt-6">Dealing Assistant / Data Entry Operator</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold">Verified & Authorised By:</p>
-                    <p className="text-gray-500 mt-6">Range Forest Officer / Divisional Forest Officer</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Footer Actions (Hidden in Print) */}
-              <div className="no-print bg-gray-100 p-3 sm:p-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
-                <div className="text-xs text-gray-600 font-medium">
-                  Showing <span className="font-bold text-gray-900">{currentExpenses.length}</span> record(s) â€¢ Total: <span className="font-bold text-emerald-800">â‚¹{currentExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePrintExpenditureReport}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-                  >
-                    <Printer className="w-4 h-4" /> Print Report
-                  </button>
-                  <button
-                    type="button"
-                    onClick={downloadExpenditureListPDF}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" /> Export PDF
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowExpenditurePrintModal(false)}
-                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    Close Preview
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Payee Directory Print / Preview Modal */}
-        {showPayeePrintModal && (
-          <div
-            className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setShowPayeePrintModal(false);
-            }}
-          >
-            <div className="bg-white w-full max-w-5xl h-[92vh] max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col my-auto relative">
-              {/* Modal Toolbar - Hidden during print */}
-              <div className="no-print bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white/20 p-2 rounded-lg">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-lg">Payee Directory - Printable View</h3>
-                    <p className="text-xs text-emerald-100">Total Payees: {filteredPayeesList.length} | Range / Role: {userRangeName || userRole || 'All'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={downloadPayeesPDF}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                    title="Download PDF"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Download</span>
-                  </button>
-                  <button 
-                    onClick={handlePrintPayees}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                    title="Print"
-                  >
-                    <Printer className="w-4 h-4" />
-                    <span className="hidden sm:inline">Print</span>
-                  </button>
-                  <div className="w-px h-6 bg-white/20 mx-1"></div>
-                  <button 
-                    onClick={() => setShowPayeePrintModal(false)}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
-                    title="Close"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Printable Payee Table Area */}
-              <div className="print-area flex-1 overflow-y-auto p-6 md:p-10 space-y-6 bg-white text-gray-900 font-sans">
-                <div className="text-center space-y-1 border-b pb-4">
-                  <h1 className="text-xl font-black uppercase tracking-wide text-gray-900">Department of Forests, Himachal Pradesh</h1>
-                  <h2 className="text-base font-bold text-gray-800">Rajgarh Forest Division â€” Payee Directory Details</h2>
-                  <p className="text-xs text-gray-500 font-medium">Range / Role: {userRangeName || userRole || 'All'} | Date: {new Date().toLocaleDateString('en-GB')}</p>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-gray-300 text-xs">
-                    <thead>
-                      <tr className="bg-gray-100 text-gray-800 font-bold border-b border-gray-300">
-                        <th className="p-2 border-r border-gray-300 w-8 text-center">#</th>
-                        <th className="p-2 border-r border-gray-300">Payee Name</th>
-                        <th className="p-2 border-r border-gray-300">Address</th>
-                        <th className="p-2 border-r border-gray-300">Try Code</th>
-                        <th className="p-2 border-r border-gray-300">Bank Account Details</th>
-                        <th className="p-2 border-r border-gray-300">PAN Number</th>
-                        <th className="p-2 border-r border-gray-300">GST Number</th>
-                        <th className="p-2 border-gray-300">Range</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {filteredPayeesList.map((p, index) => {
-                        const rName = ranges.find(r => r.id === p.rangeId)?.name || 'Not Specified';
-                        return (
-                          <tr key={`payee-print-${p.id}-${index}`} className="hover:bg-gray-50">
-                            <td className="p-2 border-r border-gray-300 text-center">{index + 1}</td>
-                            <td className="p-2 border-r border-gray-300 font-bold text-gray-900">{p.name}</td>
-                            <td className="p-2 border-r border-gray-300 text-gray-600">{p.address}</td>
-                            <td className="p-2 border-r border-gray-300 font-mono text-emerald-800 font-bold">{p.treasuryCode || <span className="text-gray-400 font-normal italic">N/A</span>}</td>
-                            <td className="p-2 border-r border-gray-300 font-mono text-gray-900">
-                              <div className="font-bold">{p.accountNumber}</div>
-                              <div className="text-[10px] text-gray-500">{p.ifscCode || 'N/A'}</div>
-                            </td>
-                            <td className="p-2 border-r border-gray-300 font-mono text-gray-700">{p.panNumber || 'N/A'}</td>
-                            <td className="p-2 border-r border-gray-300 font-mono text-gray-700">{p.gstNumber || 'N/A'}</td>
-                            <td className="p-2 border-gray-300 text-gray-700">{rName}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="pt-8 flex justify-between items-end text-xs font-semibold text-gray-700 border-t">
-                  <div>
-                    <p>Total Registered Payees: {filteredPayeesList.length}</p>
-                    <p className="text-[10px] text-gray-500 font-normal">Generated electronically via Forest Budget Control System</p>
-                  </div>
-                  <div className="text-right">
-                    <p>Divisional Forest Officer / Range Officer</p>
-                    <p className="text-[10px] text-gray-500 font-normal">Rajgarh Forest Division, H.P.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Treasury Code Quick Add/Edit Modal (Restricted to DEO and Admin) */}
-        {treasuryCodeModalPayee && (isAdmin() || isDEO()) && (
-          <div
-            className="fixed inset-0 z-[110] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setTreasuryCodeModalPayee(null);
-                setTreasuryCodeInput('');
-              }
-            }}
-          >
-            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-emerald-100 flex flex-col animate-in fade-in zoom-in duration-200">
-              <div className="bg-gradient-to-r from-emerald-800 to-teal-800 p-4 text-white flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white/20 p-2 rounded-xl">
-                    <Building2 className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base">Treasury Code Assignment</h3>
-                    <p className="text-[11px] text-emerald-200">Government Treasury Portal Payee ID</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTreasuryCodeModalPayee(null);
-                    setTreasuryCodeInput('');
-                  }}
-                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-white cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveTreasuryCode} className="p-5 space-y-4">
-                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-xl p-3.5 space-y-1.5">
-                  <div className="text-xs font-bold text-emerald-950 flex items-center justify-between">
-                    <span>Payee Details</span>
-                    <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-mono px-1.5 py-0.5 rounded">
-                      {ranges.find(r => r.id === treasuryCodeModalPayee.rangeId)?.name || 'All Ranges'}
-                    </span>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900">{treasuryCodeModalPayee.name}</p>
-                  <div className="text-xs text-gray-600 font-mono">
-                    A/C: <span className="font-bold text-gray-800">{treasuryCodeModalPayee.accountNumber}</span>
-                    {treasuryCodeModalPayee.ifscCode && ` â€¢ IFSC: ${treasuryCodeModalPayee.ifscCode}`}
-                  </div>
-                  {treasuryCodeModalPayee.address && (
-                    <div className="text-xs text-gray-500 truncate">{treasuryCodeModalPayee.address}</div>
-                  )}
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-gray-800">
-                    Treasury Code / Portal Payee ID <span className="text-emerald-700">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={treasuryCodeInput}
-                    onChange={(e) => setTreasuryCodeInput(e.target.value)}
-                    placeholder="e.g. TRY-90482 or HPTR-2024-001"
-                    className="w-full px-3.5 py-2.5 border-2 border-emerald-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-600 bg-white"
-                    autoFocus
-                  />
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    Enter the unique identifier assigned to this payee on the Treasury portal when generating treasury bills.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTreasuryCodeModalPayee(null);
-                      setTreasuryCodeInput('');
-                    }}
-                    className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-sm transition-colors cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Save Treasury Code
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'Surrender' && renderSurrenderTab()}
-        {activeTab === 'Approved Budget' && (isAdmin() || isDEO() || userRole === 'DA') && renderBudgetFilesTab('approved')}
-        {activeTab === 'Distributed Budget' && renderBudgetFilesTab('distributed')}
-
-        {activeTab === 'Reconciliation' && renderReconciliation()}
-
-        {activeTab === 'Ledger' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-4">
-              <div className="flex items-center gap-4 flex-1">
-                <h3 className="text-lg font-semibold whitespace-nowrap">Passbook Ledger</h3>
-                <div className="relative flex-1 max-w-md">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search by description, approval ID, hierarchy..."
-                    value={ledgerSearchTerm}
-                    onChange={(e) => setLedgerSearchTerm(e.target.value)}
-                    className="pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
-                  />
-                </div>
-                <button 
-                  onClick={() => setShowLedgerFilters(!showLedgerFilters)}
-                  className={`flex items-center gap-1 px-3 py-2 border rounded-lg text-sm transition-colors ${showLedgerFilters ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white hover:bg-gray-50'}`}
-                >
-                  <Filter className="w-4 h-4" />
-                  <span>Filters</span>
-                  {showLedgerFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-              </div>
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={downloadLedgerPDF}
-                  className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                  title="Download PDF"
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>PDF</span>
-                </button>
-                <button 
-                  onClick={downloadLedgerExcel}
-                  className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                  title="Download Excel"
-                >
-                  <FileBarChart className="w-4 h-4" />
-                  <span>Excel</span>
-                </button>
-                <span className="text-sm font-medium text-emerald-600">FY {fys.find(f => f.id === selectedFY)?.name || selectedFY}</span>
-              </div>
-            </div>
-
-            {showLedgerFilters && (
-              <div className="mb-6 animate-in fade-in slide-in-from-top-2">
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-t-lg border border-gray-200">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Range</label>
-                    <select 
-                      value={ledgerFilters.range}
-                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, range: e.target.value, scheme: '', sector: '', activity: '', subActivity: '', soe: '' })}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Ranges</option>
-                      {uniqueRangesList.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Scheme</label>
-                    <select 
-                      value={ledgerFilters.scheme}
-                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, scheme: e.target.value, sector: '', activity: '', subActivity: '', soe: '' })}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Schemes</option>
-                      {uniqueSchemes.filter(s => {
-                        if (!ledgerFilters.range) return true;
-                        return comprehensiveReportData.some(r => r.range === ledgerFilters.range && r.scheme === s);
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sector</label>
-                    <select 
-                      value={ledgerFilters.sector}
-                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, sector: e.target.value, activity: '', subActivity: '', soe: '' })}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Sectors</option>
-                      {uniqueSectors.filter(s => {
-                        if (!ledgerFilters.range && !ledgerFilters.scheme) return true;
-                        return comprehensiveReportData.some(r => {
-                          const rangeMatch = !ledgerFilters.range || r.range === ledgerFilters.range;
-                          const schemeMatch = !ledgerFilters.scheme || r.scheme === ledgerFilters.scheme;
-                          return rangeMatch && schemeMatch && r.sector === s;
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Activity</label>
-                    <select 
-                      value={ledgerFilters.activity}
-                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, activity: e.target.value, subActivity: '', soe: '' })}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Activities</option>
-                      {uniqueActivities.filter(a => {
-                        if (!ledgerFilters.range && !ledgerFilters.scheme && !ledgerFilters.sector) return true;
-                        return comprehensiveReportData.some(r => {
-                          const rangeMatch = !ledgerFilters.range || r.range === ledgerFilters.range;
-                          const schemeMatch = !ledgerFilters.scheme || r.scheme === ledgerFilters.scheme;
-                          const sectorMatch = !ledgerFilters.sector || r.sector === ledgerFilters.sector;
-                          return rangeMatch && schemeMatch && sectorMatch && r.activity === a;
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sub-Activity</label>
-                    <select 
-                      value={ledgerFilters.subActivity}
-                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, subActivity: e.target.value, soe: '' })}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All Sub-Activities</option>
-                      {uniqueSubActivities.filter(sa => {
-                        if (!ledgerFilters.range && !ledgerFilters.scheme && !ledgerFilters.sector && !ledgerFilters.activity) return true;
-                        return comprehensiveReportData.some(r => {
-                          const rangeMatch = !ledgerFilters.range || r.range === ledgerFilters.range;
-                          const schemeMatch = !ledgerFilters.scheme || r.scheme === ledgerFilters.scheme;
-                          const sectorMatch = !ledgerFilters.sector || r.sector === ledgerFilters.sector;
-                          const activityMatch = !ledgerFilters.activity || r.activity === ledgerFilters.activity;
-                          return rangeMatch && schemeMatch && sectorMatch && activityMatch && r.subActivity === sa;
-                        });
-                      }).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SOE</label>
-                    <select 
-                      value={ledgerFilters.soe}
-                      onChange={(e) => setLedgerFilters({ ...ledgerFilters, soe: e.target.value })}
-                      className="w-full p-2 border border-gray-300 rounded text-xs bg-white"
-                    >
-                      <option value="">All SOEs</option>
-                      {uniqueSoes.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div className="lg:col-span-6 flex justify-end">
-                    <button 
-                      onClick={() => {
-                        setLedgerFilters({ scheme: '', sector: '', activity: '', subActivity: '', range: '', soe: '' });
-                        setLedgerSearchTerm('');
-                      }}
-                      className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
-                    >
-                      <X className="w-3 h-3" />
-                      Reset Filters
-                    </button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 bg-emerald-50 rounded-b-lg border-x border-b border-gray-200">
-                  <div className="flex justify-between items-center px-2">
-                    <span className="text-[10px] font-bold text-emerald-800 uppercase">Total Credit:</span>
-                    <span className="text-sm font-bold text-emerald-700">â‚¹{filteredLedgerData.totals.credit.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center px-2 border-x border-emerald-100">
-                    <span className="text-[10px] font-bold text-red-800 uppercase">Total Debit:</span>
-                    <span className="text-sm font-bold text-red-700">â‚¹{filteredLedgerData.totals.debit.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center px-2">
-                    <span className="text-[10px] font-bold text-blue-800 uppercase">Net Balance:</span>
-                    <span className="text-sm font-bold text-blue-700">â‚¹{filteredLedgerData.totals.balance.toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-600 text-sm">
-                    <th className="p-3 border-b">Date</th>
-                    <th className="p-3 border-b">Range</th>
-                    <th className="p-3 border-b">Hierarchy & SOE</th>
-                    <th className="p-3 border-b">Description</th>
-                    <th className="p-3 border-b">Approval ID</th>
-                    <th className="p-3 border-b text-right">Credit (Allocated)</th>
-                    <th className="p-3 border-b text-right">Debit (Expense)</th>
-                    <th className="p-3 border-b text-right">Balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLedgerData.allocations.map(alloc => {
-                    const r = ranges.find(r => r.id === alloc.rangeId);
-                    const soeNames = alloc.fundedSOEs?.map(f => soes.find(s => s.id === f.soeId)?.name).filter(Boolean).join(', ') || 'Pending Funds';
-                    
-                    let hierarchy = '';
-                    if (alloc.subActivityId) {
-                      const sa = subActivities.find(sa => sa.id === alloc.subActivityId);
-                      const act = activities.find(a => a.id === sa?.activityId);
-                      const sec = sectors.find(sec => sec.id === act?.sectorId);
-                      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-                      hierarchy = [sch?.name, sec?.name, act?.name, sa?.name].filter(Boolean).join(' -> ');
-                    } else if (alloc.activityId) {
-                      const act = activities.find(a => a.id === alloc.activityId);
-                      const sec = sectors.find(sec => sec.id === act?.sectorId);
-                      const sch = schemes.find(sc => sc.id === (sec ? sec.schemeId : act?.schemeId));
-                      hierarchy = [sch?.name, sec?.name, act?.name].filter(Boolean).join(' -> ');
-                    }
-                    
-                    const allocExpenses = expenses.filter(e => e.allocationId === alloc.id && e.status !== 'rejected').sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                    
-                    let currentBalance = alloc.amount;
-                    
-                    return (
-                      <React.Fragment key={`alloc-${alloc.id}`}>
-                        {/* Initial Allocation Row */}
-                        <tr className="bg-blue-50/30 border-b">
-                          <td className="p-3 text-gray-400">-</td>
-                          <td className="p-3 font-medium">{r?.name}</td>
-                          <td className="p-3 font-medium">
-                            <div className="text-xs text-gray-500">{hierarchy || 'N/A'}</div>
-                            <div>{soeNames}</div>
-                          </td>
-                          <td className="p-3 italic text-gray-600">Initial Allocation</td>
-                          <td className="p-3 text-gray-400">-</td>
-                          <td className="p-3 text-right text-emerald-600 font-bold">â‚¹{alloc.amount.toLocaleString()}</td>
-                          <td className="p-3 text-right">-</td>
-                          <td className="p-3 text-right text-blue-600 font-bold">â‚¹{currentBalance.toLocaleString()}</td>
-                        </tr>
-                        {/* Expense Rows */}
-                        {allocExpenses.map(exp => {
-                          currentBalance -= exp.amount;
-                          return (
-                            <tr key={`exp-${exp.id}`} className="border-b hover:bg-gray-50">
-                              <td className="p-3">{exp.date ? exp.date.split('-').reverse().join('/') : ''}</td>
-                              <td className="p-3">{r?.name}</td>
-                              <td className="p-3">
-                                <div className="text-xs text-gray-500">{hierarchy || 'N/A'}</div>
-                                <div>{soeNames}</div>
-                                {alloc.activityId && (
-                                  <div className="text-[10px] bg-blue-50 text-blue-600 px-1 rounded inline-block mt-1">
-                                    Activity: {activities.find(a => a.id === alloc.activityId)?.name}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="p-3">{exp.description}</td>
-                              <td className="p-3 font-mono text-xs">{exp.approvalId ? `#${exp.approvalId}` : '-'}</td>
-                              <td className="p-3 text-right">-</td>
-                              <td className="p-3 text-right text-red-600">â‚¹{exp.amount.toLocaleString()}</td>
-                              <td className="p-3 text-right text-blue-600 font-bold">â‚¹{currentBalance.toLocaleString()}</td>
-                            </tr>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
-                  {filteredLedgerData.allocations.length === 0 && <tr><td colSpan={8} className="p-4 text-center text-gray-500">No allocations found for this Financial Year.</td></tr>}
-                </tbody>
-                {filteredLedgerData.allocations.length > 0 && (
-                  <tfoot className="bg-gray-50 font-bold border-t-2 border-gray-200">
-                    <tr>
-                      <td colSpan={5} className="p-3 text-right text-gray-700">GRAND TOTAL:</td>
-                      <td className="p-3 text-right text-emerald-700">â‚¹{filteredLedgerData.totals.credit.toLocaleString()}</td>
-                      <td className="p-3 text-right text-red-700">â‚¹{filteredLedgerData.totals.debit.toLocaleString()}</td>
-                      <td className="p-3 text-right text-blue-700">â‚¹{filteredLedgerData.totals.balance.toLocaleString()}</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'Reports' && renderReports()}
-        {activeTab === 'Audit Log' && (userRole === 'admin' || userRole === 'deo' || userRole === 'DA' || userRole === 'approver') && renderAuditLogTab()}
-        {activeTab === 'Users' && userRole === 'admin' && renderUserManagement()}
-
-        {renderFundingModal()}
-        {renderApprovalModal()}
-        {renderSoeExpModal()}
-
-        {/* Global Alert Modal */}
-        {alertModal.isOpen && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
-              <div className="bg-emerald-600 p-4 text-white flex justify-between items-center">
-                <h3 className="font-bold">Notification</h3>
-                <button onClick={() => setAlertModal({ ...alertModal, isOpen: false })}><X className="w-5 h-5" /></button>
-              </div>
-              <div className="p-6">
-                <p className="text-gray-700">{alertModal.message}</p>
-                <div className="mt-6 flex justify-end">
-                  <button 
-                    onClick={() => setAlertModal({ ...alertModal, isOpen: false })}
-                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors font-medium"
-                  >
-                    OK
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Global Confirm Modal */}
-        {confirmModal.isOpen && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
-              <div className="bg-amber-500 p-4 text-white flex justify-between items-center">
-                <h3 className="font-bold">Confirm Action</h3>
-                <button onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}><X className="w-5 h-5" /></button>
-              </div>
-              <div className="p-6">
-                <p className="text-gray-700">{confirmModal.message}</p>
-                <div className="mt-6 flex justify-end gap-3">
-                  <button 
-                    onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    onClick={() => {
-                      confirmModal.onConfirm();
-                      setConfirmModal({ ...confirmModal, isOpen: false });
-                    }}
-                    className="bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 transition-colors font-medium"
-                  >
-                    Confirm
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* PDF Viewer Modal */}
-        {viewingBillPdf && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200] p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
-              <div className="bg-emerald-600 p-4 text-white flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white/20 p-2 rounded-lg">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-lg">Bill PDF Viewer</h3>
-                    <p className="text-xs text-emerald-100">Bill No: {viewingBillPdf.bill.billNo} | Date: {viewingBillPdf.bill.billDate ? viewingBillPdf.bill.billDate.split('-').reverse().join('/') : 'N/A'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => {
-                      const link = document.createElement('a');
-                      link.href = viewingBillPdf.url;
-                      link.download = `bill_${viewingBillPdf.bill.billNo || 'document'}.pdf`;
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-                    }}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                    title="Download PDF"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Download</span>
-                  </button>
-                  <button 
-                    onClick={() => {
-                      const frame = document.getElementById('bill-pdf-iframe') as HTMLIFrameElement;
-                      if (frame && frame.contentWindow) {
-                        try {
-                          frame.contentWindow.focus();
-                          frame.contentWindow.print();
-                        } catch (e) {
-                          window.print();
-                        }
-                      } else {
-                        window.print();
-                      }
-                    }}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium cursor-pointer"
-                    title="Print PDF"
-                  >
-                    <Printer className="w-4 h-4" />
-                    <span className="hidden sm:inline">Print</span>
-                  </button>
-                  <div className="w-px h-6 bg-white/20 mx-1"></div>
-                  <button 
-                    onClick={() => {
-                      URL.revokeObjectURL(viewingBillPdf.url);
-                      setViewingBillPdf(null);
-                    }}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 bg-gray-100 p-4 overflow-hidden">
-                <iframe 
-                  id="bill-pdf-iframe"
-                  src={`${viewingBillPdf.url}#toolbar=0`} 
-                  className="w-full h-full rounded-lg border border-gray-200 shadow-inner bg-white"
-                  title="Bill PDF"
-                />
-              </div>
-              <div className="bg-gray-50 p-3 border-t flex justify-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
-                Forest Budget Control System â€¢ Treasury Bill Format
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Bill QR Code Generation & Verification Modal */}
-        {viewingBillQR && (() => {
-          const { bill, qrDataUrl } = viewingBillQR;
-          const billExpenses = expenses.filter(e => bill.expenseIds.includes(e.id));
-          const firstExp = billExpenses[0];
-          const al = allocations.find(a => a.id === firstExp?.allocationId);
-          const rangeObj = ranges.find(r => r.id === al?.rangeId);
-          const soeObj = soes.find(s => s.id === firstExp?.soeId);
-          const verificationUrl = `${window.location.origin}${window.location.pathname}?verifyBill=${encodeURIComponent(bill.id)}`;
-
-          return (
-            <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[210] animate-in fade-in duration-200">
-              <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-emerald-200 transform transition-all space-y-4 max-h-[92vh] overflow-y-auto">
-                {/* Modal Header */}
-                <div className="flex items-start justify-between gap-3 border-b pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-2xl bg-emerald-100 text-emerald-800 shrink-0">
-                      <QrCode className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-bold text-gray-900 leading-snug">
-                          Bill QR Verification Pass
-                        </h3>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${bill.status === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
-                          {bill.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 font-medium">
-                        H.P. Forest Department â€¢ Rajgarh Forest Division
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setViewingBillQR(null)}
-                    className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* QR Code Graphic Card */}
-                <div className="bg-gradient-to-b from-emerald-50/70 to-teal-50/50 p-5 rounded-2xl border border-emerald-100 flex flex-col items-center justify-center text-center">
-                  <div className="relative p-3 bg-white rounded-2xl border-2 border-emerald-500/30 shadow-md">
-                    <img 
-                      src={qrDataUrl} 
-                      alt={`QR Code for Bill ${bill.billNo}`} 
-                      className="w-48 h-48 rounded-lg object-contain"
-                    />
-                    <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 whitespace-nowrap">
-                      <Smartphone className="w-3 h-3" />
-                      <span>Scan with Mobile</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-1">
-                    <div className="text-sm font-bold text-gray-900 font-mono tracking-tight">
-                      Bill #{bill.billNo}
-                    </div>
-                    <p className="text-[11px] text-gray-600 max-w-xs">
-                      Field officers can point any mobile phone camera at this QR code to instantly verify bill authenticity, live status, and itemized expenditures.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Bill Metadata Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-medium block">Total Amount</span>
-                    <span className="font-bold text-emerald-700 text-xs font-mono">
-                      â‚¹{bill.totalAmount.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-medium block">Bill Date</span>
-                    <span className="font-semibold text-gray-800 text-xs">
-                      {bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-medium block">Range</span>
-                    <span className="font-semibold text-gray-800 text-xs truncate block">
-                      {rangeObj?.name || 'Division'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-medium block">SOE Head</span>
-                    <span className="font-semibold text-gray-800 text-xs truncate block">
-                      {soeObj?.name || 'N/A'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Direct Verification Link Field */}
-                <div className="space-y-1">
-                  <label className="block text-[11px] font-bold text-gray-700">
-                    Direct Mobile Verification Link:
-                  </label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      readOnly 
-                      value={verificationUrl}
-                      className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-xl text-[11px] font-mono text-gray-700 select-all outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleCopyBillVerificationLink(bill)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                        copiedQRLink ? 'bg-emerald-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                      }`}
-                      title="Copy Verification Link"
-                    >
-                      {copiedQRLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedQRLink ? 'Copied!' : 'Copy'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Action Buttons Toolbar */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadBillQR(bill, qrDataUrl)}
-                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Save PNG</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintBillQRPad(bill, qrDataUrl)}
-                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Print Slip</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setViewingBillQR(null);
-                      setVerifyingBillId(bill.id);
-                    }}
-                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
-                  >
-                    <Scan className="w-3.5 h-3.5" />
-                    <span>Live Verify</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setViewingBillQR(null);
-                      handleViewBill(bill);
-                    }}
-                    className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>View PDF</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Field Officer Live Mobile Bill Verification Screen / Modal */}
-        {verifyingBillId && (() => {
-          const bill = verifyingBillData;
-          const billExpenses = bill ? expenses.filter(e => bill.expenseIds.includes(e.id)) : [];
-          const firstExp = billExpenses[0];
-          const al = allocations.find(a => a.id === firstExp?.allocationId);
-          const rangeObj = ranges.find(r => r.id === al?.rangeId);
-          const soeObj = soes.find(s => s.id === firstExp?.soeId);
-          const activeFy = bill ? (fys.find(f => f.id === bill.fyId || f.name === bill.financialYear)?.name || bill.financialYear) : '';
-
-          return (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[220] animate-in fade-in duration-200">
-              <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-emerald-300 transform transition-all space-y-4 max-h-[94vh] overflow-y-auto">
-                {/* Government Header */}
-                <div className="bg-gradient-to-r from-emerald-800 to-teal-800 -m-5 sm:-m-6 mb-2 p-5 text-white rounded-t-3xl shadow-sm relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVerifyingBillId(null);
-                      setVerifyingBillData(null);
-                      // Clear url query if present
-                      if (window.history && window.history.replaceState) {
-                        const newUrl = window.location.pathname;
-                        window.history.replaceState({}, document.title, newUrl);
-                      }
-                    }}
-                    className="absolute top-4 right-4 p-1.5 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors cursor-pointer"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-white/20 rounded-2xl backdrop-blur-xs shrink-0">
-                      <TreePine className="w-6 h-6 text-emerald-200" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-200">
-                        H.P. Forest Department â€¢ Rajgarh Division
-                      </div>
-                      <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight">
-                        Treasury Bill Status Verification
-                      </h3>
-                    </div>
-                  </div>
-                </div>
-
-                {isVerifyingLoading && (
-                  <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
-                    <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin" />
-                    <p className="text-xs font-semibold text-gray-600">Verifying bill credentials with forest central database...</p>
-                  </div>
-                )}
-
-                {!isVerifyingLoading && !bill && (
-                  <div className="py-8 text-center space-y-4">
-                    <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
-                      <AlertTriangle className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-900">Bill Record Not Found</h4>
-                      <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-                        No official bill matches ID/Number &quot;{verifyingBillId}&quot;. Please verify the QR code or enter a valid bill number.
-                      </p>
-                    </div>
-                    <div className="flex max-w-xs mx-auto gap-2">
-                      <input
-                        type="text"
-                        placeholder="Search Bill No..."
-                        value={verifySearchInput}
-                        onChange={(e) => setVerifySearchInput(e.target.value)}
-                        className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (verifySearchInput.trim()) {
-                            setVerifyingBillId(verifySearchInput.trim());
-                            setVerifySearchInput('');
-                          }
-                        }}
-                        className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700"
-                      >
-                        Search
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {!isVerifyingLoading && bill && (
-                  <>
-                    {/* Live Verification Badge */}
-                    <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
-                      bill.status === 'finalized' 
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
-                        : 'bg-blue-50 border-blue-200 text-blue-900'
-                    }`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-xl shrink-0 ${
-                          bill.status === 'finalized' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'
-                        }`}>
-                          {bill.status === 'finalized' ? <ShieldCheck className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-extrabold uppercase tracking-wider">
-                            Official Authenticity Status
-                          </div>
-                          <div className="text-sm sm:text-base font-extrabold">
-                            {bill.status === 'finalized' ? 'OFFICIALLY FINALIZED & VERIFIED' : 'DRAFT BILL (IN PROGRESS)'}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider inline-block ${
-                          bill.status === 'finalized' ? 'bg-emerald-200 text-emerald-900' : 'bg-blue-200 text-blue-900'
-                        }`}>
-                          {bill.status}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Primary Key Metrics */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs">
-                      <div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Bill Number</span>
-                        <span className="font-mono font-bold text-sm text-emerald-800">
-                          {bill.billNo}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Total Net Amount</span>
-                        <span className="font-mono font-extrabold text-sm text-emerald-700">
-                          â‚¹{bill.totalAmount.toLocaleString('en-IN')}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Bill Date</span>
-                        <span className="font-semibold text-gray-900">
-                          {bill.billDate ? bill.billDate.split('-').reverse().join('/') : 'N/A'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Financial Year</span>
-                        <span className="font-semibold text-gray-900">
-                          {activeFy || 'N/A'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase block">Range / Office</span>
-                        <span className="font-semibold text-gray-900 truncate block">
-                          {rangeObj?.name || 'Rajgarh Forest Division'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase block">SOE Head</span>
-                        <span className="font-semibold text-gray-900 truncate block">
-                          {soeObj?.name || 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Remarks if any */}
-                    {bill.remarks && (
-                      <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-xs">
-                        <span className="font-bold text-amber-900 block text-[10px] uppercase">Remarks / Notes:</span>
-                        <span className="text-gray-800">{bill.remarks}</span>
-                      </div>
-                    )}
-
-                    {/* Itemized Expenditures List */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-gray-700">
-                        <span>Itemized Expenditures ({billExpenses.length} entries):</span>
-                        <span className="text-emerald-700 font-mono">
-                          Total: â‚¹{bill.totalAmount.toLocaleString('en-IN')}
-                        </span>
-                      </div>
-                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-2xl divide-y divide-gray-100 bg-white shadow-2xs">
-                        {billExpenses.map((exp, idx) => {
-                          const s = soes.find(s => s.id === exp.soeId);
-                          const p = payees.find(p => p.id === exp.payeeId);
-                          return (
-                            <div key={exp.id || idx} className="p-2.5 text-xs flex justify-between items-start gap-2 hover:bg-gray-50">
-                              <div className="min-w-0 flex-1 space-y-0.5">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] font-bold text-gray-400">#{idx + 1}</span>
-                                  <span className="font-semibold text-gray-900">
-                                    {exp.date ? exp.date.split('-').reverse().join('/') : 'N/A'}
-                                  </span>
-                                  <span className="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.2 rounded font-medium">
-                                    {s?.name || 'SOE'}
-                                  </span>
-                                </div>
-                                <div className="text-gray-600 text-[11px] truncate">
-                                  {p?.name ? `Payee: ${p.name} â€¢ ` : ''}{exp.description || 'No description'}
-                                </div>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <span className="font-mono font-bold text-emerald-800">
-                                  â‚¹{exp.amount.toLocaleString('en-IN')}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Security Footnote & Timestamp */}
-                    <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-[10px] text-gray-500 space-y-0.5">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-gray-700">Digital Reference:</span>
-                        <span className="font-mono text-emerald-800">HPFD-BILL-{bill.id.substring(0, 8).toUpperCase()}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span>Live Verification Timestamp:</span>
-                        <span>{new Date().toLocaleString('en-IN')}</span>
-                      </div>
-                    </div>
-
-                    {/* Field Officer Action Buttons */}
-                    <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenBillQR(bill)}
-                        className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <QrCode className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>View QR Code</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleViewBill(bill)}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>View PDF</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Duplicate Payee Popup Alert Modal */}
-        {duplicatePayeeModalData && (() => {
-          const isAlreadyMapped = (
-            duplicatePayeeModalData.existingPayee.createdBy === user?.uid ||
-            Boolean(duplicatePayeeModalData.existingPayee.mappedUserIds && duplicatePayeeModalData.existingPayee.mappedUserIds.includes(user?.uid || '')) ||
-            Boolean(userRangeId && duplicatePayeeModalData.existingPayee.rangeId === userRangeId) ||
-            Boolean(userRangeId && duplicatePayeeModalData.existingPayee.mappedRangeIds && duplicatePayeeModalData.existingPayee.mappedRangeIds.includes(userRangeId))
-          );
-          const creatorRangeName = ranges.find(r => r.id === duplicatePayeeModalData.existingPayee.rangeId)?.name || 'General / Master Directory';
-
-          return (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-emerald-200 transform transition-all">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-full shrink-0 ${isAlreadyMapped ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {isAlreadyMapped ? <AlertTriangle className="w-6 h-6" /> : <UserCheck className="w-6 h-6" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-bold text-gray-900 leading-snug">
-                      {isAlreadyMapped ? 'Payee Already in Your Account' : 'Payee Already Registered'}
-                    </h3>
-                    <p className="text-xs text-gray-600 mt-1">
-                      {isAlreadyMapped ? (
-                        <span>
-                          This Bank Account Number is already registered and available in your account (<strong>{userRangeName || userRole || 'your range'}</strong>). You can directly use it in Expenditures and Memos for Fund.
-                        </span>
-                      ) : (
-                        <span>
-                          This Bank Account Number was registered by <strong>{creatorRangeName}</strong>. You can map this existing payee to your user ID / Range (<strong>{userRangeName || userRole || 'your user ID'}</strong>) to make payments without creating duplicate records.
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
-                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Registered Payee Details:</div>
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-gray-500 font-medium">Payee Name:</span>
-                    <span className="font-bold text-gray-900">{duplicatePayeeModalData.existingPayee.name}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-gray-500 font-medium">Account Number:</span>
-                    <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                      {duplicatePayeeModalData.existingPayee.accountNumber}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-gray-500 font-medium">IFSC Code:</span>
-                    <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.ifscCode || 'N/A'}</span>
-                  </div>
-                  {duplicatePayeeModalData.existingPayee.treasuryCode && (
-                    <div className="flex justify-between items-center py-0.5">
-                      <span className="text-gray-500 font-medium">Treasury Code:</span>
-                      <span className="font-mono font-medium text-gray-800">{duplicatePayeeModalData.existingPayee.treasuryCode}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-gray-500 font-medium">Original Range:</span>
-                    <span className="font-medium text-gray-800">
-                      {creatorRangeName}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-5 flex flex-col sm:flex-row items-center justify-end gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setDuplicatePayeeModalData(null)}
-                    className="w-full sm:w-auto px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  {!isAlreadyMapped ? (
-                    <button
-                      type="button"
-                      onClick={() => handleMapPayeeToUser(duplicatePayeeModalData.existingPayee)}
-                      className="w-full sm:w-auto px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <UserCheck className="w-4 h-4" />
-                      <span>MAP User & Range</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDuplicatePayeeModalData(null)}
-                      className="w-full sm:w-auto px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
-                    >
-                      OK, Understood
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Memo Return for Correction with Remarks Modal (DEO and Admin) */}
-        {memoCorrectionModalData && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-amber-200 transform transition-all space-y-4">
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3 border-b pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-amber-100 text-amber-700 shrink-0">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-gray-900 leading-snug">
-                      Return Memo for Correction
-                    </h3>
-                    <p className="text-xs text-gray-500 font-medium">
-                      Memo #{memoCorrectionModalData.memo.memoNo} â€¢ {memoCorrectionModalData.memo.rangeName || 'Range'}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMemoCorrectionModalData(null)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Memo Summary details */}
-              <div className="grid grid-cols-3 gap-2 bg-amber-50/60 p-2.5 rounded-xl border border-amber-200 text-xs">
-                <div>
-                  <span className="text-[10px] text-gray-500 block">Total Amount</span>
-                  <span className="font-mono font-bold text-gray-900 text-xs">
-                    â‚¹{Math.round(Number(memoCorrectionModalData.memo.totalNetRtgs) || Number(memoCorrectionModalData.memo.totalAmount) || 0).toLocaleString('en-IN')}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-gray-500 block">Month/Period</span>
-                  <span className="font-semibold text-gray-800 text-xs">
-                    {memoCorrectionModalData.memo.monthYear}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-gray-500 block">Payees</span>
-                  <span className="font-semibold text-gray-800 text-xs">
-                    {memoCorrectionModalData.memo.payeeEntries?.length || 0} Entries
-                  </span>
-                </div>
-              </div>
-
-              {/* Quick Remarks Presets */}
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-gray-700">
-                  Quick Correction Reason Presets:
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    'Bank account or IFSC mismatch',
-                    'Voucher / Bill amount mismatch',
-                    'SOE Head or Scheme incorrect',
-                    'Supporting document/bill copy missing',
-                    'Income tax / GST deduction calculation error'
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => {
-                        const current = memoCorrectionModalData.remarks;
-                        const newRemarks = current.trim() ? `${current.trim()}, ${preset}` : preset;
-                        setMemoCorrectionModalData({ ...memoCorrectionModalData, remarks: newRemarks });
-                      }}
-                      className="px-2 py-1 bg-gray-100 hover:bg-amber-100 text-gray-700 hover:text-amber-900 rounded-lg text-[10px] font-semibold border border-gray-200 transition-colors cursor-pointer"
-                    >
-                      + {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Remarks Textarea */}
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-gray-800">
-                  Correction Remarks & Instructions <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={4}
-                  value={memoCorrectionModalData.remarks}
-                  onChange={(e) => setMemoCorrectionModalData({ ...memoCorrectionModalData, remarks: e.target.value })}
-                  placeholder="Clearly describe the errors or corrections required by the user (e.g. Please rectify IFSC code for payee Laxmi and verify the voucher amount before resubmitting)..."
-                  className="w-full p-2.5 border border-amber-300 rounded-xl bg-white text-xs font-medium text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none leading-relaxed"
-                />
-                <p className="text-[10px] text-gray-500">
-                  These remarks will be displayed prominently to the user when they view and edit the memo.
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t">
-                <button
-                  type="button"
-                  onClick={() => setMemoCorrectionModalData(null)}
-                  disabled={isSendingCorrection}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmSendBackForCorrection}
-                  disabled={isSendingCorrection || !memoCorrectionModalData.remarks.trim()}
-                  className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
-                    isSendingCorrection || !memoCorrectionModalData.remarks.trim()
-                      ? 'bg-amber-300 text-amber-800 cursor-not-allowed'
-                      : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{isSendingCorrection ? 'Returning Memo...' : 'Send Back for Correction'}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Memo Pull Back with Remarks Modal for Range Users */}
-        {memoPullBackModalData && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-orange-200 transform transition-all space-y-4">
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3 border-b pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-orange-100 text-orange-700 shrink-0">
-                    <Undo2 className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-gray-900 leading-snug">
-                      Pull Back Submitted Memo
-                    </h3>
-                    <p className="text-xs text-gray-500 font-medium">
-                      Memo #{memoPullBackModalData.memo.memoNo} â€¢ {memoPullBackModalData.memo.rangeName || 'Range'}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMemoPullBackModalData(null)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Memo Summary details */}
-              <div className="grid grid-cols-3 gap-2 bg-orange-50/60 p-2.5 rounded-xl border border-orange-200 text-xs">
-                <div>
-                  <span className="text-[10px] text-gray-500 block">Total Amount</span>
-                  <span className="font-mono font-bold text-gray-900 text-xs">
-                    â‚¹{Math.round(Number(memoPullBackModalData.memo.totalNetRtgs) || Number(memoPullBackModalData.memo.totalAmount) || 0).toLocaleString('en-IN')}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-gray-500 block">Month/Period</span>
-                  <span className="font-semibold text-gray-800 text-xs">
-                    {memoPullBackModalData.memo.monthYear}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-gray-500 block">Payees</span>
-                  <span className="font-semibold text-gray-800 text-xs">
-                    {memoPullBackModalData.memo.payeeEntries?.length || 0} Entries
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs leading-relaxed">
-                <p className="font-medium">
-                  This memo has not yet been reviewed by Headquarter / Admin. Pulling it back unlocks it to <strong>Draft</strong> so you can edit details, adjust amounts, or add/delete payees.
-                </p>
-              </div>
-
-              {/* Quick Reason Presets */}
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-gray-700">
-                  Quick Pull Back Reason Presets:
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    'Need to correct Payee Bank / IFSC Details',
-                    'Need to adjust Payee Bill Amount / Tax',
-                    'Need to delete / remove a Payee',
-                    'Need to add more Payees to this Memo',
-                    'SOE Head or Scheme correction needed'
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => {
-                        const current = memoPullBackModalData.remarks;
-                        const newRemarks = current.trim() ? `${current.trim()}, ${preset}` : preset;
-                        setMemoPullBackModalData({ ...memoPullBackModalData, remarks: newRemarks });
-                      }}
-                      className="px-2 py-1 bg-gray-100 hover:bg-orange-100 text-gray-700 hover:text-orange-900 rounded-lg text-[10px] font-semibold border border-gray-200 transition-colors cursor-pointer"
-                    >
-                      + {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Remarks Textarea */}
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-gray-800">
-                  Reason / Remarks for Pulling Back <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={3}
-                  value={memoPullBackModalData.remarks}
-                  onChange={(e) => setMemoPullBackModalData({ ...memoPullBackModalData, remarks: e.target.value })}
-                  placeholder="State why you are pulling back this memo (e.g. need to correct payee account number, remove payee, amount adjustment)..."
-                  className="w-full p-2.5 border border-orange-300 rounded-xl bg-white text-xs font-medium text-gray-900 focus:ring-2 focus:ring-orange-500 outline-none leading-relaxed"
-                />
-                <p className="text-[10px] text-gray-500">
-                  * Pull-back remarks will be recorded and visible in the memo details.
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t">
-                <button
-                  type="button"
-                  onClick={() => setMemoPullBackModalData(null)}
-                  disabled={isPullingBack}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmPullBack}
-                  disabled={isPullingBack || !memoPullBackModalData.remarks.trim()}
-                  className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
-                    isPullingBack || !memoPullBackModalData.remarks.trim()
-                      ? 'bg-orange-300 text-orange-800 cursor-not-allowed'
-                      : 'bg-orange-600 hover:bg-orange-700 text-white active:scale-95'
-                  }`}
-                >
-                  <Undo2 className="w-3.5 h-3.5" />
-                  <span>{isPullingBack ? 'Pulling Back...' : 'Confirm Pull Back'}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-      </div>
-    </div>
-  );
-}
-
-function CascadingDropdowns({ 
-  schemes = [], sectors = [], activities = [], subActivities = [], soes = [], soeBudgets = [], allocations = [], surrenders = [], ranges = [], expenses = [],
-  editingItem, type, children, onSelectionChange, onBalanceChange, userRangeId, userRole,
-  showSector, showActivity, showSubActivity, showSoe, showRange, showConfirm
-}: any) {
-  const [schemeId, setSchemeId] = useState('');
-  const [sectorId, setSectorId] = useState('');
-  const [activityId, setActivityId] = useState('');
-  const [subActivityId, setSubActivityId] = useState('');
-  const [soeId, setSoeId] = useState('');
-  const [allocationId, setAllocationId] = useState('');
-  const [fundingSoeName, setFundingSoeName] = useState('');
-  const [rangeId, setRangeId] = useState(userRangeId || '');
-  const lastInitializedId = useRef<string | null>(null);
-  const lastSelection = useRef<any>(null);
-  const lastBalance = useRef<number | undefined>(undefined);
-
-  // Notify parent of selection changes
-  useEffect(() => {
-    if (onSelectionChange) {
-      const currentSelection = { schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId, allocationId };
-      const selectionChanged = !lastSelection.current || 
-        Object.keys(currentSelection).some(key => (currentSelection as any)[key] !== (lastSelection.current as any)[key]);
-      
-      if (selectionChanged) {
-        lastSelection.current = currentSelection;
-        onSelectionChange(currentSelection);
-      }
-    }
-  }, [schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId, allocationId, onSelectionChange]);
-
-  // Calculate and notify parent of balance changes (Expenditure only)
-  useEffect(() => {
-    if (type === 'Expenditure' && onBalanceChange) {
-      const currentAlloc = allocations.find((a: any) => a.id === allocationId);
-      const targetRangeId = currentAlloc?.rangeId || (userRangeId ? userRangeId : rangeId);
-
-      if (schemeId && targetRangeId && soeId) {
-        const selectedSoe = soes.find((s: any) => s.id === soeId);
-        const selectedName = selectedSoe?.name || 'Unnamed SOE';
-
-        // Aggregate allocation for this hierarchy and SOE Name
-        const totalAllocatedForSoe = allocations.filter((a: any) => 
-          a.rangeId === targetRangeId &&
-          a.schemeId === schemeId &&
-          (a.sectorId || null) === (sectorId || null) &&
-          (a.activityId || null) === (activityId || null) &&
-          (a.subActivityId || null) === (subActivityId || null)
-        ).reduce((sum: number, a: any) => {
-          const funded = a.fundedSOEs?.find((f: any) => {
-            const s = soes.find((soe: any) => soe.id === f.soeId);
-            return (s?.name || 'Unnamed SOE') === selectedName;
-          });
-          return sum + (funded?.amount || 0);
-        }, 0);
-
-        // Aggregate expenditure for this hierarchy and SOE Name
-        const totalSpentForSoe = expenses.filter((e: any) => {
-          const eAlloc = allocations.find((a: any) => a.id === e.allocationId);
-          const eSoeName = soes.find((s: any) => s.id === e.soeId)?.name;
-          return (
-            eAlloc &&
-            eAlloc.rangeId === targetRangeId &&
-            eAlloc.schemeId === schemeId &&
-            (eAlloc.sectorId || null) === (sectorId || null) &&
-            (eAlloc.activityId || null) === (activityId || null) &&
-            (eAlloc.subActivityId || null) === (subActivityId || null) &&
-            eSoeName === selectedName &&
-            e.status !== 'rejected' &&
-            (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true)
-          );
-        }).reduce((sum: number, e: any) => sum + e.amount, 0);
-
-        const balance = totalAllocatedForSoe - totalSpentForSoe;
-        if (balance !== lastBalance.current) {
-          lastBalance.current = balance;
-          onBalanceChange(balance);
-        }
-      } else {
-        if (lastBalance.current !== undefined) {
-          lastBalance.current = undefined;
-          onBalanceChange(undefined);
-        }
-      }
-    }
-  }, [schemeId, sectorId, activityId, subActivityId, rangeId, allocationId, soeId, allocations, expenses, type, onBalanceChange, editingItem, soes, userRangeId]);
-
-  // Initialize state based on editingItem
-  useEffect(() => {
-    if (editingItem?.item && editingItem.type === type) {
-      if (lastInitializedId.current === editingItem.item.id) return;
-      lastInitializedId.current = editingItem.item.id;
-
-      const item = editingItem.item;
-      let currentSoeId = '';
-      let currentSubActivityId = '';
-      let currentActivityId = '';
-      let currentSectorId = '';
-      let currentSchemeId = '';
-      let currentRangeId = userRangeId || '';
-
-      if (type === 'Expenditure') {
-        const alloc = allocations.find((a: any) => a.id === item.allocationId);
-        setAllocationId(item.allocationId);
-        currentSoeId = item.soeId || alloc?.soeId || '';
-        currentSubActivityId = alloc?.subActivityId || '';
-        currentActivityId = alloc?.activityId || '';
-        currentSectorId = alloc?.sectorId || '';
-        currentSchemeId = alloc?.schemeId || '';
-        currentRangeId = alloc?.rangeId || userRangeId || '';
-      } else if (type === 'Allocation') {
-        currentSoeId = item.soeId;
-        currentSubActivityId = item.subActivityId || '';
-        currentActivityId = item.activityId || '';
-        currentSectorId = item.sectorId || '';
-        currentSchemeId = item.schemeId || '';
-        currentRangeId = item.rangeId || userRangeId || '';
-        
-        // Initialize fundingSoeName if it's an allocation with funded SOEs
-        if (item.fundedSOEs && item.fundedSOEs.length > 0) {
-          const firstSoe = soes.find((s: any) => s.id === item.fundedSOEs[0].soeId);
-          if (firstSoe) {
-            setFundingSoeName(firstSoe.name);
-          }
-        }
-      } else if (type === 'Sub-Activity') {
-        currentActivityId = item.activityId;
-        const act = activities.find((a: any) => a.id === currentActivityId);
-        currentSectorId = act?.sectorId || '';
-        currentSchemeId = act?.schemeId || '';
-        if (!currentSchemeId && currentSectorId) {
-          const sec = sectors.find((s: any) => s.id === currentSectorId);
-          currentSchemeId = sec?.schemeId || '';
-        }
-      } else if (type === 'SOE Name') {
-        currentSubActivityId = item.subActivityId || '';
-        currentActivityId = item.activityId || '';
-        currentSectorId = item.sectorId || '';
-        currentSchemeId = item.schemeId || '';
-      } else if (type === 'Surrender') {
-        currentSoeId = item.soeId;
-        currentSubActivityId = item.subActivityId || '';
-        currentActivityId = item.activityId || '';
-        currentSectorId = item.sectorId || '';
-        currentSchemeId = item.schemeId || '';
-        currentRangeId = item.rangeId || userRangeId || '';
-      }
-
-      setSoeId(currentSoeId);
-      setSubActivityId(currentSubActivityId);
-      setActivityId(currentActivityId);
-      setSectorId(currentSectorId);
-      setSchemeId(currentSchemeId);
-      setRangeId(currentRangeId);
-    } else if (!editingItem && lastInitializedId.current !== null) {
-      lastInitializedId.current = null;
-      
-      // For Expenditure type, ensure everything is empty on fresh open
-      if (type === 'Expenditure') {
-        setSchemeId('');
-        setSectorId('');
-        setActivityId('');
-        setSubActivityId('');
-        setSoeId('');
-        setAllocationId('');
-        setFundingSoeName('');
-        setRangeId(userRangeId || '');
-      } else {
-        // For other types, we might want to keep some context or reset leaf nodes
-        if (type !== 'Allocation') {
-          setSoeId('');
-          setAllocationId('');
-          setFundingSoeName('');
-        }
-        
-        // If it's a fresh start (no scheme selected), reset hierarchy
-        if (!schemeId) {
-          setSectorId('');
-          setActivityId('');
-          setSubActivityId('');
-          setRangeId(userRangeId || '');
-        }
-      }
-    }
-  }, [editingItem, type]); 
-
-  const filteredSchemes = schemes;
-
-  // Deduplicate by name to remove repeated items
-  const getUniqueByName = (items: any[]) => {
-    const seen = new Set();
-    return items.filter(item => {
-      if (!item.name) return true;
-      const duplicate = seen.has(item.name);
-      seen.add(item.name);
-      return !duplicate;
-    });
-  };
-
-  const effectiveRangeFilter = userRangeId || (type === 'Expenditure' ? '' : rangeId);
-
-  const filteredSectors = useMemo(() => (sectors || []).filter((s: any) => {
-    if (!schemeId && type !== 'BudgetView') return false;
-    if (schemeId && s.schemeId !== schemeId) return false;
-    if ((type === 'Expenditure' || type === 'Surrender') && !(allocations || []).some((a: any) => 
-      a.sectorId === s.id && 
-      (!effectiveRangeFilter || a.rangeId === effectiveRangeFilter) &&
-      (!schemeId || a.schemeId === schemeId)
-    )) return false;
-    return true;
-  }), [sectors, schemeId, type, allocations, effectiveRangeFilter]);
-
-  const filteredActivities = useMemo(() => (activities || []).filter((a: any) => {
-    if (!schemeId && type !== 'BudgetView') return false;
-    if (schemeId && a.schemeId && a.schemeId !== schemeId) return false;
-    if (sectorId && a.sectorId !== sectorId) return false;
-    // If activity has no schemeId but has sectorId, check sector's scheme
-    if (!a.schemeId && a.sectorId) {
-      const sec = (sectors || []).find((s: any) => s.id === a.sectorId);
-      if (sec && schemeId && sec.schemeId !== schemeId) return false;
-    }
-    if ((type === 'Expenditure' || type === 'Surrender') && !(allocations || []).some((al: any) => 
-      al.activityId === a.id && 
-      (!effectiveRangeFilter || al.rangeId === effectiveRangeFilter) &&
-      (!schemeId || al.schemeId === schemeId) &&
-      (!sectorId || al.sectorId === sectorId)
-    )) return false;
-    return true;
-  }), [activities, schemeId, sectorId, type, allocations, effectiveRangeFilter, sectors]);
-
-  const filteredSubActivities = useMemo(() => (subActivities || []).filter((sa: any) => {
-    if (!activityId && type !== 'BudgetView') return false;
-    if (activityId && sa.activityId !== activityId) return false;
-    if ((type === 'Expenditure' || type === 'Surrender') && !(allocations || []).some((al: any) => 
-      al.subActivityId === sa.id && 
-      (!effectiveRangeFilter || al.rangeId === effectiveRangeFilter) &&
-      (!schemeId || al.schemeId === schemeId) &&
-      (!sectorId || al.sectorId === sectorId) &&
-      (!activityId || al.activityId === activityId)
-    )) return false;
-    return true;
-  }), [subActivities, activityId, type, allocations, effectiveRangeFilter, schemeId, sectorId]);
-
-  const filteredSoes = useMemo(() => (soes || []).filter((s: any) => {
-    if (!schemeId) return false;
-    // For Surrender, we want to see SOEs that have been allocated to the selected range
-    if (type === 'Surrender') {
-      const hasAlloc = (allocations || []).some((al: any) => 
-        al.rangeId === rangeId && 
-        al.schemeId === schemeId &&
-        (sectorId ? al.sectorId === sectorId : true) &&
-        (activityId ? al.activityId === activityId : true) &&
-        (subActivityId ? al.subActivityId === subActivityId : true) &&
-        al.fundedSOEs?.some((f: any) => f.soeId === s.id)
-      );
-      if (!hasAlloc) return false;
-    }
-
-    // Path matching for hierarchy
-    if (s.schemeId && s.schemeId !== schemeId) return false;
-    if (sectorId && s.sectorId && s.sectorId !== sectorId) return false;
-    if (activityId && s.activityId && s.activityId !== activityId) return false;
-    if (subActivityId && s.subActivityId && s.subActivityId !== subActivityId) return false;
-    
-    return true;
-  }), [soes, schemeId, sectorId, activityId, subActivityId, type, allocations, rangeId]);
-
-  const hierarchyAllocations = useMemo(() => (allocations || []).filter((a: any) => {
-    if (type === 'Expenditure') {
-      if (userRangeId && a.rangeId !== userRangeId) return false;
-    } else {
-      if (rangeId && a.rangeId !== rangeId) return false;
-      if (!rangeId && userRangeId && userRole !== 'admin' && a.rangeId !== userRangeId) return false;
-    }
-    if (schemeId && a.schemeId !== schemeId) return false;
-    if (sectorId && a.sectorId !== sectorId) return false;
-    if (activityId && a.activityId !== activityId) return false;
-    if (subActivityId && a.subActivityId !== subActivityId) return false;
-    return true;
-  }), [allocations, rangeId, userRangeId, userRole, schemeId, sectorId, activityId, subActivityId, type]);
-
-  const filteredAllocations = useMemo(() => hierarchyAllocations.filter((a: any) => {
-    // Add SOE filtering for Expenditure
-    if (type === 'Expenditure' && soeId) {
-      const selectedSoe = (soes || []).find((s: any) => s.id === soeId);
-      const selectedName = selectedSoe?.name;
-      if (!a.fundedSOEs?.some((f: any) => {
-        const s = (soes || []).find((soe: any) => soe.id === f.soeId);
-        return (s?.name || 'Unnamed SOE') === selectedName;
-      })) return false;
-    }
-    
-    return true;
-  }), [hierarchyAllocations, soeId, type, soes]);
-
-  // Auto-selection logic removed to keep form empty as requested
-  useEffect(() => {
-    // Removed auto-selection for sectorId
-  }, [filteredSectors, sectorId, schemeId, editingItem]);
-
-  useEffect(() => {
-    // Removed auto-selection for activityId
-  }, [filteredActivities, activityId, sectorId, editingItem]);
-
-  useEffect(() => {
-    // Removed auto-selection for subActivityId
-  }, [filteredSubActivities, subActivityId, activityId, editingItem]);
-
-  // Auto-selection for allocationId (Expenditure only)
-  useEffect(() => {
-    if (type === 'Expenditure' && filteredAllocations.length > 0 && !editingItem) {
-      if (userRangeId) {
-        if (!allocationId || !filteredAllocations.some((a: any) => a.id === allocationId)) {
-          setAllocationId(filteredAllocations[0].id);
-          setRangeId(filteredAllocations[0].rangeId);
-        }
-      } else {
-        if (allocationId && !filteredAllocations.some((a: any) => a.id === allocationId)) {
-          setAllocationId('');
-          setRangeId('');
-        }
-      }
-    }
-  }, [filteredAllocations, allocationId, type, editingItem, userRangeId]);
-
-  // Auto-selection for soeId (Expenditure only)
-  useEffect(() => {
-    if (type === 'Expenditure' && allocationId && !soeId && !editingItem) {
-      const alloc = allocations.find((a: any) => a.id === allocationId);
-      if (alloc && alloc.fundedSOEs && alloc.fundedSOEs.length === 1) {
-        setSoeId(alloc.fundedSOEs[0].soeId);
-      }
-    }
-  }, [allocationId, soeId, type, allocations, editingItem]);
-
-  return (
-    <>
-      <div className="flex gap-2">
-        <select 
-          className="w-full p-1.5 border rounded text-sm" 
-          value={schemeId} 
-          onChange={(e) => { 
-            setSchemeId(e.target.value); 
-            setSectorId(''); 
-            setActivityId(''); 
-            setSubActivityId(''); 
-            setSoeId(''); 
-            setAllocationId(''); 
-            if (!userRangeId) setRangeId(''); 
-          }}
-          required={type !== 'Activity' && type !== 'BudgetView'}
-        >
-          <option value="">{type === 'BudgetView' ? 'View All Schemes' : 'Select Scheme'}</option>
-          {filteredSchemes.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <button type="button" onClick={() => document.getElementById('tab-Schemes')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Scheme">+</button>
-      </div>
-
-      {(showSector !== false && (showSector === true || type === 'Activity' || type === 'Sub-Activity' || type === 'SOE Name' || type === 'Allocation' || type === 'Expenditure' || type === 'Surrender')) && (
-        <div className="flex gap-2">
-          <select 
-            className="w-full p-1.5 border rounded text-sm" 
-            value={sectorId} 
-            onChange={(e) => { setSectorId(e.target.value); setActivityId(''); setSubActivityId(''); setSoeId(''); setAllocationId(''); }}
-          >
-            <option value="">{type === 'BudgetView' ? 'View All Sectors' : 'Select Sector (Optional)'}</option>
-            {filteredSectors.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <button type="button" onClick={() => document.getElementById('tab-Sectors')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Sector">+</button>
-        </div>
-      )}
-
-      {(showActivity !== false && (showActivity === true || type === 'Sub-Activity' || type === 'SOE Name' || type === 'Allocation' || type === 'Expenditure' || type === 'Surrender')) && (
-        <div className="flex gap-2">
-          <select 
-            className="w-full p-1.5 border rounded text-sm" 
-            value={activityId} 
-            onChange={(e) => { setActivityId(e.target.value); setSubActivityId(''); setSoeId(''); setAllocationId(''); }}
-            required={type !== 'SOE Name' && type !== 'Allocation' && type !== 'Surrender' && type !== undefined}
-          >
-            <option value="">Select Activity {(type === 'SOE Name' || type === 'Allocation' || type === 'Surrender' || type === undefined) ? '(Optional)' : ''}</option>
-            {filteredActivities.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <button type="button" onClick={() => document.getElementById('tab-Activities')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Activity">+</button>
-        </div>
-      )}
-
-      {(showSubActivity !== false && (showSubActivity === true || type === 'SOE Name' || type === 'Allocation' || type === 'Expenditure' || type === 'Surrender')) && (
-        <div className="flex gap-2">
-          <select 
-            className="w-full p-1.5 border rounded text-sm" 
-            value={subActivityId} 
-            onChange={(e) => { setSubActivityId(e.target.value); setSoeId(''); setAllocationId(''); }}
-          >
-            <option value="">{type === 'BudgetView' ? 'View All Sub-Activities' : 'Select Sub-Activity (Optional)'}</option>
-            {filteredSubActivities.map((sa: any) => <option key={sa.id} value={sa.id}>{sa.name}</option>)}
-          </select>
-          <button type="button" onClick={() => document.getElementById('tab-Sub-Activities')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Sub-Activity">+</button>
-        </div>
-      )}
-      
-      {/* Hidden inputs to ensure correct fields are submitted */}
-      <input type="hidden" name="schemeId" value={schemeId} />
-      <input type="hidden" name="sectorId" value={sectorId} />
-      <input type="hidden" name="activityId" value={activityId} />
-      <input type="hidden" name="subActivityId" value={subActivityId} />
-      <input type="hidden" name="soeId" value={soeId} />
-      <input type="hidden" name="allocationId" value={allocationId} />
-      {!userRangeId && (type !== 'Surrender' && type !== 'Allocation' && type !== 'Expenditure') && <input type="hidden" name="rangeId" value={rangeId} />}
-
-      {(showSoe !== false && (showSoe === true || type === 'Surrender')) && (
-        <div className="flex gap-2">
-          <select 
-            className="w-full p-1.5 border rounded text-sm" 
-            value={soeId} 
-            onChange={(e) => setSoeId(e.target.value)}
-            required={type === 'Surrender'}
-          >
-            <option value="">{type === 'BudgetView' ? 'View All SOE Heads' : 'Select SOE Head'}</option>
-            {filteredSoes.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        </div>
-      )}
-
-      {(showRange !== false && (showRange === true || type === 'Surrender')) && (
-        <div className="flex gap-2">
-          {userRangeId ? (
-            <div className="w-full p-1.5 bg-gray-50 border rounded text-sm font-medium text-gray-700">
-              Range: {ranges.find((r: any) => r.id === userRangeId)?.name || 'Your Range'}
-              <input type="hidden" name="rangeId" value={userRangeId} />
-            </div>
-          ) : (
-            <select 
-              className="w-full p-1.5 border rounded text-sm" 
-              name="rangeId"
-              value={rangeId} 
-              onChange={(e) => { 
-                const val = e.target.value;
-                const proceed = () => {
-                  setRangeId(val);
-                  // Force immediate notification for range changes to avoid validation lag
-                  if (onSelectionChange) {
-                    onSelectionChange({ schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId: val, allocationId });
-                  }
-                };
-                if (editingItem?.type === 'Surrender' && val && val !== editingItem.item.rangeId && userRole === 'admin') {
-                  showConfirm("Are you sure you want to change the range for this surrender? This will shift the entry to the selected range.", proceed);
-                } else {
-                  proceed();
-                }
-              }}
-              required={type === 'Surrender'}
-            >
-              <option value="">{type === 'BudgetView' ? 'View All Ranges' : 'Select Range'}</option>
-              {ranges
-                .map((r: any) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}
-                  </option>
-                ))}
-            </select>
-          )}
-        </div>
-      )}
-
-      {type === 'Allocation' && (
-        <div className="flex flex-col gap-2">
-          <select 
-            name="fundingSoeName" 
-            className="w-full p-1.5 border rounded bg-blue-50 border-blue-200 text-blue-800 font-medium text-sm"
-            required
-            value={fundingSoeName}
-            onChange={(e) => setFundingSoeName(e.target.value)}
-          >
-            <option value="">Select SOE to Fund From</option>
-            {(() => {
-              const branchSoes = soes.filter((s: any) => {
-                if (s.schemeId !== schemeId) return false;
-                if (subActivityId && s.subActivityId && s.subActivityId !== subActivityId) return false;
-                if (activityId && s.activityId && s.activityId !== activityId) return false;
-                if (sectorId && s.sectorId && s.sectorId !== sectorId) return false;
-                return true;
-              });
-              
-              return ALLOWED_SOES.map(name => {
-                const matchedSoes = branchSoes.filter(s => s.name === name);
-                const received = matchedSoes.reduce((sum, s) => sum + getReceivedInTry(s), 0);
-                const allocated = allocations.reduce((sum, a) => {
-                  const currentAllocId = editingItem?.type === 'Allocation' ? editingItem.item.id : null;
-                  if (a.id === currentAllocId) return sum;
-                  const fundedFromThese = a.fundedSOEs?.filter((f: any) => matchedSoes.some(s => s.id === f.soeId)) || [];
-                  return sum + fundedFromThese.reduce((s: number, f: any) => s + f.amount, 0);
-                }, 0);
-                const surrendered = (surrenders || []).filter(s => matchedSoes.some(ms => ms.id === s.soeId)).reduce((sum, s) => sum + s.amount, 0);
-                const remaining = received - (allocated - surrendered);
-                return { name, remaining };
-              }).filter(b => b.remaining > 0).map(b => (
-                <option key={b.name} value={b.name}>{b.name} (Available: â‚¹{b.remaining.toLocaleString()})</option>
-              ));
-            })()}
-          </select>
-
-          <div className="flex gap-2">
-            {userRangeId ? (
-              <div className="w-full p-1.5 bg-gray-50 border rounded text-sm font-medium text-gray-700">
-                Range: {ranges.find((r: any) => r.id === userRangeId)?.name || 'Your Range'}
-                <input type="hidden" name="rangeId" value={userRangeId} />
-              </div>
-            ) : (
-              <select 
-                className="w-full p-1.5 border rounded text-sm" 
-                name="rangeId"
-                value={rangeId} 
-                onChange={(e) => { 
-                  const val = e.target.value;
-                  const proceed = () => {
-                    setRangeId(val); 
-                    // Force immediate notification for range changes to avoid validation lag
-                    if (onSelectionChange) {
-                      onSelectionChange({ schemeId, sectorId, activityId, subActivityId, soeId, fundingSoeName, rangeId: val, allocationId });
-                    }
-                  };
-                  if (editingItem?.type === 'Allocation' && val && val !== editingItem.item.rangeId && userRole === 'admin') {
-                    showConfirm("Are you sure you want to change the range for this allocation? This will shift the entire budget to the selected range.", proceed);
-                  } else {
-                    proceed();
-                  }
-                }}
-                required
-              >
-                <option value="">Select Range</option>
-                {ranges
-                  .map((r: any) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name === 'Rajgarh Forest Division' ? 'Division' : r.name}
-                    </option>
-                  ))}
-              </select>
-            )}
-          </div>
-        </div>
-      )}
-
-      {type === 'Expenditure' && (
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <select 
-              className="w-full p-1.5 border rounded text-sm" 
-              value={soeId} 
-              onChange={(e) => { setSoeId(e.target.value); setAllocationId(''); }}
-              required
-            >
-              <option value="">Select Funded SOE</option>
-              {(() => {
-                // Get unique SOE names available in any allocation matching the hierarchy
-                const uniqueSoeNames = new Set();
-                const availableSoes: any[] = [];
-                
-                hierarchyAllocations.forEach(a => {
-                  a.fundedSOEs?.forEach((f: any) => {
-                    const s = soes.find((soe: any) => soe.id === f.soeId);
-                    if (s && !uniqueSoeNames.has(s.name)) {
-                      uniqueSoeNames.add(s.name);
-                      availableSoes.push(s);
-                    }
-                  });
-                });
-
-                if (availableSoes.length > 0) {
-                  return availableSoes.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ));
-                }
-                
-                return filteredSoes.map((s: any) => <option key={s.id} value={s.id}>{s.name || 'Unnamed SOE'}</option>);
-              })()}
-            </select>
-            <button type="button" onClick={() => document.getElementById('tab-SOE Heads')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Manage SOE Heads">+</button>
-          </div>
-
-          {soeId && (
-            (!userRangeId || filteredAllocations.length > 1) ? (
-              <div className="flex gap-2">
-                <select 
-                  className="w-full p-1.5 border rounded text-sm" 
-                  value={allocationId} 
-                  onChange={(e) => { 
-                    const val = e.target.value;
-                    const proceed = () => {
-                      setAllocationId(val); 
-                      if (val) {
-                        const alloc = allocations.find((a: any) => a.id === val);
-                        if (alloc) setRangeId(alloc.rangeId);
-                      } else {
-                        if (!userRangeId) setRangeId('');
-                      }
-                    };
-                    if (editingItem?.type === 'Expenditure' && val && userRole === 'admin') {
-                      const newAlloc = allocations.find((a: any) => a.id === val);
-                      const originalRangeId = editingItem.item.rangeId;
-                      if (newAlloc && newAlloc.rangeId !== originalRangeId) {
-                        showConfirm("Are you sure you want to change the range for this expenditure? This will shift the entry to the selected range.", proceed);
-                      } else {
-                        proceed();
-                      }
-                    } else {
-                      proceed();
-                    }
-                  }}
-                  required
-                >
-                  <option value="">Select Allocation (Range)</option>
-                  {filteredAllocations.map((a: any) => {
-                    const r = ranges.find((r: any) => r.id === a.rangeId);
-                    const rangeDisplayName = r?.name === 'Rajgarh Forest Division' ? 'Division' : (r?.name || 'Unknown Range');
-                    const selectedSoe = soes.find(s => s.id === soeId);
-                    const selectedName = selectedSoe?.name;
-                    const funded = a.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === selectedName);
-                    const spent = expenses
-                      .filter((e: any) => e.allocationId === a.id && soes.find(s => s.id === e.soeId)?.name === selectedName && e.status !== 'rejected' && (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true))
-                      .reduce((sum: number, e: any) => sum + e.amount, 0);
-                    const available = (funded?.amount || 0) - spent;
-
-                    return <option key={a.id} value={a.id}>{rangeDisplayName} (Available: â‚¹{available.toLocaleString()})</option>
-                  })}
-                </select>
-                <button type="button" onClick={() => document.getElementById('tab-Allocations')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Allocation">+</button>
-              </div>
-            ) : (
-              <>
-                {allocationId && (
-                  <div className="text-[10px] text-emerald-600 font-bold bg-emerald-50 p-1.5 rounded border border-emerald-100 flex items-center justify-between">
-                    <span>Range: {ranges.find((r: any) => r.id === userRangeId)?.name}</span>
-                    <span>Limit: â‚¹{allocations.find((a: any) => a.id === allocationId)?.amount.toLocaleString()}</span>
-                  </div>
-                )}
-              </>
-            )
-          )}
-
-          {soeId && allocationId && (
-            <div className="text-xs text-blue-600 px-1 font-medium bg-blue-50 p-1.5 rounded border border-blue-100">
-              {(() => {
-                const alloc = allocations.find((a: any) => a.id === allocationId);
-                const selectedSoe = soes.find(s => s.id === soeId);
-                const selectedName = selectedSoe?.name;
-                const fundedSoe = alloc?.fundedSOEs?.find((f: any) => soes.find(s => s.id === f.soeId)?.name === selectedName);
-                if (fundedSoe) {
-                  const spent = expenses
-                    .filter((e: any) => e.allocationId === allocationId && soes.find(s => s.id === e.soeId)?.name === selectedName && e.status !== 'rejected' && (editingItem?.type === 'Expenditure' ? e.id !== editingItem.item.id : true))
-                    .reduce((sum: number, e: any) => sum + e.amount, 0);
-                  return `SOE Funding: â‚¹${fundedSoe.amount.toLocaleString()} | Spent: â‚¹${spent.toLocaleString()} | Remaining: â‚¹${(fundedSoe.amount - spent).toLocaleString()}`;
-                }
-                return 'Select an SOE to see balance';
-              })()}
-            </div>
-          )}
-        </div>
-      )}
-
-      {children}
-    </>
-  );
-}
-function ActivityFormContent({ schemes, sectors, editingItem }: { schemes: any[], sectors: any[], editingItem: any }) {
-  const [selectedSchemeId, setSelectedSchemeId] = useState(editingItem?.item?.schemeId || (editingItem?.item?.sectorId ? sectors.find((s: any) => s.id === editingItem.item.sectorId)?.schemeId : ''));
-  
-  return (
-    <>
-      <div className="flex gap-2">
-        <select 
-          name="schemeId" 
-          required 
-          value={selectedSchemeId}
-          onChange={(e) => setSelectedSchemeId(e.target.value)}
-          className="w-full p-1.5 border rounded text-sm"
-        >
-          <option value="">Select Scheme</option>
-          {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <button type="button" onClick={() => document.getElementById('tab-Schemes')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Scheme">+</button>
-      </div>
-      
-      <div className="flex gap-2">
-        <select name="sectorId" defaultValue={editingItem?.item?.sectorId || ''} className="w-full p-1.5 border rounded text-sm">
-          <option value="">Select Sector (Optional)</option>
-          {sectors.filter(s => s.schemeId === selectedSchemeId).map(sec => (
-            <option key={sec.id} value={sec.id}>{sec.name}</option>
-          ))}
-        </select>
-        <button type="button" onClick={() => document.getElementById('tab-Sectors')?.click()} className="px-2 bg-gray-100 border rounded hover:bg-gray-200 text-gray-600 text-sm" title="Add Sector">+</button>
-      </div>
-      
-      <input name="name" required defaultValue={editingItem?.type === 'Activity' ? editingItem.item.name : ''} placeholder="Activity Name" className="w-full p-1.5 border rounded text-sm" />
-    </>
-  );
-}
-
-function Pagination({ 
-  totalEntries, 
-  totalItems,
-  currentPage, 
-  itemsPerPage, 
-  onPageChange,
-  onItemsPerPageChange
-}: { 
-  totalEntries?: number, 
-  totalItems?: number,
-  currentPage: number, 
-  itemsPerPage: number | 'All', 
-  onPageChange: (page: number) => void,
-  onItemsPerPageChange?: (val: number | 'All') => void
-}) {
-  const actualTotalEntries = totalEntries !== undefined ? totalEntries : (totalItems !== undefined ? totalItems : 0);
-  const isAll = itemsPerPage === 'All' || itemsPerPage === -1;
-  const numericItemsPerPage = isAll ? actualTotalEntries : Number(itemsPerPage);
-  const totalPages = isAll ? 1 : Math.ceil(actualTotalEntries / numericItemsPerPage);
-  
-  if (totalPages <= 1 && actualTotalEntries <= numericItemsPerPage && !isAll && !onItemsPerPageChange) return null;
-
-  const startEntry = isAll ? 1 : (currentPage - 1) * numericItemsPerPage + 1;
-  const endEntry = isAll ? actualTotalEntries : Math.min(currentPage * numericItemsPerPage, actualTotalEntries);
-
-  const pages = [];
-  const maxVisiblePages = 5;
-  
-  let startPage = Math.max(1, currentPage - 2);
-  let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-  
-  if (endPage - startPage < maxVisiblePages - 1) {
-    startPage = Math.max(1, endPage - maxVisiblePages + 1);
-  }
-
-  for (let i = startPage; i <= endPage; i++) {
-    pages.push(i);
-  }
-
-  return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t">
-      <div className="flex items-center gap-4">
-        <p className="text-sm text-gray-600">
-          Showing <span className="font-medium">{startEntry}</span> to <span className="font-medium">{endEntry}</span> of <span className="font-medium">{actualTotalEntries}</span> entries
-        </p>
-        {onItemsPerPageChange && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">Show:</span>
-            <select
-              value={isAll ? 'All' : itemsPerPage}
-              onChange={(e) => {
-                const val = e.target.value;
-                onItemsPerPageChange(val === 'All' ? 'All' : Number(val));
-              }}
-              className="text-xs border rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value="All">All</option>
-            </select>
-          </div>
-        )}
-      </div>
-      {!isAll && totalPages > 1 && (
-        <div className="flex items-center gap-1">
-          <button 
-            onClick={() => onPageChange(1)} 
-            disabled={currentPage === 1}
-            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="First Page"
-          >
-            <ChevronsLeft className="w-4 h-4" />
-          </button>
-          <button 
-            onClick={() => onPageChange(currentPage - 1)} 
-            disabled={currentPage === 1}
-            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="Previous Page"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          
-          {startPage > 1 && <span className="px-2 text-gray-400">...</span>}
-          
-          {pages.map(page => (
-            <button
-              key={page}
-              onClick={() => onPageChange(page)}
-              className={`min-w-[32px] h-8 flex items-center justify-center rounded border text-sm font-medium transition-colors ${
-                currentPage === page 
-                  ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-sm' 
-                  : 'hover:bg-gray-50 text-gray-600 border-gray-200'
-              }`}
-            >
-              {page}
-            </button>
-          ))}
-          
-          {endPage < totalPages && <span className="px-2 text-gray-400">...</span>}
-          
-          <button 
-            onClick={() => onPageChange(currentPage + 1)} 
-            disabled={currentPage === totalPages}
-            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="Next Page"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-          <button 
-            onClick={() => onPageChange(totalPages)} 
-            disabled={currentPage === totalPages}
-            className="p-1.5 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="Last Page"
-          >
-            <ChevronsRight className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StatCard({ title, amount, icon, color, subtitle }: { title: string, amount: number, icon: React.ReactNode, color: string, subtitle?: string }) {
-  return (
-    <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 min-w-0">
-      <div className={`p-2.5 rounded-full bg-gray-50 ${color} shrink-0`}>
-        {React.cloneElement(icon as React.ReactElement<any>, { className: 'w-4 h-4' })}
-      </div>
-      <div className="min-w-0">
-        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight truncate" title={title}>{title}</p>
-        <p className={`text-base font-bold ${color} truncate`}>â‚¹{amount.toLocaleString()}</p>
-        {subtitle && <p className="text-[9px] text-gray-400 font-medium truncate">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
+    xœì}ëvÛF’ðÿyŠŽÖ3$'$uw2²$ù–x7±},åËÌz}bl‰H@‚€–4þÙ·Ú×Ù'ùºª»¾ ZrbÎÄ"¾VUWUWWWbâéÓ(þvtÓî£c2¦£ˆ>hœÒ4ãiÚž÷ÃQgñ'Geü£ M_z´‘Ñ«¬—ÐQok‹Œã49È}ÃÍzÛÞv²0‹XØ7	¢ˆ¤b ¾*ÇÞ¦ßÒó„¦ã§—êè.{»dÜÛÝ ›¾š‡›ƒy–ÅS÷û9 Óy¹@q¸9
+?ÚÕ7³‘ãi6RÇ5cãâ`
+/Æ9èùužfáùuNGä"˜õv6\c:äÃ%Îá˜½ñÌ9¥ÙóQ˜…Ó‹7lD—q2z9â(ä¯ñŠ^æ¥§³yÆ*ÌÄoò¯‘VËSy±pÕ¤¡A4§&á3 "ü•NÈ€õFñ‡¿Þ"»êíÙuo›$ñ|:¢#ý¸1|J3Â¦FäÜœˆö“ˆD‡sM½¥n²a/:	Â¨³°¦~‘×æÔñ™êøÚ=uß<Yá€ÈsÆŠó¬Cv|ògñÅEDJiršÙœó”.aÿ¦ÏÂ4Déæ<ˆRêa5œn>`°¦M²$˜¦Œ¨ãioGq’’7ZgIkp!XÉyÔCCSø¹“cA”ÝÞÚj1& Ué„&ATT—¿•&ä#­ùšZ|pMÕ2køò;èù”w³¦)öh†H"`YVïžÉáY¤ã3ï1Î¼çáÌþ	¸Ø+{–èÏ:E±÷ƒxt]a xòàäòû¡Žt’õ¶wÃãå8Ì(›åCIs½+&±ÆÁ(¾ô,P†q"‡ã]œÑ9§Œ²é$ÄÑˆL0’¿‘Ù€‘9JÖõ$íé4c}Øâáð‡xø›Úú¸·O.Ù*¡°ÉÊVcB	T`€<eÝ'q¤Àf¼«Œyfù*%:×bC~¸qŒHgtž‡CrÎ{IÙì’â)ë‡=bOØZ½ iŸü<¦S±šX#»”ƒé4ÎH0bO(“R](?Bº$	2ÈðF³qÉnú‡›³6ÓY0¤½k¥
+2£‚þþA&£üžÄ—î=`£ŒÄä	¼ÔÀpéfÒÆªpuìX:‡Q0 ‘Zp "	H7H3:¶É|6£É0HéÆñ)ƒÝ0#oä]ò–¡  
+küp»°:Nykí}˜À=ºá¯é0~$4³yã.cè±Šü…	žS«^›ö3üÒÇ¦b@ãçLcß‘`–¬?_›BH˜ÒßÁEâH
+1£ã^8ñ‘‘^ïp“r×¾`ÏÂïh€šºÕ5½£7ŽŸ=íoÛªÌf	ðZVïd‰j§A00ôó/KT}Åj\lãŸ%ª}Ð!ÿ»DÅgáÇ´~6Cñm‰Êoƒ_/‚d¼q,¾”`mS¢­F‘A9Qz#˜×$˜µ í¶[æ‰qþF¯n&LrýàcögÊèzQ6×ŽcE,5XåžY ·ÅIÌkNb®NbÎ'!”Úi³¯ÀÞæ&t¸ÉYÁ>í}W%{å“s÷Ë$˜ÙÌÖ§ßŽ„ÎutóUM¾çS……à…ÚíÖIÄxy `ju‰Ýp)'¼ùÀ´ß]Ô~ûû…þ¼ïÝööìê½*,­Ø­M@K\Sjs¾ß(dÍû5œ'iœô˜Àî±í{|ÉuÓób¦iÿ<œŽÚ #ê‹äèèˆ¨  ù{ËE¾t@ä1S†@MAÑäÊqþ¯iîßØš»¯¸|ÿSC·	ùfý3´ºËÞ.ÃÑþE=î€þ4ÊÙTô	F®T&ü!¢ç£´kŽÍ§òßñB}~5c*_þ°+U…Áït©ÞjŠw»Vo‡¥¶µZÕ–ýËõŽètÿaW&N~ÝKr6Ofõ–¯^«ÍìnWâŠØ€jhÒxÁ¨ÐZ„ÚÛû½O¯§Ã?ôRD ¬{9f4ˆ¼eñå–âj3»ûå¸"F _yærÌßÜùRtîãiš>SØû“#nUå@Â>lÜ}@pà…ç¤]4Øñ*zÎ|ì>ºÊèœGA®1,e¯jt­ï±‡Cš¦n†äìÅz¶ø¬ùV{Ô?6‘QoŸÈA¼ÜëÜƒ]Á}†Íáé8¤Ñ¨‚oòBOÇtYæyŸ§^ïˆÓm*°ì‚ú±Ÿ»1þˆ-<9ƒ|ýˆN/²19&[0e	.,+–E-Ý	ë†TÇaâžm|ïY§léDa8,–<åŸ³ð#…#ý,	‡ÀZÒÃÍñžÕ¶1 X1çŒEô®zÁ<‹¶áC<uœ¼ðKzžÉó-ÆÊ¢`gL.;}6¦Ã†¿K´s­â<M›¤<êòœ*cºWÍN~tºqÌ	ìp3¯T]ˆ’•ës	¸rõŸf£€­òäúÖMœ¬
+ÅE‰ÓœÌøZ²áóç>B84ŽåÕ©ã¹W*_DþãNixxáá…Jtr’¹Ñh°„êÞ\;|±Nè(œOÔÃWoÅ9rQ<HJ$#–L“qG8#.ÔÖiKž
+¶iž »Ì+ùýöÜ¾iþYmßx8;ëõðùû ‹å{)Òa:¦³~9…oÃ7Š#ÔV¡Œq¶•³ÑÒ~>üS}öòôäÉÏŸñmÀë§ÿÁ¾ú¡ŒWlÔ%0XBú	?beÎ÷“ë¥Ám56¥—äk¬·z’uúYÌYÑS&^¦íÎŠýîQ¬2×2ù©i†(P¤$˜^wë¬
+ø˜âWU8W'EÏTèª¤å•IŽë>Hp|‡\Ape^¬¼„{>Öí>¯ÅW)EçÊ
+cž:Æ\ÎŽGÙ2RÜsüÞ_þ(ùÜºù×ÉhNoÍ·æ»b+&çbó2.ëéÕæIëÞr3Ëa6KœŽQêçn˜çP÷†)YNžÊÕÙ³xl¹‘X”Ž´wÊükçì4¹.¡ly%oé,N²”Õ`ÇKŒâKÆÕƒÑ›g/à=^„8 )Ri—ö-fŒžƒcïÞ¿gÚ4c¾²4¼ÑŒq.:ÒÊË‡VyÍz(‡3dÃ€%ôkÊ†ÔnEŒ$Óa0£…[?/y~„Æ
+Ÿ_Õõš;7m/þ¡(¯ÅCÙë°ŸÒì#ÃÓðŸ´½½×q¼j·Æ4úH³p´º¤ôÚÒÊ]·?<¸Aø-H¼øypÃÇ¸øÐ%Û{ð_^Eü‰˜Í†Dÿ`óØ~øHšÀÔ©‚^ÛÚÆGkìÛŠ9±îè•ñoœ¾~NND¿ät>™Éõ¼æ×ä[¥&lÜÏ€¦Û¬®f…­ÖygÐÊû®RVÉFbêÛ”©KÙ?ŠŽ·wÔ×l/7a„ÚºHÂQK«7Ž/¿ÇÎ[”qœë7ÁÕ
+ÌØƒ'	~c%`zíì:¢ŒDo1TÈ7]2¤Qô&Ù°.ºÆ\O‹Ša=Û*›þ>ÞþûgkŸ- ²|³³ÏÞÉØ;ìÚ8R¬Àä9¹ È…rÙé3¾›Hd<î‹BK
+õ„2Q´»/{X¨4¨.gB1ÑÔ1Ùþf_·Ëi1°Úš©» ú½âñb}”ýLÌ„{÷.Ã,VÀMú~¸}¼ÍAß*Ëé{ë}Ëgˆâà#ÍY*êO—4y¤Œ’ú	EÁ¶7ÿ+ýz“É©Ö/­Î¢?M-/Õ…ÜttA!ê~wÒçt4C~ÚV\ßþB4×A‰€Ínn’'ó0tˆMµÉGØÆwøâ€-#¸q(U†2™z—Ç×…‘Æ:*dqDÅ árãd@“.?‰ªY3ß,Ðã^iÕymÐl†ó„);™òPn
+á j¨ŸSò†Òá˜ULj‰)ÞHÄš}^à¥z'QÔ§@-ìß,NÊêcG}²Gðoø1ÌB9„ šô&D™k× Ã|pb4ãI^ÌÕœÑú-¼|ïªÏÅŠHÁ£!A8Ã“qBY9éWÏYùÒNŠe¢Ýà4:šCGúQ‹­Â§Ú_%ÈÒÅ[9\yÃ±2*W)82)k
+‘ÈñÐß–ªhJ"cß½ÉrU#+ŠÃü£+JV´‰è„Ö¼ZÍá»Â2¡àt‚¯tLuXeÆ¦ül]/ÊÙÉ)žqF“‰®BÈµoQ0¤›5téðÈ®ÍÙÐ§ãs4;0u7}Œ"dÞ¬”sñœ÷ÙFô°ÉWžÄqDƒi§ÿkNÛ-Òêpâµ»Ï"ëÿ]NŠÝ‚”º!ts¾÷utLô+Î²º+ïÓœátÍG<"rˆÂÀµÊ^«ÔÍIf•Ê‚ËP¶ñø¡¦Fê&Ù¥I
+à€ñ"W2
+)ç%ýó8yÇ.¹a,|n:Âä„ì¹‚°TdâÚaå‚QßÁvQ¥%ÖpÓèàó†·J…Ø@ñ“õGÑ^Y„í”dÊ°"•ùµ½a>&X+©ª4ãì¼•¼l÷16+<C¼i)ð¶×¼Œ…oQÆ ‡·Ô~‡P¯kk¥þF¡¶ÝÈû[ôÜ°…È/Ç}°Ö¨ª¿cµß›H²
+€.[LGUŠE/µx+×ˆAöMÁêªo4D¾nLâù4S¸dÇÁ…"{†”ì^Í\J´à’nNjÓ#k¥äE4BB¨â;›÷Õá¦Ð´ÉOýÜ´Œ—Öâ¤ÍòÑF¸h#«y}ky­ü³6÷lˆwþŽ`]ÂÆj¬Ï1%ßË.m†l¯?›§ã¶ÎWáHí W;|ëjïhaéàE8ËÓ¥xªÅßóï¨¸cÍéEKå±Žé«¬Rp¥$£#>t×ƒ_ªyT›v§EÛí KNi…–áéàÓx2ÚopWô…°°Ê‰çbTÀÙëÎŽœƒ:Ðœ­·Ñ¾Ã¤ÌèÊpæ¬åí“í‡[5m»Jçp¦Q ÐkÞý[eû.+y&íŽmÅé23beó[ë¢OÜàÔ%ä|Rô{a“S*ë{—õû¬hß¸û>‘LTáþ6…Qüdã>„s\˜²Û:;nÑiïå«VÌv;ßn£ã[…¬é·4
+¶FÌªÂÿÒQpÇ†=õ9ßÈÒ`å]ë´ÿ
+.»µà þ*ªFûmÚGªÕQ>ãÊðíIÓ¡xóþ½-êV_€ûý>‡r…÷æBÊÜä	þ›f8atIzÅËùÒef‚Õ“Ì§Sh9Ä#âÄ‹®KàËç #‘-np ÓPÉ»Ö¶7Ê•ÉµÖk‰”FôÉxk¿ÏÇö^¾‚†‚c ¸ZúÒbrÆaú–þŠÆn6o(*9-ZñÎÚ¿~UÔ3Õi)=Ñ¬Âñõ}CŽ¯ËKªz4à‰‹œwZ[VbÊŒìtt‘‚ u1!ï§³(d,¬×‚‹4A+—­›-ô éµôv¬
+"ÍIø	Áš þcõ«þø‡rë
+ŒæÍóWÏ^¾úÎ?„š´¤T¯JÐŽµ0Îã8³ñÙë³“n·”ª’ªÖNSË¦äÜPûå<[UÚ{5Õß ­»:#ìï¯~J¸³ÇÄŒüÇ8'2È}BhNÞ×<œ2ŠVm~GóÉ4ï@[[ÐãXJV~KªÅÁñs8ÊÆ{zk„lC¥Äî¾YbGk•Ëk­Ñ½oÍ*»ËWÙ«ûîŽYg¿º›ò]bîÚêEƒþÛ[ä@Ñ[Èî–ÃªQ(óSÒ_à”ô~úË‹ü"B‹“åw›ÿõ_ÿü×ƒm¿_âŒùùì-S¸ yçU—qòÛ ŽçÚ8º?íÿ,š»øSÓõHì¢EÁÓ1…û yg°/€RxÞÞ°\Š\Š×æ&9ÈÀËèaø6¾¨ª=B7ìqûÛqI•=²‰>-â€fð\€íŠ‘ÇÁ"V|?´ž&4¹ OÙ
+HÛÛLÅÇÿhruŠKiBEÏã8	ÿÉ†DÅŠÌ‰I…h×¡ƒÓ¤Æ°”ñäUû”)r0›vVµ­Ã±‡.HéH^Š1b(¥ë^×3`³ cs›ú„xÊÞ§qd.Ææ/ëf[™äbÀJ½xñ|þg0k$"Ÿ5–x¥‚UeãpÚ2Ü%«,4ˆ³,žTCvé(å»ÆÞaÙYdˆkQªàÒ©v3µ3(!VOÛ©‹âUäPàz ®	äÚ`®hƒL>e ÏKïÄ›PR'os\ðß&È`K8	®~àÌ÷„*® Jõ"Ž6ŸOfÙµ\j\â:p˜æmäí#‚ÐæÄ¤fñƒ©­Òá\2rÆç¶ôzÔæŽ‹¡Û×ìÕY©µô6°ç“ç >Rš;$Û;lðìŸå)Ûk9,tœ”ˆ‚¨ðä®¦ðsÈ ÑþY!‚´¾
+TâaX¢¼ºrHïÌ%…eÀ”BEK	!§°ø^‘@N`C*Æò}=TGüø„O‰è)<õÄŽÙ¿“#VsÃœ°¬ä€ùxngÍË×+bLãÄ¼.`jŠ—Ï[z;ì&:Ðêˆ’Ar1Ò°YF„Ô nß÷ÕE‡uh3˜ŸŸ#¹—AXì’úWQzÕ¿LÂŒ>ÁÅþHÔ‹âØJ=a_ÛïxCïÁô.XO0›E!·Nm~œŽúñŒN¯&Cò$ÈÒ^|~)ÛÎ÷ÓYÂ˜"Ê§IÔÇ¿ªÕö¬'iºí’¥œ¡a&å;ÕÿgÅ>Õ±uü'¾‡©þû)+km¡o÷•]Làé© `âk½|†' ¯ŸÃ’h Ç:|ƒsü†g¥øV¾âÓâð¼õþ‘Ý°/·#0xøáÑnag„CÞ®òëVÜ¤Û•€oÄAbÑ~‰[mîR«ø¿Â½@upæ!f™Ërqìm°Ìc¹8§öÇ<4Ç³ê 8îVÌýƒ¨á3aøKm‰¦Þw´ð3Üß8ý{ž…QÚâà—,þ…«ïTÒì’~¿ŸÓ³±§éG½5lÚ¦Û¢¿¼"[5 —ÐöF  +¹ÑÍ›Ó„ÅNŸHg­oz5³—O~Þ–/›g4&áLDpV”xÐDðÓX6¬}ÑäN?°¨¾b(^¥ò”ƒÖ=âhA%AÁP«.¾P|ð·íKˆ~öáßÜ¨ø™‰ól:åx/ ŠXÓw4SŽqìÇo*¡Ç‘ÍÛÑP½Û'`©*ÒÆëÇ›Ïž¿&ñ4º–ç& LáZ;fHàA6 \KÆ *žhìxš‡ä°vŒo©4ƒáT¶Ï‚Z ÜË|tA‘ÀÞÒ!áQ8%goÿ¡!_f³'A‡&-Çq.”Æ¾¨& ´T§4Æ8ƒíóÙ+ô\ÑžŠÙŽø€—‰ûËéYrmV”“0»ùXíˆ©Å0Ý"9ÓûŽcªåTXà ©P€ÆÙP9bOJµ‚Ù›_RNd‚yc¾í3û7ãC®AKtJžÐÚR»Ôƒ[A-0ìòÓaD¿€úÿËùõ/nŠ‹O‹>kÛ­–ã	Ó…Æl	1Œñ³ ™Ósœò\×WT/K ·ÏÑ|Þ¹½£¿)ç1jÚÒ™¿AQz¡ÆºL#þ€Æ_óVÇ¡Zð8¸•ÉjµzõÝ&Û£ëUÞ©RïS*ù£
+Iô ì±rNá'?üðúççÏ~ah=U®zÁÆ
+ðNQµ´;.iá7§"¥å¥Úi>+hîu¸ÿ]àxaÔ, iÕu½2ûU1iwî|+êƒèÍÙ ÍÖ<[êœÆç¶b =Ñøc;ípòx<þD‚_àu²åP†îÒÎÄ¹èÌ]~ø²-Üˆ9>Q©ÐÅ¾@Hˆ¨ ÒUá+ÍOÄ˜"U¦X(æ´r¦-¯ýàØ{Ds5Ä5‘B^2"<È9Š¡Éð?~ÝvÈæ‹[g>%ü@¹NæÕ´¯”{beš4\¸¼å,¨?”þ$Š¯Å[Ó·RþP€#~P|-Þ¸+…òT"(Íï•!ÖÂ”‰‘áµSBNt4AQâb¦‚j#4SrxïöÜîFèíîƒ6à‘ÜÔ]ÐÚÂË¸ú'…€êÜZív”‚~ÉW–e38ÀœÕÄRˆ¾Ê8ãÈZáž¨¿žžâŒ´Öå\y«¹{Þ‚0ºÁ@\ïRp9N‡l]À½7à³-f¿ø ÛBUèä 3|©¡â„ŸþŽ;józÃ„Ú’ŒWàdõòôunk{Ë³VçÝÖ{/Éè¾§År5¸-N¹ÇÅkr]$”%¥…jI-ùž/ø-Ã.¹°»ª²=g 9e\DsZ6g&\éåžsäõž·gë4î½f¤O¹™sBç~“XM’6/#™¥qç‹Ì÷e7êÓf}ê\†>—£Ðš4º•Ö¡Óš÷5DË´8ƒíZ¸Q	Q¤žÌ¹[B´úùµïNˆü«ïhá”Ž´Í,ø²{¶º…-ÒEëB¥áMÏ§áÏ)7™ƒ<I’àºžÄ“6°×S¦éÛ½™õ cïrÑ·¾ãèŒ+6+uÆã",ÑY¡Â¬Ò_:a™é©zÓJ“TÂ+,Óoìë£Ü>Æw¹Ë´ÌSGþÀTjwûfúÈd…¸Iå¨”añht'.ç õ„åÑƒ?ðÝBUð=VL±tÈ1rÏ‰·ˆcÁû3Ž°*b!-ì ëâºX­®¤ñ{.ˆuÅâçŒT·ZU……/Â¾w°b™ß·#Sà¿‰@2*E4KÆ ”†BÊHð†”©c\ ‚Ñ`Žy«TÇM ÂÒ£/k¶ïÓI¢p0ïšüas“œÓ\“Dça’BjH'Î$JO¾`Û£oô
+¬Á~s `JÕjÅ ‹ÒÖ=Ð¼ž­ÈžTTòÎ4ô9ûSù„uõT©íêU¶ƒ”m|ÁîóöéýøcïÙ3ÂÝ":&zV¼ÑçvÇÁ›—"<â›Ž6sÉ€7
+‹²/Â«ò4ˆ†óÆŒZ¦";ÿH¶8£k˜œÚ±'L!…Y#Ž½J²Í‚0a¥‡ºW¡Pu
+ûÔËé‹B`9$¶´’ò9É¯GhÆŽ¯áœ”ý«¼çÖ”ŽËö«•J·eüF¯MÇ=.æÑ?,ka>j/=ZäÐÏ#“@¸	…öcþÇn™é'…Mx¡™Y”É?×ŒÖçÎ©&ŠÙ&Q/áùŒéùÕQ¾=«S•RßáÚmÂ%®4×ðNæšÀS„Ro< Ø”ñÛ†QA.Â€´é¨kŒ~ÆÀ+:Ë—ÐAµ4
+h¼ï‘íù«£¡.QJ¹
+˜Ø+'×Ò"÷#ªá=ÔÓ~s?$¯÷„qƒY½²œÅ„i¹¿™ÞÜY€Í^¨ÅñvÂ­ì/Š»n¾ëæ;¥®²‡éê[ücYÍ•"Qè¾kÒhÒ;h1ˆ÷óà£ÐÌ<=é,ÒÞµ‘-È™Û³šãˆLFø–%û®eûužfáùuo@³KÊD"d339[·r”íñ·í4FFõ„2^9Šxypì]ö&#_î3W.¢ò&Ý‰‡„r¡%0Ú#cö_0HãhÎäø®övÁÍµ·½¹ÃÓ³H$=ü
+2ˆÁ_©‰Ö £–«Çp:›gŽÜ/šGewZGÂq±v´!.Îe˜ “*É³ NN‹¨Ó÷ûî¦Ñ‰ôèÆÜ·¹CÉÇÓ§chíè¦Ímå7¬Óì­Q·ME6î¡ÚyTÂxÛì‰#g|ÔhúQïod–0|Ì®ólC2éPžáNæ(ˆ.H‘k8Oây…SÚ›ÆS*åS=ä?d¬û}ÖO_å’›Ž°ðøØÖßLžäÍV§ÌÈ•¸Î‘$0£ø’MÝ5xôI•DcXni8)ÛÀß	#/„ŒdŒbNÇñå[ußÐþ*5U¤Œõ°"S2ædå #În¬þEŽÂ‚Ž$ª”e¦Ué
+ì„"gE­Ì„‡¼ÿÚ(ÂDbÌ¾´ÎÙ>ÓI<ýiæé’Š2ÏâË©§T½Ü|0PtF²ÉCcSª²p’’—K©UÛ¯0¬±É®êò+g:4=Ã'##‰gsé9£¶ §º½µ8ÞÞ"3Ö&8Üä¯+ëíì/Žwö—¯·ÏúÛ_¡¿Þöâøÿ…lÄÔ3_%Frˆ×ŠDÝÖ,¤·Y‘•(I4Úª®z›ã›i’p‡þË5Æ®ÔmK™Í†;U©7ùë•7¹«•ÞÔfE5ˆé™˜µ‘õr~â²eÐ¨»&—„3Þb_3¤=²óVÐ.²@áRæ5r”ÂÇÁ°­Ì¢XÛÌ.:è=d»ñpúkQŸGø—mñKÌ=ÐzÝI¥Ìö Â	 V)¨ð£ƒâç.‰.”ŸÅî þS’vIœvëzž„J‡NML¼‹‚4Ú$i2ýò–‘~YÍU¤g„¼ªl›ÙÃMlÑÛŸO|É&Æ4Ãª?wS™8“šÑNj­våi°.ÝºùÉw«ÕÍÏ¶á{qzoÔói|‹:#0½ÀÊ8CŸc}*ÚK0ôÕWýácg“¹UÿÝBõÏ¸OÒÊOI‚)M¢ml3ÞÅo
+§~1(?7æy^q*(ÛÅvéBb?]³ÿò–½i»ÜR³xë%üOµ$¸Yg-k‚Sió‹BR¿µ*¾¬D–k%G†ÚKá4wÑ,¼ÄM/ õƒ±åœgMŽøð®(æð Hã	•çç¥çZ 9õø0íø{\tþ@kÆzÖ86½†5.Ö²¹Æ¿¬kc]sŸ¡úë:wž¾Ýº†µæ<ÅotÁ—Ló¥þÎ–É‘9¤âL¼œs”Sq]gÓót¤x0Tù/”÷% ¢LŠZíšó¸Â­!-koñ…"”Lb-,P²¤æ™`Áì,UçÏø
+WÂÚ¼O»µÁ3—5Îþ\/„«Ñ¾x¾˜_ b ôõUx~Uù}Ýž«#A–¬ù†_˜r­TqXnZ0É5(¨*¶Øó+¸\†#ŸWé¸Nú	¹²ãEáø…a&;¿ß‰ˆóô¦9óÖqåm\HèäŠ¼áü›~‘u$Çëçëñ:¬•±eªüÌyýëçKpx3ÔÄóuWÕKû×ÿÂõ«æWÐ‹o’Æ=ú·<Ö/u¬ÑÃ³æ®Üö)‘8Ÿ‡<RYgtq0Œ£¸Nõrgé,K§#ÏÙt©G ÿNeËÞ!2V<ÌGÃeÆŸV«EÄéøÙjÕ«"Å–Ÿj‰3)¤ð¯t¾áþù£oÙ#Ô&tÎ'^¯âååÛß=ŽÞo) ÈóÒ«Û	G¾õÐ«ÿÅ’¾Ò9c—ènÒ?cPøgô®ä—Á®–w—ér®áfvåñAÁæ`1ZôàÖåT¾UUÂc+í›Ï9²¬Gô9vöö€âÿþçoŒ‹&fÂ¢Î¢¬ß%¸T=ˆZ”ãÝö¢n9hË…gAZñkÔÂGN³ÒÇÃ¹X˜¼sS\yiØIÑACPôùÌ»wª³›	}àðçQ|Ù»êA~,ó~
+ú:¶=8M¸Ó!Éžñ¼(˜±­¡{3d_]ÉÀ?Ñ1…,1ü±	ßj:Ì4ßzØUídÁ'Ñ³c+6¸·ó7¸ÖAœôc¸†u¸™ïrõWSÙ=$ïBB¯+·7<Êcˆ›ÆIo‡Ø®¢(.¤+ß>ð‰û’Eð»Æwýù‚ûƒ¾Kþ‚û‚|'ÿ%÷%êaâ´Ü´¼~þKh{Å…ó»ŠØ—ñQ{Þ{4(e‡xFeD0pŒ=MìÛuÎ}Éa)Š÷<µ0<þz_vIˆ+Ä¾?Ä78h€*TÌ««KÛƒ²Q}»²7Å&Àö¡™c;vÛ¦ù}œõ´-î5¬©qîP½žÆsWÅ5]q¸i¸Õþ+{‹×…%îGãó(¸…fÒv›g¥ÇõÎc¢ƒaÑrÝ§—nñ‚ü/÷ \ì˜Žã8ÊàºjÔh÷­Mäº%€ˆ£ÓY0=ºÙÞ^èPù–ÏNh[º7„t_ÅZz HÂ 5ŸŽúKÎÜ¾èï”Bnhû`q˜A‚y­@«ÇÚVŠß.nGZ–q¶-ÃruÖHÐ+6¬wDKÛä×;œå,ÛË;{
+„é°^¥À"]~¡ÛÚã ö¶aI(1ÆŽÉ¶½H–Þu‘IfvòÈVÉE6ŽaAõnjÅ#_Æ£˜Z{ƒÑÏ&áT­æŽ>fDGcû±øœÜO„Í-A§Q×y„7˜„3†?wu ÞÞA*‡ØO+¸‚¼¿3„ƒÓa¦@#é:–lÛv•Öè~;wÌ4¯«ÞÀeëñ,2-Šaªf¸¾å8¹eÌŸ%ÎÈ^	¤xC8ZE”< “ý®BúØþEnTÜ®çâ—¼šOÜîà(¦,§Ã#²ß‘5È	ZÝ51H>TWÐÇªïÞ¢úñ‘º´{dGmK{³ÇK.ªiKrÇ_ÍùÐŠ8§ü«„p“(†RêY²¢xm¯Gáé’©;c©ò0Fe,“æR“`Òã6aDŒSñ‡"d“µæ¡šä§Ä¹±<å NŸ™…XåÊnÁæØª,øÝ×Kó»¢þ½`|oQUh>Ú™õH’öÎÈ¸·¹é‹qËÀ ñ™À2
+Y
+I0Lâ4…·"HÙL07œC~@²q“•.tÄ!cG—¥£'×§à
+ö– STˆºdŠ!²Ž!õ÷B±w¦G(²7©¼ÙÑÅ;ðr¥ª]òœuiE&H#‹†u€S™”TdîTßh¹[±VÞâ~Ên.hys!Ë›X¾¶på·1îN ¡Ãs:Ä*é¼÷EÑº9ÊD nýòº|k‡äæåé-q”‰–ôëžò­Ý/§·äU¾B|òCŒ¾`¼{V€X„ä•«÷{3ck¨s;<àÕAïg¨N•fóâ"tø†˜NE‚9GŠ
+&!2F&\(¨Áá¸©3'özËz«§Þ*Âö²ÑäüÐðæÇ{
+m9{Õ¡uô0ïê«w‰dš"Ïè
+ìnŒûë£"ú°ä¡y1uXPË¾(ZvÆåÎR¾@6~7%mkÓÑ£t”(ÝWdî'T…¶ÚKÏ˜”?“¤1yG<ï<Œ|\-¯õfŸ¬JÏ¨BÍñ¨LÑ“ºÑ¯#£Ä‹®4 QŠDáÜ	ç-#BeÕ©ï‘{øßËE]ÒB±ò•Bîq°—Õ3
+ßÛBNxj«¢DÁ2WÏW 8Ý]9XƒŽ«qr6Sž(Ð¥¡óÞ‘€Õ$`(ZFÄE_9Ç—?‡Ù4@àIx+Æ¯·¿È%0670žv>cÊ\ø™_)fIðBZéhÔUõ½Ž*gS@´cðó¶›È´"YD–9€oQ¿Þ°ü‰Ü€2èÁ=–ÅåÒD˜bá¼òÕeú‘²-¥=óEé
+’…ïr>f\ˆÐ°àdâAKPŽ“¥òIWBÎ°›µ“Êùùñ‡ú¡²|ôÏ³<xHß%~<@nˆ¹T¼€ã§úV‹#è"Ošá¢KÆ«@ÌèMa\Àõ‘QB
+ä‚¼ŠÄUy’ÙŽ&š”‹-îŠÜË'ìm&î¯æXÏ•…ª¬.šÃÞW4×™¤8çì˜Yô‚³Å¡›€e{÷WjÓg#¨šÿ“Ï[»GG;VâÝfþ”Ë¶îï×g<WÎØæÔžË¶î£Öf|ÁÆ6òÎ¹à“Uš¹í¢.&õ4ÊS°ùç‡=Ó[äö×^¯‡¶è“A
+~9O&Ar›¯1§V¯§ØnQTH.6
+Y¹Ä,Ëº:™Í¢kòÓKaßM5—$Œ¬cy}4i}õµ¶ºÖÓbVXßXÃ^aBUö›_éÏMŒçŒ8©VRA0¿'Þ±2Òñ¬§Y¢Ó/îÎë<§„¹Cš@µŠ¼©¬3wÖT HuÕ¼^‘¿Î0@D,žbONöôÒ²£™’~
+I³»@òo)füþÅÑƒð
+ÓŒN‡×ywÂ(Uóg1¤ÞÕkdÑ±²h
+M£oþ H‚h–q˜?ïèa¹ü¿W²Å}/[„4nH‘ñ9àNDæzÂ(˜TŽiÂ)9K®•Äpt?Œ/|ÄX’0÷92Ç½•`kiI¼åPÏ”Ìq*÷²³Ç%pD"8˜fÓFCÄŸÅË)\W5ÑvÑÄ«Z
+áAr-&àH§[ßëÓï¢xD?¥˜ŸyÎþ¼#‘H:MÂi©?ÑØñTÌ"i©`Ñ,#:R1z›¼x°)1¼-BÊI£;.[â>4§±(Ý%•‚¥å*²v”£*¹¨‚©Ek2=êïòÅ®"šºŠ`éjB¡kòò®äaùfÐ†ô•ïYTë¤bŒWKäDéy¯"L@’¢y’õœgD<íøYpõLÆá§´žlãòŒŽ½0þŒhJ‹0QÔ>l¡ý4²yÊi8¡p\ÁØ‚)³Ô*_Q#¾"[
+æ#líU<¥Þ–1‡°ÔR§<ûjÀYn8Â6©–|µcßyÄ­­	„i‡Ÿõ"ÒÔ‹^°Ac¬—Ç<¹<›fëÕæIë‘Ù¢´¤yp_‹X ºEqt.¼”,´‰Þ^"(×jÎhoÅ”áM¥¿]ªðÂ©à™·-‚UÊÒ.+Œ¤|öì´…~¥NBÇ·¾Uð$ÎÆ­Ž¡PÕìó—ïNÏÊûå%*úV:®“X\ŒÉ{ÄéJfû$Œ"ò*®Ìkû&¸¦øèÍÉ+øÃ‡?è©s2A†M‹´·ÿÜ‘ßYÒÞ¿Q–qnÈÕ—W4#o‚pT;§­Á›á?¼•@áÿˆê¨>à¢ ek5-4fÊíXMÌ @äˆÿ Ù¬¾Óº|§`šò\½ÊÖã>üû*Î™…Z ‚ß<ö1µ*¶úØËWµV*Xéc//íj @H½ïñGEñ)Ïz¨×žµzF‹4³jhÏ¬Á’®«ÏÐsù Ùâ(=ÁÜÉ«¬ÜwiV«èH¬–Z…§Ti´-‡KzÄÓÂ]Þ;8F“9š—¸'}8Þ«Ô'¿˜ªÞO	®H®l‰l|‡›ã=£ý²LŒDû¬”ˆÑ5ŠO‘}1Oñú»OÀØ<„ëg]\
+ÊŸUâÅŠXTfBá«HIÏ¼Lœ*ˆ½«G©ò„£rÝŠÛwÝ¸ö\„»ØGÍaì»ÎoÄ£{ÿ¸ôªÜ7ãw*oÆC°®cÖ£ïš¾Ëñ¼‰+òš:Õ¦eWNšÑ®Ìön¥g™­¦q™­LÑßoùéj²ôžIn &¶BÄÒ0†ö•Bib7´*ÊÀÍ—Ð-Mµ×j¦¸†¾‚’Û`÷«éÇM`%ÕºÁThåMõ$H*žÆ*ýW«ùkDCCƒPã¨À%_É•–¹l¼ZÊã‡òŠqÙvç~ŒÈØX}‚A9bB¸Gç!Ÿ~|Ö¥zeŒL .5"÷Ýqç]>×M>óÖsA#¤Î'ïQ× ‘"2¶±ÈMqL’ÃuŠt½á"L¬)b­"ÜQ ÒåC(L,Ÿ´v‚*÷(r[Ë’k¤´sÿ¨J©‰çþÏ´,5?BÃ-9@§=«ù!ZLnÉa.oI[në	ºáüi\Á5¶'>“ÞC…‘˜edæ¦?ÌzV¯Ye,ô[ƒDG‰i—À±ðqOãË$˜‘t˜ÄQ4’Þ8™Ö÷=q3Y…’b>8íVÊ=ÀZõ’©7ùgWxàZ’©´eÊW¦](Ÿ>« àè¥cFM¿õ¶ò;ÿ|Hü˜Hïý[·ûõÕ ¯û‹rØ38µL3#˜’rRš9¬ˆ &•J9ƒb&©QØzÊ)ý}Ã‹g”wŽ¦ÂM„üE½Hž¡›GºFÄEttA“û†(1ª;GŒ¸Æðs˜RòŽ©*nÚõÜžž…Ã]ƒ\Ê¥/tF5J'Aš¡!wš1–[µŸ¹Æø>9’]VýqLä)S-ë½©¬¸ Ùö¦—ooîÛ:ÔwçËQ;cª\‰Õ§)¨Ø p@kÂïà7Ç¾—Æ3ã‰‹@õ±Jw­ƒÒè‚ã$¥“÷üî3*ÇQç‹0¢O‚äé8H2«Y-ðôæ1©PDžª±I„÷¢<§#2á¯‡	Û|‘\%·Z¦’<Þ­qì‹H@ÑÈ«îeíàÛçºý&?bÂÔFlámçúÑ”÷ˆÝ}.™+Ô¾5k…9®>«ôÆ3çcÁpý=SÏ» ¼ÖÂ›AÌY[9úiæëô /©žR¶¡Æ}V]FònƒsãW–5¯Ì« lIuIM5 Âû¹Ã j;‡à¡zó=H¿jÞ¾åeÜ5ý—=qÓê¸J4ºx¼®Êy¸c¤[ÆòÎeDº*‰	ÇŠ/DV‹ÈüÞ"Z©÷ÈZˆÍåOÒ¹IBûÏpVÂÒºNðÊà¹Ÿ¶ÿùòÍR=´BôY´Y²›uK$?ª,DqÕ‹qŸŠ@†÷˜ç:©u~ëCR„˜;Ðõ¨
+¾äº–Ó÷zxotÉ×³ñúÀ7yãŸ*7˜ð÷ëçX$·È~(z8üw‰6Þ»übŠáŒ¸c7‡ŒØ7‰ðÞ™Hí-o™·Y»y~ìüšrã³«ç”Î)÷ÕÔ»gÆm3#ÿ½7{¯¦éÛxKXJgÄ‘æ‡ènÙ“øóXe÷T³ù²">åŠúã§^_1åMå±a¥°c›]ä‚i8a$ÔáæÞÿ¦Qˆ_z ½—Å.›“«=+wt¡¤ñÞCÔ<tYÃpËîÑíþYw¬§DÝg+G{ê§Çç×çw6Þwå ¨¼Ú óÝ­mÊË{{R4ç½d\Æ•hÎiÚ‹öYaDµ™æÏ‚|ÆûžY ÷öJ¼VßÒtã†ØFNÙ¼.ÃQ6>ÚØÞÚúóãp®/~ù£ç³õá…ÜâC~€7Ý¼+-Ã€Ï#® ¨cm%ô ,ŠÊ[É¢[·ƒâv.Š€¡þóðy¿(B8ÂÝêQ8Onv÷+JÇó¬(½¿UQzŒFl„'Ó‹ˆ²â¥ÿA¯6pö.+?eh‡ˆè4Šà.at´ño£áîþÞ¾3º·ÎöÖàoßnWÔ9ÜdôUZà,Ž£,œAØ
+Æ1Ü˜¾"ËÃõ¢òòáÿþçÜàsÛ§äƒ7ƒc>„Òup¸éXr>ÿ¾ÕòÆ+ìiò±”ð¨ÊËbþî.™ì³ÿ$·Æ‹'B¹E?¿’Ia{eìÍl1°ú+’Ô—õöéf/¹|Óìie”$u¾ðØçluH‡ËÍ‡*ßUîïâ™„úd¯µ –f2)šÉ®®¨<Äÿ)~š•*Ä‡…OIòÀ/
+4ÒÔb¦ÎÿVyqißT/‘áFèp[ôô–Òˆm5|,–Ì‰¡]ñ÷‰#¶iÃ{Æ©yj-Ñx `õQ%ŒqÇ aÚ
+Ò}Ëˆa­.Ñ®á±
+ô;ú‹º¾ücß…ó8oCš/mÏ×å„êÞUc®F•ÌXKÇéá&ç«z3Ÿ†ÿ=§¼ðLÄ(^8‘­â-¦t!qž.ŽÙy»žeÊØÐþS?ßü7Ný"+jÃä/éÜ¢ÿ/4ï yŽÚºDš_òÂ¸;i™1IÄ®qÆ4±â¥¹>y¡É€ia#%KO¨¼ãV=6¶‰šiÅgQÉ#¶ý¾×1.æ×1"Úô:ëÕ\Ç_Ön¾vùÇºk7¿y›µ+ÊX©ÁEí•HêGˆêCŽÌáq•ÊyƒŒzH-O7JHÑªTNe=	x(b V;æ¬ˆ4•ú[[ü¡™›d³·<zÃ®`d–ªòfjbâam¤¨ Y[Ð0ks½ÐSv}áyËð<5¼ ¯§"ÄrUz»ÛrWuÈlµxÁvëÑ%•ßæ5J%×@Ój¥Ê[-ÆûÇá³
+þêóÚ"„ÂnÓOÆo/¬|‡_XñýdÅyÆD—§/-~\¤3}x\õ6²—¦_$‚O"¼~Þ¼ ˆ›·Æãà€ß¿~^›ËÇ·6ñ5ÊÛ]uÔ¬Á_8ÿÎïš[A#¾	iRê§ª^·Ü±ÆZ		RÈvÜÑ3`ûmÚ÷W"Ußqõ¸¤•	³fÅYDØ~©d«”mé¦	¿W’%éjÉ9C¤éÏrJ~Ö(²Ê\‘œb+ÇB¥ð²8{vºq,c®¯RbÐóØc¬½ª¡²åP² œèXööPâ³YâjÔè)$Ã÷“«ÖMãN>	…d)¿¾\V“ÕCÕÝ?ûûà ÊþiÍ3J  -¸„Æl(›;ÜÍœÔ¿W‡½kþ*‡Ìw-ë=œÎæYIB2¶t¹‹Q™w!³(Ò1CMŽ6Ä¤”¬DL÷n!ŒM”·$ø'3ÞÒM&å.“.õƒÑB[g@%ì>j«¨÷72Kdt…%Ùá¬lÒ¥ƒåÎ`ew.ì‰Àè½~ùJí&|ëå'³ˆJšð\z•ì±5²WJàe—UøûåßœTSËM	¢ û®™Þl[¢ùkÒéÈíxV‰ÿš·nˆKž¯è­¥fˆôØ2[fnak,§f:¾v«U^ÃZìUôÝ³OE­±§–ë]¾§Æ4Gßêq˜}¡é—ÜdÿÝs?ÅSþ-eÓöqÀËnw¹WÄ²¢p%vä%®¯N”;zîåž»ºc­ÊÞ<Q4–RÌ806áŠS™ÆPæÂë	û­‘L³õaWÊ}|}}Ú™;¬ØŒe7òÛi®ØŠÍú]WÂ[¢3P(gR•}9\È¥láA¹WØ"ÄuÏj$(7Wî5^ÿwÂZø´7gh Ðùýµ‚¹
+ˆu°Â·AeÕ¨@þøPGÅO)œ•(X¡DD=žƒbã1aÊV»]÷f×fé­"í$ù+alBÆ¾¯èˆ©‹? EmëÏ­
+dWëìÖ¥y$¿©¨ÝC‚›rlB‹uw3Æ`¬¥ÏÁJySivWÃnø5À€?ç„Ó6ƒY·„òÖ„8†©-Ä˜WƒOåM›ÒeÛÌæÁY¶³ø“ñ¤™ðV7›uçMÇˆ;ä¯›VÄŒfBþ,ñÒyyÛ-Åý´¿”èbì‘á<aTÕ›Å!>³’¾ÌŠ«[¤7>íìØ}NÙÓðØsÊç®ÒwIÙÎ¿69y)î:–½•|f'‡Â¶û:²‹š<kÂLô¦!°Ò ·ƒj>¨öÞ¡ß@õo)êw»½¡`“[– ¯o<{“Ä³àUo&þ+™³jÈíƒŠA…102š'<"1X“àl~ŒaDE˜PnyLZ#[$\örëÁe/ÿ]Äß‡£B$ÍŠ{´^ãÊºÍµõMn#¤5ViwÌ-©i|(7º¶c)ë£ßþÒÚÈõ&sÞ¡n;œ§ñ<‹Â)\ŸRñôTôZüPîœÖ0Q–)+UžZ†Jã´çŸöó%Lºë²„Â:ä+¯š5­¢•çW³ŒVÛF±Lœ} rˆlñPèsméjñ±Dç‡üÇ†¥”…U.ÙDXÂÓÁ§ö+#¸æ¥¼Ó)ÓòvE§©±®FP‘]³$«_Y.M›f6MÏñQÙŽß™BR/‘xvx¾L…å="ìŒEšNoBNM|ÿ·CæßÜI9wK’r©8K9¼/ßUþ¶Ž¾¤œ˜¼/9@ÚI|)“túuMÞºÈ-jPóaÇæ‘û[›»®<µåh$v>žMÜãA†<^µA¦Çø²ŸŸî–æDkdö¾FŒAJ[ëÌäE3{!ŒBìsG<6Ór9ãš]8…±>¾„)ÛoŒ^NÏ’ë»ž*ðµÄ¤9,ËN>Ý8öãe?¡'÷c¤³y2‹hÉP“ka1_}œEH#‘á-U¾ã4È€™Àþ¦j?çÚPü¿^²É3¥àùÕN¹cúrt@3y9ÂSëWÜKa0ÝÂ—…?Ï–º±ÉÐHq,lM>²AÕºÉÃ\[9ÇÍO®‘X/=ªÂøÒÔ{óa¬¬ý`S2<Ú!Ú†[Ú‰z#
+-ÚÉMµCMÉ)Î­S®¸Ó†]½¨“tSé¹¼c^DI'ù7CwÛóçÞ,EåUŠ©9åÈy¬Ôà#£fPŒ½i9— ™bž¤Êk3Ÿú²q½Ãf½çQ¹T>¥}ÇˆK˜¦ÑÛà¨lH3Ûq›bž‰püÜèÂÍ0ú3øœ»¸uZ±—´aË	ðèK½KHmãH“'ÚöØ±kZ±}#v“J§"iNåØê™û‡.ãI¹•\Çæ’²IîS‘ÍæO™<	¦£–×ÿÞ{Zi´€P¾úq§vê¢gÛñØ5Kú’s_«£9—*ëk65ÃèšI:'Xûë„	Þ.Ž)ü.Së·ŠTÙDl‹HNM+ÙCnŒD$KYCJ½Öb)ªv*+È2!á¿gš@Ê®¯E4Õù)Àˆ‘–±ä7Ê®:A« Ï¼Yä¥áÞ ¨ƒaŠþÒ±Whäò¢©¬ï¢÷ˆ~¤?g³e¶£Ãè¢Š)½È'^ÞØ¸]q×^»/¾ëÕ–¯ØúÛ(fÉÛv!ÝíNp[ÐÄ$
+×fZ¶·êöb)‹êÇHúìþ¸í‡7rX• ÷ŽÍÃ|ì¤Ínò »-¾“ÂØ¡«ooÕ¹ÝxW½ó€swÔ{ê®f¯GY}ª¡çvÃ‰ëÑÁÍWè„TûrªR‰ƒ›(V–0gX¬=7i`õÂŒ!•x4cF&”JÊ•ÖŠªÉÝþËNT1þjsmÔæ{&*L™Ú$+¼´›š&*˜Ÿd’šõ­†q­SPÙ-sÿrÐ4Öe¬j•65Í¢fîxOÆ¦àÛ¥Ílh^Ó­jž€0%žð{¾tDÎÅuî*—CØïyPfh+1³Õï(§'ÌÑj(_Í}mnm“…ÂÔæê*œá2gæq6ýó{»à‹8s¤¸YÞK×h›/ÎkgöœÜw±Ò]¹ðºæçwãÍK{©óÎÜyáÓK/|JŒëuíÅ.ÖäÞ‹m{]|ñmSn¾ðYÎÕ·~÷¸û::»w.¿8Æ;tûÅþë¸þÂ§¾û/|néŸUÝ€á³W`øÜ;w`øT¢¹Ò-Õq3…ÏšÝƒásŸ\„áSÛ—>·Yô5Öl—a,WŸ÷Ïu>ŸÈ+WY¹×ä:ÝŠáóé]‹ënÕë}NWcçD—º€T×åë~·cÞO•ë1/Õ¼û1|>CdG…£†+2‡j•;²£\’y/wä–Ì;¿®É·I#îÉ·Å§qQnr„krSnrˆëvUnr¬ëwWnr´ëvY–c­Qìþº.Ãçž¸/Ã§)føÔÁ_3®ÌðYº?—fL«»5×RµfSåâŸÛ¸9ã(ªÁ‹ÝGwgY0–C±ÂõYñ»?óËßB-s›v ­Ù%:ïÃ3‹µ¸FÃ§A÷høxw¡ë>XÕUšë‘~7il»ä<àvîÒØÂ§s™†ÏÜ¦9Œ*BIÝ'÷i?ÖnÏYG(Wg	·jlþÓºVc—ŸÄúSÇöÓ´›5ÂÿórµF0Tôöž:Öž•]¯á³÷kÙòJ.ØðYÒ>»b«£X¯;6|Öî’]ÚIsnÙeÝ4çš]:™Ý³áSê¢ŸZnÚð¹­«6oãÝµ×4€%\¶×5‚únÛkÁR®Ûë‚Â’îÛþa|rnøü±Ü¸ýÀÿºrßÏÉ®Å»þT?g—nœesW¹t®²R¯ìâã«cOüì\½qÐ•¯Š§U¾)©01–ì¼ÝiT–¸m5àð½òì=e¹¢+vBá$¦HŸ ðÆ»:(©°xƒ§¨áü¦”ç#©ÕÊ$H3Ü«O³$Ž–‰çì4¯–çÇØ%eÞµzeo žïÞ,u²-Î,ƒÝêI/èèps¶DOlÄU©.8&žrD /I sm·Óùä vI‚¹Õ—	 ¯!W¤P—`Èx‹Kz†Yf´²ÁŠÊ‘ eA@L·¿–àbEÐ+ëz­À—×Rèc¡FÀ_™ýâ¶°×“^¬üKS€/M½¼§Ü}Bq[¿8°€®ÉßmãwThî¼«pñy·C@ÁAîÍïóAï~rºßYÿÊf³ÁJÅã~HÆ÷cH¹|*Î:ÃÓØ²l§ØfÜa+½ªoáGg¸º¢Q·¦“i“ýr[î]tŒú:––Û»˜sa°]sïMù3N¸MÒáÿ¹Ñ”¥°©1J_9Ë‡8XÕÛ¶"ž@YP›O¯/4ƒéýç3ÍÃPÈvYáMqîä„¹sØô}î­guìSYpÕË3ø*Æ®³àê™|ì6šYÃ0h?•h^<‚Ùa<M3u5¯1œç!
+¾Rb°ëÏ1Öõ4uÐ‘G½S¶]|Ä…77Éw`c&…Q1eâ‘ê’Á5ù>w­þ¯Ïƒ[à3á&Cl*= oé-ÛÃ×[—Ü¨~ÚòaîÐ-à™’’ù•œºÜ·éïÞ“Å1ÏÍBŸwÎ©•ŽN”9ß#ƒo¦<ìó‚mœ«ê\Â›a²ŸUã ”ŽÚ)ÚúáIë	áå(·í‹ÚtµQŒ—ÕÆVmpº=’9¨CÙ} zR^Û ÿ\¤†¥s($¯ÕÐª_¢~õ½~ÂO)ÍšRiƒ÷§øHðmðëEŒÉ‹˜QSFòp`Sü8 mYë_ÿ"J¢k­“I1¤"ß3¬•|Ýµ¿JÔdßSÐû¦ŒÇU
+¢}øB¤aCtèoK•6$‘M±ïÞ¦d¹òQHÄ¡þ‘%K[DB[
+&­Æð]G´Ñy$ÝK€M}¥#'g8çA”R­ddä5W¤äz‚w?Ä—ÈÍò(ÓÙ«§l£ÖVNÙD]Î[€:8½ž£i“ñ­ô1î›ÎqMÄî%rÎïœt88;’k<‰K¦þ¯q8m·ã§H¦fçÅ%”#ò.'¼nA:ÝõÝkï}Ý5ã»ÃY'ïO‡I?œ£ùˆ¦m’0d¥ª„Óò5sY¾ªà t$¿1tÔ¨ŸWÎ‘;5	xdÉœòwI‘¡ÐgzÎó`8¶€M%²è¹î„˜ÓðÚ
+ú)°†kƒ=”âQá“^†*Å¨ôÕ\üZs&¬`þ(BÒ û/Z«#€p²H]À¶@¤C~­`˜V‚%•F2™·‘7­>ÆF¥hf¢„7,EµÖòZè¢pì³äµo·’û¿3X×…ðŸŒÕø…Ö?<¸)îG÷@œluñAYm¸U]õ«ü^GŒõNMÿÏûéjVt­¿¶ôÛ-ý½Psß½Wž.œÓ¶FØ7Ú&_
+&ls—å,³c0H¦ú¿Š/I0Ò•}®WsÝ±)-'+hëÍ‚›º9®MÎ¬~±ÛP(‘ƒo
+>©Ñg)×…fu¾ëåº~ž[ƒã6Éoà¶¬ÿu­þ5òÙš\¶û;p=¸þI[qµ9k¡Ò{ØªÍ²ÝõgótÜV¹ë(È…ÅßT©0)^€ó7µHšÙ<åoùwTÑ±Þô¢UðReÂò·ä‰§p1
+ýîRÅÄ²§tÄÇÏ@òzð+Ã2s–j3ïô¡h»tÉ ÃI¬PÐ#4C>'³ ¡íAñ·4D[åÄóŽ¦±°ü¥2=¥óV"ü.B
+¿'L¸ƒO2P2˜°rÖMÆ]ŒH©­ånç!ÛQÒ3V±~ˆG¾÷«Q#˜¶”ãEqó3ÕlyúõNqUQåêµEíM~v_N£8q“Þ›g/t¢j·½êíö÷ó wz´0w\°âŽŽï*U!­Ge,."{¢D²îõËÂúÜD¬„gbfˆ…å2H	›ªZÍÀc^¹FÜ0¼
+{œ×]°öíÛ¥ö=JÓ$ë‰Hû­Fh7ê2ç¬È	ºäâåèÊqMò„%˜IiéˆVØÇK,uÄ¹‹`€·˜ÒKòŒµÑÿuú4;'lkLzÅËùÒð3Ö~à¹ù\Å)v>Cm|dÕÃÏAé#[ô‹DžkCh<j9N›­…„Ë#»ð¨Þ‰vä=Ñ®Œ­ë<Ü¶8§ïÑQ×w—[sÏäÞÊ	$R¶§fîgÃ˜ÆÉ$ˆdLÌãw¢­BV¿÷_Ã®í”æu°sÎXódÅMœÅ9‰­V<åRI­âP·‚;]q7Ò+ü<œ7‹}Žs;öÉ¹§a‡+ÌNî>k¶¹q|ÚW8³,Óp¥Æšs9'1‚YOûµ}–î@²•STD—n|Iï#ÿIl©çQ¹ßDfËÔÂíòrÊ‰ 
+ÿÉõ(wPvÞbb3}›¬K	y´¤·Ë«—n7ç·òð\Q$Å7Ù}ÌÒl—`§kæT°qÜk¸—ëÂ*½8ïš,¥®-Ã2ß¹pv¾>P·iÉº¹QtD®z‚vR+˜aú–þÊ}7ŽP­‘û_<MÄ»Ö#o3h,+Z)X`¨“=Ñ¥²C/»÷–+•_/SÏïsSã»çêú¯Ðµ’*<¸Q@ü˜´b¶3|ER ¼q—ÿ?   ÿÿì}érI’æ«„8µM°‹ ¥âˆdS¢T#ÛÅY5[+“’@’Ì€Äd¢ØšÍ+ìßý5o±¯ÓO²áwÆ™ ¨’ª*­»Dä§‡‡‡Ÿ·t}Jåoó‚|K¶q®
+íÝsœ8PÐ~É¿{õdXL;«ÝÕµ^•ÓÁ@óSm¬®±ž.µ%‹³™[Tdq[bÇØC“:—âè–:ÛÁRíÃÅü½;ðFù3O>árÝÝ¤ÿèJßÄáI,¦"°WÑ‹W
+=RéÈLð“Ž`U´/]²,^:3Â¸’J†¯ó!ä÷ü7ù>	¯p®µ>Ž¢FÆbï,@TŸcËã¹üù¸/Ô9ì
+8=/ËiË³”"–ØT-»„ˆ$ÃËrûf¡ƒ…ïN³‚<u©Ðˆ{{ü7à$FG$áÝÈ‰ô‰¾½N°NÕ‡ã¦±ÍÅgj9ÃîÉv–°öñÿFd©ÂßBÀQu r 0»JÏêÖ›W[´M•X€„T³Ÿãîe·îÃFLc‰i“ÿ4Âeæš7™Ó_¾iV9¥­9.Æ†ªê’®rÿiž™]ÆÔ¨?¹Ü¶%‡ŒWÖù¨pÆ©¯ìq§MÉ=ÛŸl\neÛÑ¹Zk6¾ÛÀÀí•½ÙDërVÑ)¯/ÏÊ¬ôz=#®6<«bR/çÎ§TeU{ &°I÷i¯´	‚ßi9éÖÅ 'oòs:d—tÈä’þïÇò¢“ãìÂLggQ†ÈP¸‰²#V-Üx°{Èßé>—d<[Ð~u™ÃœÎ}??˜LxÌ-|PÔ°T»x4ÂèÔÒ·Í×¸ÙèxVÑÞ£e“ô³þeŽ¶¸úzÜÇÐHºE©ÀÊs¼KeLÚdf;ã«DÙÕ¶6¯#°Í†fÐ°Dýƒâ‰vZ4èœÏ€ŽêTB2tHÈwðtÙý¾ižcV9;âLúh3`ã3õìÊ8;øl©üÜ«M.Èã‚ƒÕ“ý¶Wu8ÚŠnýôÙÖc€UõI¢>dˆ<n³Ÿ«ÚŸ&t“ Äž^këŒ>^½iaô®?Âùq»\›£ìS÷
+ìÜºõ€“£;ûå“btAêª¿»²1,/ÊÞd|±B÷ÃéîŠÉp)ë(WL¦¿õˆVÃPX9k‰þˆµ’cÈö÷¼ªÊJ¦k›“¼Ç}ºNYŠ¶zz=Ì{”t&Ã}  ‹Úê?[ïiGž)EŒ§'ÅÙŽþ~ócQOÁ‹—Îyg•gè[ûgrÓ˜Ï'?Òe®¾Ž.ÐÿØûï· 6w°-k›¹/¶°†YîûÐÞµÙ»„D³²w<Ìáì\cBY8mYÖïçuìé¼Sy° m”)s‡Q¢,­†ã`(B¯—A9>™Š©`µ¸EGA7”-ªqf™á#œjŒs¤tU+ºzCæ•¶,­¨¶L1O.±“ŠjùÐX@‹LêÉgó“N¶Vö^’ò|DE¾'X”U&S´ÏøZîDûa•ÿû¬ ý´ðˆ¬£P«}"uå9üQ¾Oph¤iÌ{=rx°µ}ŸÐùÁ ­¿ èØ°×/G6»m‚Tm}#IÉt¨§FlÖÔd·Ž$Åw0×Çô»+
+[d¦'üãEg[TÞbÂÅ'-çüÿùßÎÿ}iÓ}Çó½»Ûø_HžúKžU¤óâ—5ŸÎÌí%Á5 ÖÎ¢é„Lø/—ZS –¼ø¢Hîvø(šÓéòÅ/	éRÍ
+*}ñK“>]ú7HãÀ#{S>¸±uWÄªsÇ)Tú6¤^)I7IÝ¦ùùõë	óDÇ°¯kÓæËxRâ«ÌPÄ^½ÓÅî‰?žl°—í*íèpJ68úQ¾Ô¼Ä“ƒç
+÷Þå¹ãÍkê?%ÂÕHâ¢Rm!·OŸMQî± |tV¹ÄÅú„z‚Ÿè9ŸPa®C,ˆÊ]>W=Êf3v@¿\*hpsÃ]ù´¤õ@¨¡lpoZ£Ž³ìšúLÅ­­þeuÍ×Q£š÷ßÌÕï›¿T,DöVÈk÷>µL||“ÓaT›–,¹õúŽdô²	žÊØå”ˆº÷-êw¥¸pnCnBddX£°ÜlÍ—ZúÏR®ßd`úÚñ'×1| ½ÇwV;;½¿Ýêmn¿3;ÐÌ8e¼7FÊ¿'P|[}¨Ëà˜pOà,¬;KV™=ò˜4ïîà-Mæaûä²È‡ƒÀT$$'Ðåé¶~ô€3<³hƒ©:eþlŽ,! tæ0A=\Ã7k¤¨é]5ÆVJtÅ×dL¢5œJé=z¦Í{„óMÔPÁ…JFxä( ¥D¯Ó£+À$O§òCló*V`C*ˆÙô&¤ám,œ&ÙCÊ~=›Fµ´kg8êÚÑ Õµ¬itMzœv­"‘¤¾£“+”Rƒ£<”´àl¨«€]ðëósè8=ßc;í:(«rš#²yšÇô®žß+ê#º³—Õ‡×cü¼aq{?
+º¼ºÓ²[LºÃH&åc‘i94éìG#Ï€XŒ/¼Qˆ	
+)D†a£Á‘–K€ï³ÕÜJ†y5=­
+*7}v1Ù’¾”A/[_RéóCwÓ
+-pŸyøÝ¥ã6Šb,§ñU9ÈIç%´sÌIc>?–õt-Ñ™O¶¤ƒ†îÂÍZíƒY= ¬e!:VU‘×Ð¸Wù¨ÄÃÉ:këºŸÙ:êÖ³ëœ¾™U9*¦SSÐhxMêì#å¨Š§¿ ×%e2ƒücÑ§|„ò"rUÐúÆtW–5(ê¯™8F¿B3ÝMP¢­
+Ð7ƒ\Vˆ¡‚ŠºÏ(ôìAI4`ºn5Ï{2‘Ì÷››ñ(·ÍCi$-¬”r‡a'Ø’2R™WçªP[ŒØiÔÆ ¨‰Œ†Žntˆ»'td	†zæÎØÊi£{zžAà‚=h,2­X”×É(.úwp½"T¶ž¯ð>c•éi›¼v²Â x£üäÌ)+Œ¦ßõ­ÜG*³)9ÍÎ:«‡Âèhðœ,F:«ÎžÓFIÜ4;€£äzçeMeâÑsL’—:WÅx © €ßÿk1˜^’=²µ¹ýÀú”¿H7³rH¥÷Îì€'NÎòËìcQV;dµ•åôrU‹ad—!Õ7ÖÍâ¦†Ç0K—`k¼úÒ-^[ƒÞü<ÁlýÓâàQŽ9ìÃ(Ú–M“=n¢\dbK2P`•^ŒmQk­+âPªTª´WÊ<q‚æ	ÆÚ‡i>Â¡Þä@ô¸E÷¬¦U£¨@r¥«yß_e.HJ¦åÃö€UXÄZÂO°/þïMÕ©ÍHÔ¹â—¿v“i Ò WJÕR©wãzË¥Ûöë]ªs«E6Éc…:<MÏ·i©›´…Ð`óöhÙJ&—(äÕé-¤¿sôÛ­¯s{YhYã5*Ä¿¸þd&tuƒîªöä¾hCÊ*ÊqB–›¶ðÆhhÙ%ðc6eú/w¬Ü`0Änð°¸Äÿš¼Ç¸±€ÅVŒ
+~,—¥;`µÅä]‘ÎŒ-&AÜØ¦•Yˆk/psòÄ*Î3!Ä0\G%ÈøPE›•¿%Æ´·¤Ìˆf#‹"ˆœNJ`íäxÝØ&Œ?€=)Ã7u<ðR‡°:F_Ï†%Ž5¼×ëùÞ–LTH|>×m7•rb…K·Ë©2©Ôúuª{ýê+œ±]Ãš’b~Ñ)íÁc2¼ ÿ>ÒN^ë
+»ÜëÚ}þµQX%2é®‰cÊ%ÁŽ‡ÌuyµÉÙb‡}ËüÖ	B²«¬˜Ò‰ÈÁ=°zÏ „N1})£&¢³zÌ¾çâl Ö3T®Á0_ßs)*ø¤#“HÙb¨¶%²C§³mRŒf³m¦	o:¨¥nÇàÑIÔ8À0:§;Íµm*óLk¢)*Ái®DÇE¬ø.œájµï?t"ò7ìî¯ÅÇ›R'²¨Äà÷mllÔˆÍÑÜV\úN’#\ŽÙçÍ¨vÆèØð‹ðoÄv7EvøDŒ1Ó˜·p€t9?b-žeG‹~9®§tžÐÕ~QËV/	ï-ÎÕZÙì>okWÃ.>·`‰£nëp	âG¸¾ÚÏ˜øÁÞÖ‚ºŠÑf’Á´l1uãV#
+Ñ'‚¢ùß<uÀÚŽ¬lß$øDW¯¶xI:qHE
+nÓj6†tÜœùö±Ðì°ßL@gfA®HÃCïüQ¦Â}²û—Õµ·›ï¼§Ãß>ÖõIz$©åèõÐÌ”c(ÐyKAÎ4âvÐ.WÝÉ'´øàì?’«á>3àn2¥m­ìùŠôù½X,ŽÛ?an[1Ó6iáŠks+ñŽvp1…54‘·Ñ—_Ï¦¾ã¼±¸œkÉÇÑRl9î„	†ä(ûX\Ø`#> ¨ÇæáH1üÑÎLét^ãQu“üxfÀkWBI|ƒŽCÑ´â‚°}¯Ü«Pó‡9W^åãÙŽ¦ p.+=7Œ#ôì
+¥½žäãÎ½ÿËÚ„\Á‘2•ˆFÃ¬­‡½\ž@Lº{D©î‘­zwº¾4HÉ?mó÷ßÌEAz‚l±(6qÂ~qBUÙmÁô´²ü´«)]7[Ú04M:jÆ‹c Î#)à€Èþe1Ðã°Ë,€uàg„ƒ_@écT‹:_*€"u¿Ñ^}ïVh$¸ÿÁeØÞd¡Þ(ñ¨N{1j‰ÓÞ•$™Bo.j»ÓŠxÆ”í×Ùò¾x+cŸ¸œzb¬!nËmÂ	^Ü2$Äq’C4ºô°&Ÿ`ú¦¨ŽœuŽä ‹ú‘'*o»ŽÎuØeÉÞÝtê–~uýrìÁ$°ø2ÏXÊ8…E÷Îè€Gà@Æöò°>lõPÁzu9Ê;øVþ¡’ÈñwP(™â.)é?‡U9¸Rs¶ìOC¼Ç²ÿ‹«Áx¢ä*uÔL+ ÇsÁ¿ÿÞ}ûhó’D¿RþÍ¨€Ý÷ò©W%•FŸj{àk­ß_
+–ñcž}Ì}e J'Á ³vmÚfƒÅ˜@­t<bø•9Â• ™‘äüù9o"âÜàöü Ëxv™¬Ê1hšº*<Í:uI:ù+½“Ä™òÚQ¼.÷'MÙÉˆEÇùC{Ï&Ñ%n‡já;-ºPyï‚›&=×n±ƒíßáp¹ùÎè†™â™®uÃÇ~0ž¹ÉAÔ’ÜÑæWr‰Ù—b¯!tŸD‰ˆ]†\¤Ê÷Jò«4ñH¾ž,$É/E%ù¾Í£ŸÜVÆ’¥IZìZŠ¼Å.ÔÅ.sm³X)¡°ÔL}–«x«™ÚÐV 4E0M>ØçUð^8Ði…m<Ü´¹®—¥Âå[‘pñ•â­Úkáæiþ¬œ~…ŸÇhi‰hÆoJ'As ~]à5c8{›SÔ0ç³ÌòžŽŽ<ï4¾<*§Å974Õ«<µœþÂØxaM•o|	œH«ÆèÄ	®!8-'×ÄèEOøÚšX~ë>Û`—-—§Mÿ¼øQ%­o±$—ò¸ibÐ­	šß;‹ a›ÖðÂcˆ0…!&|J×÷’Ýðß¿—´ÅØ‰¡oŒg ¬ƒ?Mâê{}8'³A¦P­ÑÞI1šsæ8Xé“Ùøfu](Î¯kã÷Û9ÝAéÌÁÚ¦ob¤ìN³ÒÁPùíÍí‡ÝíGk«7ïŒ2˜ö`0xqmÜï$öü0æÓ¼³*1X‡Ö	}ËøŒ‡šq,á¿+2ˆœòól6œþÌ\Crµyî÷Àí3 (Ô^ì©ã.
+i¦SJ°ß+æ$ó0[€&#“é´¯£ 4Jí~ŽVsk°WYBUº†tBñÈÌšDøªI,h
+EàÇäˆÝd5íÎÇlˆ]£ÿ¶Ë$J?ðQÖ”@H¬íwA@l ÚÐ7‘ ³€A&ÒÐÙš\Ä4¶¡î¸“D&ì]“NxR$“PL=ª“jx
+$}KðL={=aîy{\“ßt­¿%-ðÑhCZ§¡cÏhIrîZKš•Fønƒ8Ø÷qâ)²,1ËceÂ1
+ÜNéÈhœ&þ^Ñó¯7Ê´¸VRY¦t¹žBô,q2Ñãë)DÏç)Nô.S¹Û@8±³"&¨õ"aTáZ$Zš4X(-—ƒÃªÉÈ™wèŠÄa„ä‡}˜7\AQ[^é0ÿÒ'ìÑÆat¯?:×!ÎqM¹zPög÷¹‚xtÍÓë—ƒÎ*ØyÛ^ƒHú•ÿÓß'ÍÏdK©{Ä(šGQ+W‰b:\ê¥ÄÈÇqeïÛ .€qëÖ,ÖO=^«–Òž¬“£ãŸ=BÚr\ÁÛp\••2‰éŠÜ”&›T	ãœ—E…Øóq1t¸,üo¬‹ÝXGÙzÙ
+6®Fƒûš%¹T=þŒFA˜hQfftÄ&ïß~3—	o@ó)s4Þ8>i2x¢£A¼9²)Íæ¼zïÖš¥¤9ZÒ-i~™ˆÉnYSÔlSçr¼þtÍn)A$‰bÅ'âƒ1Bñ—$!
+°P‹æ#·ÛØP.œtÔ[ìwã-ß»ƒñZ[Ž¬qKÎ“Ýß;c¸Çžº?ÈKyw_8ò¾øU^=ƒp„5í{%(éÛú2«FY6žýíñ£Í¿\B•û (½ÏÎº-÷í“ÆžbdLŽo+*¯F»ÿ"òÛµê}‹5%50”áe@1>æÏ¹nã#0Ì¹ÉÙ%cúF:
+F~ku³¦Ÿ¯±w¾ÝüF°Ç¦„Ÿä}íä“Ü£hÏ÷	mºú„þ{À‹éÛÑïx~cÞ¯äFx¸ãKPäÓ¶:°d½x:)ÈÆ«
+¦cÉÞcìz‡(ú	~
+Ó(>Œ…ùCÆ>N3ò¤mš:[K?}«Ôï)Gp?º¶OÊÖûè7.L®uâîéÝ0ÕâÏTnLŽ­¾ÖïÒ—JýYÉo1Púàí»-Ó½qv*I	ÖR±5Mª¿o¸þxwÎþ½a9Àk­²çü†9÷þ}Ÿ•õ™\a2Tðr°;×~ÜÈ­zW9´cô\Î‹Š–­ýÁoÜö «ï§­Ž±MŠ½õéÕ¦¿¶çYS6ø]HP¯Ÿ#ž!<½~Ž·Ãnó¯VˆâíËgý¨‰¥qO#hU=[š§¶Ae·†Æi‘ïàÒg‹a‚¨ö[¯¼µX2ç¹—štgI|dƒü4.¦º…(¬6pE·_ÆCØî[Áë•q"«Ø´—§Lœ¢#'[·Áÿn$7ìw‘ò&§JÉHý=š©yDQpf^í+GÑdsÿèÆëLáj‹"ú^‚1Ë é>ÇƒsÙ›=þo ï#ÌézXÉäžFKÖ””É	¤i³t™+ý¤¦ôþŽÖµùœ)nü­ÍF€%©K/Ùë(s?Ïô†k#“"S6ÐÇ˜{_ˆt-'JoÒH¸EäÊ²ˆhk®¦iwKâ6nÊ®;%“)…yh˜ùžã&Hy4"·4n	t‚=²éÀ'RWó3ÿ8ß4=ì>íñ°å¢Þ‚ü'ˆRJ„¼¡ÿÒ8‡$òþ%®„L©|$™Ûöà“úÉ‚Íˆ '65‹‘ÑÃ[ç´\iÆE>`6¯µEðÓþ¬Þ a¬JÈÎ{l•´£4YNˆÂ˜Š›5Ï# V¥“Ãª	)‘sà”ˆ”ÕG%ùèAim^–‹)9>g|JË®jp	þõ<öb²H@ÈÆdgîÖ“¼þoDké”ãáµ<ha1þ òpÉ@2å'Zæº—‡îÙdëV/{—ÀÉGœY<Ó@øpJ%.\àyOUôR“V
+ær‘2õž‘2ÕG\=zâ˜õóN§žÖ	Ç²¡çùo¡\	ëd3ªîáâÞº‘Ü¹¸ÈÒpÎ[ÕËÓ&¨£|Jž†^lAP¿©©ö-™gÙ°?¨í¸Žø³¾•*Y&,WåE
+µf^öX!Þ’êaŸIÅ›eŸ¡z¿ëÔRóÇ¤1vX4m`âI¸¥è¶K²ŸEÚ¤4NÎ†9û6„$âª5âªâ
+Ìÿ8Ÿj)tö-éêÔá&QV_æôs³¸.‰f”ñ8ßþ»B~geêV¢ï7sÑ‰'(N®JúÝ¦æ‰/ ž0¹<0Ö3&Ú°ä–ã½žÂzhœ'ò´(›Ý!ÐdcŽ¹æ:ÓØcÈ`îz.¡–û„~Ä }î­>:úúºñ¿’ö7~îÌÒ¶ÖŽr‡yÝ¯
+æVD%ùÜ:‡z È1‹	ˆ“¹ÐA<ÄWÐAž¡8RùY•gºæ£–‡wpµÝƒÿ"3é®
+m¼·Cl#Ó½Á™pJNÄƒeK¢ó÷à	.NEôÎQL}zÕ=/¦tKåøPä­¿€Ä*ó<ûÉs×ÃsNªòþû1_ë¾c*ºGZ_ðŒüÇ™8pÅÎÄZÊ1¹–¼‡b7j’QKê8åÂa®ÝI×#¬¯ü–NÀÚð;ŽÀ<!‹8ó¼)à	ù«‡•{(÷-NèSp»ÆÅ©É„=vfÀGb@ õØF­/ÁÀX;:·[iü¹2ÕS€¬˜%ÐÌL£Ô§:—å¡—o¶(ÔàxæÞƒhÓ³ÕýwÖ1SùWÉ‘³ÞñxYiÆ!ÛNŒÙŠáúÃ^,®˜ÍXÕcv•cæm^(Èa—5ƒÓÜ<	[px²{Rªn‰fœß‘RUÀ­²­Øù‚´_;žqïv5ÌÜàâ.dåƒÆw)øÊ†Ñ›}F:t[s6Þ¡°3Ü
+¥šÓvPùÄ;fR`ù•7Uªe…Ï`ÕîÂQkèqòÉ#­Å¢*éDœÌÎÅv¶0Ù!JM+»ËdvHÏÁ^¶%	çVé.œCíß¦¢ý {J¨%©ÒÚáégŽ¹¶A ãd–êçù &ÙÇ¬`pªgøþ½Õ¶ò¹3¹º–Ñ£_Éü„¸’æM¢Yî]¾$¼0g"´Aôh‡ec GÎöÞ%UyEyó¶È$êjW‚³®î¦àp61KQ‰Gèõáó×ëm€¸H¹ç dÏ+Œ£8ŒæKˆ—‘ðÞ7gq²‰Pngëìýdy½E\”32VæOcbî|c“ªW/î\#=²Ü4xtò{½ž^ä:eîs7Y'BOä¾N”®•ý6”¥üV™³?$ÄBÇds.Bç¾¡#d^Ïï’j=§ýf$äãò?Ž®y½ü 6l‘'-ˆúzçŒ°Tæ$µT–dÚ$àß>É²“GŒd¥¶2Ýsòô®6M>Î÷Ö~ä/he™@‘ä2—€Nèÿ­½:-GèÞˆm@ÒÏBºSÈp1«5¡Í”éÒ^ü‰O­g—.Ö’VztáñðoÈ…jó~Bi¾¶Šx“jæ1Þü>€î½Ô]P_’KÝ
+Íµn±‚¯zÝ›Ñv±=O×ªÉ/³·>Ó… ÎôÖÂQÏ~ uwË¤|îs²LšçE6©ý«$q†(!mîÝ–þÚyµ½4+BJ–Ê°ËeºËß
+É‚­:Æ‹ËÜ<|¤K`ú~&¥¦—-ßè“²ÌUSÚn.ô5EÊúNEÊ”³Ü×+6 càòáÛKR©½ðDÔVÕ%wë<åª;ŒLlED5J§9§ÇÄ=h¦]ñÁW= î*ð»gdræB´ò!·ÛVq­µT®ÃìóÃ¢ž®:èÂÀg‡F f°!ØBû•ùßèþÖ¬F6lX«ýûh³‰õÛÈP$B¼ø¿6õj%±Ýz!Ü8GÈ¹D çh®›œºÒ¦²À#¿)D¬Ú Zž<xôÓµ`š¼`©=œÃaí"ˆ»&	VñRiÂ½¥>¥‘gUîó4ð.éÂOvæÚ¤"ïòˆÒ»¡œIvç¿
+éðš?í `Ü1ÔÖ‚nDë¾Â¹Ýv1ÊGåçß.°V×ôªóÉ7ŽW´6#¿«ä]ƒµñóïMˆ÷PåÎÖ\ý	ö$ñÖðhr¼aÙK×ÃA6Õ¡MÙO'îò>üWä–ì®®õªçµÞßÊbÜYÝX]cÞ¶££HW¥<ëšæÓ¬Öî ,7 S4KxOÈ.aÜ€©‘'ðÉ$ûÃ.ÁöÍ|¢\pÑ;Ë;Rñ×_Éú}p9B‡)ãIq^÷Ÿ•óõ)ÝëYu­=p`'ÁåRâó¿«á€3ØÄ¸hŒWÈ‡:wÒ7æìäib1<%šº=va’€fh¶•#êÑM«4fÝëÒdTîvoúÞ¡)Ò™´™$œÅ¤^ÄT›hYy£pt"”Òƒw ÉMÝë&,‹ñK°­®—IàVÎËöÆ3Ü"je¯C?ëùf-Ñ?Äb¯D^ð.[ß°JœNÉÌÖvL„¨‰œX²p¾ÌÚ¶ÒplÆ¥iaî¸¡bŠÝU…6-=WÛ¹ ‚†l•¢2îbƒ˜"Ý:¿N/%Œ~“÷ƒà7ªœF¸Õ4mÃQtä°AÕTº°pX@ö€øìn!»Ô-‹ƒ½UÀÔ €«\®en¬L’»¨¨T°’ëËÏ‹‚D¼›ƒ&n$i|Oû;Ra8¶i9r Ü€Ýá©íb9½±½™Ú
+–êSí€]Á@ÖðÐ²í­¾÷óœ]éÖ”æœQ—žlñ½‡ñˆj½¬b<,Æy×—{Þ[5åBKHvË†ÛM«ZÓR“ÒßäçtU]>»jdšgI/²+œÃ™BàŸìa‰‰	Ñã¾@¹Häg4E$\F
+†È»Åëúi=ågùÇýˆ
+ÆFšöM‘]PÄ£È09vCNcVÕeÕÐÃ;%•Xseî:^;BKeStB[L~,ÆÂEDEäÓ*«/·äA;s	ÿµ’Â[ŸGòÂÈEB@È&“ª¤üâ=•ãv\À™£DZ‚l"´®Œ#¬);Î.wüP|¡ÃŠýwÆüG‘v¸*s×+™MX°+‹±¿Î©pv¥bìùoˆ±w‹„°‘Ë;á ~ßçŸ‡}ëO~?àS÷_ò“Xx˜¹Ee¾1˜ƒoæl`ß‚Þ/«ÁÒ]ž#s£ÿ°GïPâÑ’Â„`
+P~Á'ÄfànàÉ¾qn;à7ÉËC¿®óý?!”ÃÍ{n»AfQƒm+×«7ÒŽ‚q`)	uV´]ü‡KögðÑYG¸¾P!ÜÎ¨H&·˜~¥]þ%‡”±ð«ÿ¡;-öþ¨ôˆö±ÃÓ¯Õ-PlÜƒ²n««lŠY.'=u’âñ£ê©£ò’NkuPü˜RÅ%úä	9²ò¬œWå$»` ‘ÏL”‚„Ô°ÿú¦ƒ´°„LÎ’ ,ô—Ðdn¸@RF\÷¶ˆ¸o
+vÓOm»ýÉŽÀ.~ê|–û2ùÇþ7ÁIHÄŸ‹üŠüõù9¯darLGmÁ|ÑOþZ¡v<á¤@ûRQÑ³»9”ŠÞ‡(DV,Óô’´‹M„^	Ëëæ1ÕðÓ{°‰MÓ’Ê–# ±fJoV2ÝŸ7C8kÓˆZ¯²ée‰Ÿqbz—Ç@Ã÷žAa\ÔÓS_?ÔÓÔb°ù‡€=7EÐ¸fiþH•×¦Ëë÷m‘î8»Æn»dúº¿OÃØ5›´æÃ¼ƒÉlüíª—ýµVœ9@Ü>Õ¦ÎKšÖî#¯Ò‘Û)Ú¢à)ö°Eq
+Na“ÀÚ¡M‹	m‚¬R1ÿåÑj
+RTý7Rä¨u	`SíÇœXƒ(¡Xc'pìÜéá	élýµ[KÕù¨`Z¡.,•ßÓ„©Ð>ç|çóŽúdVM†yËÿáä”t¶—;ø¬÷¿æøãÆ±»Ë†_lâ÷—º–Jÿ:ÓÿgbÑÑ”ú'=ÐTÂ“)ÊÂ/„ï¢ãÚV 3ÄKº§3û=Ž1Ê7ñ»cå‹VÒë,	pvÅØòtÕý6¿ÖÐ§!™x6Ç´ÁS=ûË«r@TfzêÈøÇ®[ÙØgTÞÛ W@Ì0óf·Ew^–(Ñ”Ûoç²
+•‹R%¾½mVa>MpS›ñäEPÐ¸¡·oŠöØ®ùó¸Ÿ}õÃÜV·–ÝhÉ®B”óÑ3ÖÌÒ˜Ò}á™ù—Õµ·›L;{r]Óž%˜¤Q;K·bøçž=\­7iåd‰î€Î„ÍŸ-£át–stWù¤â7”HàVš_t,‰;˜0{æ°Ö’â›2„.èÆl]]2oØ$Ÿ“}OêO­]¼¼fË<Ÿllƒ‹‹*¿ -#‡LJ üX²1bçb¼`ØvÈÊÊ/Êê¤ÙŒ)P`^ZÌŒ„Ø@-#Aà3;¢1-#Afä X2ýÏË°†3q¬â\#­k&°›è|Ã·œÍLYD©Ì&˜ÁOÃŠÒ¨÷ér,ê5Ž#í$èsƒšYšqNµ~U³ˆUÅ,	Vï¾HxP|a3o.…Æ
+ÐóÜz	œÐ²¦ù‹H#kIl´Ù¢‰ó¯<yÉbO¢Œ'Oâ:I!Þ‰ m‹w[ðòë×=][¢€¥-Uær¹€ÖÖ™Ad$%e¨…ùÂZgÛZjÚ°¤É`Î¨k­NŸL³4#íÈÈˆ»Ä?$?$?$¸þ@äH~ÅH3±Z¢QýÐZhz¬{v¢-UgBŽWÜ™:r³Æª#1YÇï(]‡Îí]sËÖ¡ÅÎß]ºphãŠ?-]Ç39Nü™ûCW¦ÞcHó!§!eÌ7þl ðÌ¦e÷$û˜“Ã*;ŸòÔjäÏ®ÆÌ;|à•ã¿¡ãü#*ë9†ZÖ´™¼ÁZú/D;¹§ÍH {C30,Àê¨;Ím<NMé/!5M'wŒIŽòé˜ÖÎïƒÖÎ'Ï.óþ‡gEÕæ¾ ‡½Û|FÔ-JðÁ'Ÿ~>rjáóyZÐkŸ¼×)j€t”]ÕôÍÉ ëçcæ@¬NÇ¯ºÖ?ö0^{Âcž®á|Œ—Õ4‡Ué®Êú³až	ŠÇUåoºÇµÉï¨A§ˆ„%¶óæhØÝöµÕ?ÁØhÆ¼rw„y¸dˆyQCl„=ƒ½cp+~pø]£ƒ5((u)Uä¼*GF4[ÙæÙþ\³à¾²µõÜ¢YÇ¶ô¦DDóÜ+ðDß= |çA˜·Dœ 	výTûF¾™Z!žìª û†—½à@Öj.@šsuÄ-e.v¸wÌgÉq6Ô6
+}r)In<ÚtçM °øÇÿý?„5S´rô 7Š†Ob/<mÂÉÙµúr4)«)ÃšY'\Ãð'.»’AQÑö¯q	:nE]Ïh ¥þV ]Üi'üðÖ«¼=Q¥¦‡œ6NÃAÊ³Ùàž{Ãá„(–çns ú¿Ñ„ÍÄO<òhçí»ÈçÁÀ+ôƒ-Ï-¢ÅòÁµÛzpßwâewÃ6ÜÛ{ZPGh¦#NrÿËVñÖLD€¹®¯X˜mŒ7Ü)Q1Ð£š=^•ƒlØXßHµ9Ñ,ß¨½»Žª}Ù7Ý8Õr§Ö'Š¾~€åÍ¹/ø^®fqÜ0r·›~d§—»¶.} ¿Û,½mKûø±/)žŽµ`ÎÞ´òâ	·ñ«e Å¯ìqP$/J¼¬Ž£ÅÙR`h}„‚=…ñÄô¢ànèkÓbåþ‹Pn†±zò¤¥£²‹kÎìb£ xb–z|‚YÇ×,tï÷ù§IºÛt¿Ø¯Áýr¿— ßúÍ±äHÇ[Ë®zÁÕQYüW#°WÙx–ù¼@9)ÄÆ2Ój´®pîU¥QžŽÃh$ª|ŽÜcÅ9—L•ê+wžJ/¥.|L
+¹F6Ë…˜N [$ôÜ|¹ëX!"55»sŸ&0T†ÐyÒ=›3¹u{å¸^¯ç«jÌ	/Gœ2<ý»àr+ÇÃ¤E+¼jOn†äHš‚‚Gi
+“erFwÄuî[ÍÜæÁék*°»F;wU;é–‡	<&ò¼vC	t¢CcÆ›)!ø,Ë¨/ù„Åvƒîƒ>õ¬ü”×hÐaä®	ŠQ¹"lY6¾>8£dpó8³Ööêr”³a¢sQÕù‹a™M;“ž˜´““=r“^‘¾™õl?\¨"úY¼¦ÔI:cXw&Uþ1å0(bc?AÌ0¬Føð]ìh†I;´ ”¡°VOOV×Ö°äÞdV_ò;)%ßkí.9Ö3Ñ7º©Ó®ñ2ù§×ç‰Má@šôsXðÝ-ÞðjïçplE‰)eô‘Drå¿ýprj'»ÛjHEþ*n9®imú,cËÓPrDY°8†DÃÂxS&çVCÝà0$Š«¶Ö¸Ú¤Õ½P	5\wçòOÿû™È+3aRèbRí¯*×¦I¶¿’¤Ç^à ïù&É¼sQÿXM;Ö£.BK¢@ÇN?ŸúÀø3ª ²gà5F+Ñ×FÙ§Ýù8¿"ÐºÎZoZ¾<y-œ`DlÕ)ÆVÝ„Ê©òŸTf
+½ÃO¼Â)€VkÙâ4/´ÕL”ÛQ{fÕJóÿ)Ž;btþñ_ÿo-Jy‰ü6brˆ’¯ `&¢iSñ7‘È«‚ wStsARn*Å°`§6L’ˆ?"è³IÉ­­#¡W³::˜½Až"¸=F¥·ÿ= 0ùZÍÏJK<¨²ŸìªÂ=,á°a5.®êcÊŽ…wp0WÕr›ãÀ’Ÿm”“±ƒAÔÊhH‚›=€?N4VÍßG·CòÍ¼¨9¿y9¦ü¢ -Ï*7’Œ`‰¼ÊRø¼2Ø€xµþY®.ÛQ9í4ûàÀ‚JÀœ÷`ïžhøGO4ÿè€"\¦mGãÏ+j»Où7®1^–d,·Ã&Xü¨&WU6‰ûLY-÷xdx×Æ§º‰”(í»¼aÃI‚¤ÄÄ¡©Œ-kxäû¼ÞÜÑ–,Ë G•2oÆšGdÐUñêö:Á†ÅÜ-É‡uî)ÙÑm®X@'˜Bïè·à·	0‘üébúÏT´øMò?þ~©•mì_(Åbã>ÕrIéî)·9FÀ Ë½-‡vpŒB# 6‡R4ÇŽÁÅàÎY†o€VŠU”Ö1EDO[`à…uzÓË<Dáà¦•½ÇØ1µ=Uf™Ö;¶”ºŒ¶Èª’\BÂê­•½SºœŸlL/+Ódò’Ø95¥,úN°KÇ'Ó³rp«lÞIód$d˜óXÒª² ÚèyYû†AÖ¶ùâs»é°S°²¤€š”#–ßDMÿÌú—z’6bpyòE¢f,Èð‡ˆq­¥=9é'g(ÄšÈ]›2w«Âè¸Caû=i¸€2ä´²4:ùv˜ö>~ÉX!vZç‚(ZüÖÀ%ÆÂþLè±1åØWüè›Ú¶¥i]âfêv}â«Å×­í%v+vPÇwØnŸ®ÐÈš$l¨ÓÉØ`PYÙñ4mYÍHÿiYólÜQôÏ WÙ=±Ž:1„]éÔœµ'f­jSžµ#ä”ùnGÄÙ4lò{WoÒè7Þv¨ÝNAZ[Ôý„¶Xëàl³«±½Ï©Å¨êZ3»ŠöË”q=‰‹>p%¸ÓõòZc"ùòÀP‡¡YÉ8þã¿þßýÍu I*:EåÏ`ÉD“ìZTxdý’¨±!xéôö¶è]\ÌWbO±ŸŸš‡9:æÛë‘èJ¤^Ý)]´@1×/I?„ÁÇ¿êhêšhØâÈÖ;¼Ž
+oÖcN&{ÃdDÑe«‘°ÔçÚ\ù rZW 
+:µésá:9ëépØà³þ‡Û'€Šs»:Ã'7§?œ´ZE)ã
+±ÉXäËÎ'‘l‰pÅçÖÂÖlNì N_¾‡^ia.jé,Ä®%íï±XgþVÐ¢ò}’A…ŒPír|pÄóó$9aí	j^vé®h	¯‹`—lóT—ËèXÐpÿ¡kã'èþ3ÚýNØ]^\†Ùôàé³Ãç[Û÷¼ˆ%2…ËåO„ñ~NÅ{¼Äèj‹¯G÷¢%J(ŸA‚ùÂ9ÁµU].BþA°dBÞÞ>€Î [ÿûáo’šo•Y£eÚEü÷–fW¨I29«>Ô1C”–Uyæ§eî?ª
+Ð}Ü«³áÓ©JõO`È±S‹ÝOöï4èÿ˜8JÊ9ÊsE²×ëz¹$÷Ðª¼ªwçÛ^×Ïºð’žçÁ“ämÏFéíHX^^åÙ™#Ë3q•VŠ/Ùì‚ ûçÅ88êp&C‡ôÆýÃÇMž¹òï9ÁlC´å°;ød·0J@‘éMN‡è§ñfÝÁÅÁ•bƒ7! JŒÚ@x! !þó;+E'Ð€²!o¤áž°åÄyRÀCžŽðŒìØy Þ“Éªõ…S“éeFW9— ÆRMaieãk–t÷,c)<y^fÂ (ÝUzy–€è‡ð<¿y~òü”ütôôå?>?$ÇÇo^ÿLÿ8}MŽŸ¾<úÁ³èü@žuçXj%Ó/b3øPÄ4ÃØÃE"Ò]ãñ¬ÇÒò¯Ã €ÇŸÃµ€€Ñ¼¡HÍÆ-t~¤Ÿ‹—æ`Gtxöò¤¾¬Å§ˆß‰|†‡ÿ»€ß„3/BóP÷@É H+Gé‡ Ýü’_š§Ù‡œ °Þ±íÉÉe‘Øµ+ÒáÙˆíõ%øÒ¸èÕC”wìƒ–d-I
+èºÌÒ~c(lJÚïµÏ¶¸Ã2Ïï.”'·4DçèÅÌKŽ› }ô`˜WÓÎÊ) iëðÚôg6¤òâàZ1wÆÚe»ŸíŸåT¤+«·Qú0ãJ0Ì1´vJj'0çû„oZîÚµ´i…ì•ŸÆL oô~et4¬ÝŸ0¬šó+Îwøl¬‡¨p_ãÔ;ú‹ëä<Öyh*[°¾ß7˜¿ëf?šˆ 1 )‘ÄX½#¹¦¡$Ç¬÷ÚX¯øºàX>9ànÖ½[s¬µ8sZ›I OUñ:‰@V9=Ìd…÷ÜD…$%œHc{Œ¶1¼ÀÆ†EÜ5¤ÍðÏ/Ð«“þ‘ÁÙ/¡à’ðžÓ(íWÉ-EÁõp&<¨ Pž‰PÚÖÍZfð«GYÀ?ï Üˆ*nˆòvQuëD$€ •u¢ÀþÙo¡ŸÀxPDa¦¯’ûÚ*'9ºZï­å)©	eu@ëåÀí1øª9|Gø–Ú‚©‚LªfxT5Ã£ŠaO…P§üŠÏC­8ßK¦VNCK£VI“MjýÐ'Ë§Oöžp}G½çàˆo&q¼µö»¢sAË¥tEË¢u¢-ÞüUR·Jn%p•?ÃH¸å?·a„ŠÍxd>1-AVsðûþ#G³l±l´²#+ŒeqkÖÊX¤·¶-+šÐ„Ù@¦šßÓZ?™uïf½+piÛ›¹¬ÍUÿU,qmÀS–¹‘GîfYs;33MÕF~ºÆ*QO~_”Ž¹u–Kâ<Ù²ˆ›÷U’5ŽnœœÜXkºcz7Ùß.²ê0äõ”R2®éÇ¨-S?vÈÝÑê“—]Ô«¶mÎ·:J¢ Þîø¨ÑJ3®m$Òð4¯Fn¬zGúUÔ(Ú·Y?d¡rõ˜)¨ûUžÚë.ê¹ø†>ƒofFîS|/<½vv„
+^Ò~¯r(ÑÌ2šj6•(•Iy>†¤M7Ù\=uò2X<7êá†_5Ú›¸ð/9æ'`/™Òƒv)'×b2š	t=§üÉÈõIRõÆPbå€³zøü5˜0­Úˆg¨å<æmê0ŠYûkWBTÇ­ð¹˜³ŠÑ(ÖRŽ‡×¬ªée^T¤¼K;4ÔG·`ÿ¤š4‚‚’÷{³bàTë
+|9³)?ÑSCŠ¾4>‡a>‚¬ÐmŒ˜‚0alÝ3Ç©I¼$¬ PŽltœ],ƒŒÝ§0ÚrÈ¢
+o)&È)gS‚,çÌ«ël„ oá”_LWkEŽÎr(ÕÑ;AtŠ(ïéDïqôÀäÚX[-6>}K^nŽÕ¸cr‰fV‡¹fÑ£òúivÆ&­­N×	aGìZnGf+vË<É©î5ôÃø Nñ$Ÿv˜¹÷|˜M_Q	Ê²øÚVA* \¸AG¸$‘]™ÚÒH]l_î7H9Þ¥;R6îÙðHà‚ÑØÜsãÅ/ÎOî5ûÜ»ÌêÄr7Ù¹§‡çEUëî!fÇ¨ô‘3ùÛðpt°w+Cyî´’³*Ø¾sR¢âÁªpŸ¥T¶ÂEó¦=KJ˜öQë›•Hi>§Ã%dŽÎCÿÜ:Ó`øép_þÎá~3ÆFuh‰›±ùÛQ‹¥KjQÐg‰jÄoW5MuXz5ÚQ›W¤ÝqT¥Àè“‘÷YtÌ¸éêþB¬Ö Ï·OƒËØÊAE=H¥ÖÌË^xD*É£²üòe«œ+£!je×|e—'”ZK¯^îYhŽ²)¥Oôš9*é—ÈÈÄ¨Ÿ±»”ÿŸñ¿1àêJøâ«ÖÙ_™o:–®§AÈ—¼Ðíäæzm¨u?ÆpŒQÃ±9h‚áÐQÓùÏ.'êÆk‘ )x£|¤3(]µ™ÝjÖÀùy°|¶×¨"“ÙŠÏz,O9Þ KdçÌs˜GÈ¹Ù)<á‹JÕyÝÝS
+ñ©R„GuÙ9ëU,z€¥¹Y[¨l«`W×972å{©ß0ãêŸí1¶ÅÅÖœŒ¡àÎ Í“ŠštÔ;l4wH“¹N8þËÁ¾¸ç9§ñ®Ø>{®ù‘ôh= ½9ƒ…|^Öm­µ«K¼z–äü¤M†ù«lœ]Pg5uú½êPéœÒ~üÖA+óùõ“ÊÕu‚
+ØVÁ;¬E;Àƒ™Wœ×šX9Mçï•E¦Ê&šB#›±„Ål§BAŠ˜£F¼ïw››€AêÕkÒZ¼JFÌÙšã”oŒ`’7Ç‹ßÓGÇ
+`Ÿ÷á¿`½K×d•¤lÖãßÊbÜYÝX]c`ªŠ9_ÕêÅ¦×ùol<w´(à²š²!áÄ´Ù“TÁKÝ—T± µäZj,°‚+i‡T[’§¾Ê|)Ð½&ŒxŸÓóëX$;Ú8X½ñÓÏMhqóÒ&ñäõó/p
+k%ÂYßÆö|'£]/i´Uïµ!×\ëÆ’ûÄÛwÖ<¤e OˆŒåž¶Á‹õHA`hëí†<gº˜V9	FÙ§îe÷þ6ÿÏóayE[›Í¦e3nÂ²×
+¸å”TØ689ƒ4ùÜGº,®ƒÄ¡‚~/ON`	}'oZZ°Ù•-„C40ŸYsÎ£õH7‘IÞ4&	œ7Ä¥ðÒÂ]ØË±šQ|B8åX¦¸@×ßdº­‰?ö6\Å¤KÄÒ†¿óŠÈ„ž—IH?Ð> CAì4ªì|ºŽ%ÑZs÷V—Óñ›åTô˜HM$Š[½]óú™§GC:ï	EÊ BhËÅM‹š„BâË5ïhžavEñI"ê¡¸Ž%g2lhÚ©UÛÑð¼m	¡î]XÏW­åÃªFn-G¾Þ‚Ò.]¼7¬6¥" ›:Ë¥."e›h¼®’ž80á
+¬_Pz‹¿óè-'÷–ÈÉ­á	CØ‹å"êï³5þ½ú9¯è¶ ç_ßy/ 3zÆ6(’HÝÉ° èjþëf
+Mp‰QsªÍÆCGÖt×5ö>ñä¾#–Ú¢OuA½m§\OK¬Îyãù˜6†n"?ù¡Óõ¬ †sE^•ôè˜³é+Ø§¥wÏ_+,Ì7MšK:#ƒäHwLK
+í¢!Þê˜çw613y†Ö@ —ý| Ó!š;Ü ‡Û#.¦UòŠ[C5?®ò!º¹_¼ Ñ0H¦s¹‡7Ýµž•E ¨5³as8*üupL-Ä°béò¢GNßüÒÝÚ¾¿–„·‘–€&ØÎ,5’§këvŸ¹š)šÏÆÛ™V¹TÔ®ÑÚ†7¼Ñß‚ýwM’¤òÀð¢Á&:®Ñå³ªzÎHš‚dì¨µBað6û…*ß#/[»sâi•›€m@å±^(6Õf4šv7{Wö”[[b÷–m¤çJÌ#u¤ä9·g-P8]N©É&›YžÚä*õ;/K|¤1gÝhY¹e÷„y…±NƒCrÜ&Ò)Eb£¶ÙX%®³«	›¥©B2š’	ý•¸±Ù’QS)€à‰øƒ6f²¦Ùb>zÀp«-ê
+~ö%‡‹;:»½*‚éÎ\ŽåOb:ó^¯g–ìõ/_¿­_2ê±PSs¦êb³®EüÒá
+|.îŸ—î£^Y>ê•î£^1õjõ*ÍGûðSço,Jl8swAjœ$LBû‚Éãäõó4âp9¢(aá5É?ªPt»DT×Ë÷1óZ¢3™»··Y®ùa€š<’—*,ïÝAh\±¥¸¤4‰Î³ãcòž¶#<ÀÃZB8d!°,Ü„ÛXÓp×[à$hH	©Lb,B.>µ¢‘%ð¶ A»èAÒNßÅ’‹.¸©^ .,ŸêÇ_ø2é<oÁƒ¸£ó€_p½¯à`urU…7Ée-&=º>²˜Â¨fILà×X-0ý[\àô·Øb×€'–¾Ü[AP|‘<=}Ð‰¸_þR¼òƒÕ}ÞeÞ¼Ï~“}ñ× …Xþî‚‡ø"—_;8ˆ0 DËehÆ­˜˜·
+[	Öú™7]#2wÞßæŠlq¼œ¿~Ò/Êjôb6žô!<TTÌmïí£Í—ïÐRÅn<Ú\½‰yòÑJŠAÞ½ÖÝùú³zZŽºu¿*‡Ã³¬
+¸5÷<ï¨QqxÄpø¡+<ÜQ~
+ïC¹}9æÁHiX¼¹°ñH~·q.ÕkÔŸ¾&66@FÞäàžŠ(Ñ‘Fè1‘š
+z¥=j¶-:¶KVG}Ž(Ç`mµk€\ïÜ®–;ˆªWxñ•Á
+ï.Ò2ÜÏ»¹T×í7?‡ÃpËOÑ„ÛËò^n±˜Á=7u9/'NC/«¨E$7ÙM§0èÀ#ÈÉ~YäÄ¡]ÓêV@1âj´¨-&;ñùË 3if‡¾ÎÔP5J+Þù¤ö1‚½Q´9©u¦¯Ï¤b)—ÀÐq áÈÿ}ÙàþTñš´b1\R)b¡XVª,ëÙÇj$ßÜáU	^©KŸÕ·ô#æŽ*Añ'–Çïfì¯wBîà©²…C;éî‘$oA"YKúH™BJÌ {o1o!(=â#bÃcUA/\-2P°ËÎÅ"ØdgRå"ö¯Zl•N!Þç£Ëb|„¤Ì_Ù!oéá^[ç÷ÞE«‹'<îâÝmÃ÷×ôßu$OÒ_èÉ¥šòÄNp“{é6þP¸ w‡Ò•G{È	¥+3ƒ¹ÂÜiž™óá€øÍ¸ ¿7ÿ‰á>õeUŒ?t7ÃÝtt‘1ëw˜g1J`Ã¿¼ºôÚ©÷Ä‘ÈFÆƒÄƒ‚RVº‡@Ç]Œ»WÝ”$ÌÁ|ef#ª …Ø(¹ªáòœÂLÑ·	ÄJJiîq¾èJ­6i=.—Òµ:¢gøÙHÝ!"–÷†üœªwTLÚ­ë•Kƒ÷Aµ”2ÊÃé|ÉMìöõ<À<p,tOP‚–1mÄ_º› (©QZ’âˆ‡ÃâíÍvNºÊ:qT9[4g’ÍœÌ†ºwTzçIŸÞ'$¥\›9*Už`ýÑHÒ€ù®}¶î¹2=»l"€Y°}¿f5À/ÜÍ¶M5¨ˆ@[1†nGÄ¤Úô™QFÙî`ÖÏ;z6¢23‘Pô-èÅ-®“ÍµäX×ptNÛl¢p»-‚¥/¥(Ã!¹D½˜·nY´M††«ÚYÔÅÛYÃ0Þ¢>|þºãÎÐÄcwU¸¯R/2onÍ\ázî(ËÑ0×4V.[°ƒ‚®Äî´ìV@+Ió{àçewšgCü[²mñš¸%BÕFÍp=BY
+5TÈ%õhÿ® ·R“Ièý Ã7Â÷ƒ™W£>äXD2el,ªÖ—Ç¾€?Ê„6ûë~š«r«
+7äîŠª{D¥ÍGÁ$SÀ…@}—,–Uš,‹Mµ'élPŽd±}<ØPÄêA‡ääº¦EÆE±à®`ž6îoÚƒïžµìm
+g#®WEðÒ£Zÿe;Ý«40Bu>*X”ò€d%oÀÎëÊ“Ë§×bôf‹‘¡ˆ×	ŒÙs*r_Ó–çY=«xÞ\±AÔ²NK¦…NÆñá‹Ó/~Ô§hBÛC·Â:YžÓœµf­¹\è2ž\–cÌ‚ˆ%\³·©¤DDZB*â®cHIØv”gô-DkîÆn²¸K­óQÏØ&<X†ò¨+fÔŒ®e_¨&‡¶`E=|âÀÍa›ÕåpF×å0?Ÿ"«š–“îÖÆ6é¢ZV‡)Û&ùÜãŠÐ¬ U± -(3¶`„"±(qPV’²"/!3zà{nýfdÄFâ%4,tâvyƒüÜ, =½;ø?óëÃòjœcÉóÛô>ägxõ9Pž¬nô¨¤5êDC+‰êå=0~/oa1Õ•s8œèÿú  2Ìl6ì>&“ÊHR.…Ž‡›||š
+Ëð°¹»
+ÖÈiÉéÔž—ýY½CÍ°çÝ1ð(vä]º¾µÚÖà§Ï÷â äAèA+-,Ðã¢¤·<Â[„ì4£…%(N×{ôØé€…aôvóÝ²C› .*W¨7g©™<š®MsQ}Hq¬cIÐÚ¹ˆNÅ:©aMƒ‘mM}SÓ6¦ðæ‚²£†Èq:¤Óö°é:&$ýÁœ)JŒêÒg7±’è: J,ÍDJ“¿88’pvÞ…ÝÑB×¥Òa±	D¥×¶oö¹8ÌÃöÓ…s„=´œŒç×_ÁL€\7,³ÁÌF#±µ¦ m;¢™‹Î…ü~iâÇ°sgµh£ê
+ãÚEÑì–.A1·‚q~uÂUo>E*5h¯q?$cÌ0«úaÙïàÿgëD!q”u2çGçÕŠuþåà`ºƒˆ½qyEû
+vM’ZÀ`my²Û²Æ7skLT3…RöHl%†™Êe(?²¼[Íí(h¾f«&ÖÀWYõd59dsG[ñ‚?Çe¶ê+?`\×øäM~^åõå³þ•g!ÒF¸LÍò¹_'‡)æ=)ß~+yå—•ëÑ‘q M²Ç§ês–íQ+ï÷–îñW‡Òø‚S“j€La¢¢¾ÅõwªfHTË#j‘!™¦}"×Œr}b@“x§+¡% ÔçÉÓüú9ù—<,™©1 ˜¥Í¾öå«`h) 0st‡ÿ=åLfX¿Ÿ›'1†åQ%+ï–<‰çðù
+XR I±5T‚]7Òk˜^jø0ë°Kf´C	=BcÊ‹Œ¶ÐX•LÈYÇSã•ÆfdÌÍZ'5ïã$»ÎóÅ?ª·™[WåxtxàNÙè‚“Ö…¿çTu:Ý5B.¥M÷-OÀ]ƒíQž(%µßI#ÀË.ï[fó3`O.ö¯Žaª¨¬XatÁ5ù9è÷1	=¨”Õ”2ùËûžÊü&zÁ Wö¤Öi‚d¬ðuòòÅÉ34·¯“ãƒ#f	ÿáä”òiVkT†^—³ŠË‹:bÅ˜­·ÈüÚóØ¿ƒÜß=µWU6	C/žü¯.Ë+øãªO_•ƒlØ(µ”}ßoß KüsÍƒzÐïgq¡ÛðÖS$¹ ·W¨À®ÓÖ{” ø˜lÐóE~µ¸ºt7àDŒsV¾¸õ<ÉYø³r†Dþ‡„Ùn7w4C…)g ‰ý’fç_)C]ÞôHÝœ¼óeLKòSZ_d‚`DH§7(ûîP×ÐD}Ví¸¬yR²<BVq®ùòTÆ<6› gízË•8VOXŠ8FhéŽØÏåð‡Ak$ƒsf|P%fƒA•×z
+yg±r=“Ê«cÛ$SqÐ*</ËTwÙøƒÜ·ÙêÿÊÕ^-à{ÌÑq#”ÛÅyÝ‹âÍ{wOH»t„p…-X‡1‡>«*)Ç¥SÐaq9Ð©hä„¿`oB0Z´1P,;Z‰Îj¬Æp`‚óþb%œ¡…q‚:¥’`øÍ Ñ‹üpÞ¯=ù$ãŒwrÍ¸‘’ÄØ´ª€Ðíp{ó½Eç;HŠþü2Øî oD~µè³h¤‡Áˆv•SrP×Å=FªnG[Œˆhy’%	R¡Ò;‘7©Â9ýôqRi/7xçb¾¨§Vƒá”ñ68¸zU–ÑÈÂÉGÛ®Z?2¼ÑHû˜²´*5u)uŸLò~q^„ÉÛµYp„kÝÊQÚp½áÎƒÃžD8S1³=ÀWt…_ËLL„råBÀau$B`gý#¬·]Ÿ{„Þ."ÝM—xá®^ˆz—Ó¥Û¤%jŽˆ.ÅÝÑ¸èU8G‡K…¢m‰ÈM6t£÷XÈ@fgoÙG)X9º‡j$Vã’{Ìæ#Òº…vZ'¤]È0¡?)‘ „œŠ á"$?Ò¡m ô“¼¯ý8I‘| 1›\Œ|t!5½Ê0“„^kGxvÚ!½=¸û‰„à¡JúT	¹6¿ß~ü ØÚ ;|VévãÁ¦ŸÈ]NÕa§8×øÛºˆ×¿Ï˜§³)_.•ÈR{¢_Içõbù´qVk.iË”âéRû+KuõWI¿Ÿ§¿>^é?ì	£<OÅ$ß[Šp³dCÒJThPË“%¡®oLí‚ž?·ÆAA9­2Ò¼,ƒ|¼ÒœÞ(Ý³¥'W–×Ïa‚ÕC|áî\(âÝÃ…¸(±µ_®«Š€6_‘z¹Ðˆ- Äc°R}ˆ[¢aÑ‰<ÕvU´}á$²aŠPé³ *ßNjJ×[<#îw)yoý)_F\Û9-„	.îGOÏKTÎû	§•øw\V¬úåá‚I¢žÎŠá€.Ïíö	ÃY,ÔÜžÇ}²
+‹Þ”QÑIùÛÆ½(„Q,¹Ÿ{~îPEžãU>*qm¼ˆLóAª&ÙtÈè¬Žh)¡ÕÆ§V÷ZoÅÌ´Ü, üîn¨¿zC‹>/hñéeQíÂ Ý–¸8ñsXÚ˜;	tnVWöÈ.öu=Dý\Èõ	Ë±ù–õ’Åê…«°‡ÒcÇv?/j •*üEYýDåß.ï@ºÉ@ì×p%J"{ gÊI÷¡rã^‰”A;ƒ kd$£`?oêí~Õt» LîÂ[	ÓÐ°°&ÃZ—¼¼„J4³aN…0Â¦)sð ’C8~`þöQGâÄCÊós(‘"¯ÉeV“3ðVcHóø‚’Û„‚®ÀÉŠŠðg×”-æ2’€)ƒŠš²áiYùÐI¼Ø$­c•À¯ó?£[7%Ä§Ù˜2sòç{ÿjRß¸ìNÐŸHsÆ3é\9hxüò–ãˆ‹g	>}tCõº[£yö.bhcIú73“èøFKþ‰¼É/(Íä•‡(nå^èi®žÇù¢æ”6oD…\³©Ã|
+Î½xc4N‹	]¾ÌÀC:[›ëd{ó[ñ{B‡8ùâõ †PI—Í4ûD€/‡‹±Ÿû³!Çn÷ô¹÷¢Ðv`»½‡ºT{#0·n— )¬9ò/…©ñc>›¤£²gô¾ƒTÞŽq—Ez‘ü#²Õr%|f(|“SùÚîÛ­ìM†“¡æB
+Ùj—Öw"‡k¼õö’ì³lÜÏ‡b–,:µÏŒ²ùWY1&ÛÝgåp6“ªb°CÄVÀ'="ž‚-;ihò¶ÈðbGûÉ{M¡ëÿ  ÿÿì}ëvÛH’æ«d©=%ªË¤$J¾imÕJ²]¥²ì–T5Ó;Û{‘…1Ip Ò’F­sæì+ìüÜ_ûû:ý$›‘7$€¼D‚ $W?ª,L$2#ã_³ù%>ŸQó`Qv6%|Ùt:ÏŒ³fœJ}2ôÙôö.e÷™.•ž†I%©,Úà³jJ 0´ÈôŒð IpyôßYTO5·AÈ5€Ó{ùa4Ï’l02¡+„­
+oý‘¬nöñó=–©tàr _p©BŽâË²±VI;u?Ï,ç>hpÉ+»¤²TÄÏƒ.Gàš½ò”¢_Ï§#€¨ßA:Mè ì­zûé€Ýû6KÇpûáäÜ!“L†Àv%põb£^QpWl®8ð/Aÿ}*ã“1 ½%Ð2fÿwWTš@7=HñË™ó(’\-*çA"IwéÚKðÏt€M·ãMú%ü)'ƒ?6ZŠ_J¥7ÑÒë~Æ; ›J_¸ê@š›*ÃS¦s)ì §
+Î U-À#ëÞœ×I>ˆ²aqPëíöozwÄ m›–âEÁ}Dm1àä€êxÝ©àaK psB9(ð]&¼<×§'`†ä”ÅÑX™/©©™N>í
+‚äÔÇÑ)	òïzÊQ…~Ž#_e14Í [4M=öÈŸÓ9òŒ†pôE_þ˜êõñEw÷2šÀázÐÑpÈÞD<û,¦ò &yô…™áô'3.myš,c¸€­˜FtžûÀ`+OÎ•w "Sþý|ëagô«CW¸ù ìá¼?e¡5?ë÷ýn9¿x?ãÿu2LûVÎ/ÆiÀøÙÖê3K9LÙè*v{ÿšêHÏ®É#ë·yŒ½ayÆÞÌÙTïgCIÖWíù†ÎÄê¤Úõú3cf¸·_È0@#êØæ_ ÍÃml~5žtÚ_uâ°úlY¸xV¼¶Þ0ÛãxeŸsß’[AÃ™e³þâ‰*[3Õs^œ‹J•.•*‚Gr†>4„p.àqåéd‡¬¸ÞöÖ%µ=«èZ·­’¤Tûs‘bk’^’q:pa!Ž@@q!Æü_Ð”@]9a²‰|ÏœÔLb®(‰Jµ©ALX¯Ô»\iEÈ`RKš3É/Þð‹îxðêÔÝE<.3POeõäúmÅWb>AžBØº(ïÛ—$*„!4Pß8¤bÅô{Š*¾â“‰{£8›f	]>‡€×@4¨‘)—7N
+¡òb(<iv¼~ó~õv§mIX{j;±Æ•ä¡rD6‡ÇâÀîX£áu¨|´5ýÎì¹­É7»L#ìüxƒá¨Î…_qSL•Õe^±·˜ùX¡-a<†gº±G1p@“û¯è	Ðìì¥8ú³°ç$Äye×¤X¿Tdi*#‘ÊZÀ›º ûvà(½|#L‚¤.˜î,7{þ|¦¶ÅïÞœ
+ “èK,, óy8‚ï!µ;kÍ°Àµ,Ž†ææ³6Œé—ÂÿŽ‰RøTäžKåÃJ¡ OœN~v›Lß@QŸ»=­ –7])¶îC–Î8¡b¤ŽQ$èN¯ñÈÛñ†þ|€çEŸ&cÈÜûÈ©z„tóZ³E3j5šî¾%“è<æò•ùÌ&ñÎÔ4½¤;”ÎgÑ§x™•oD.ƒpi)›§ó|tGH`ÆPÙA†ñ—d[ól	¼ÇÌ•(âúò¦3–Ù{bÒb?°_Í™Å¸14|m`Jæw¨ˆ/›Dûi¼Ü‡z@¥QÏg‰Ì—Õ¿½Ý›îL•ø'…ûÔ—äTÙ/•ëÍyÒ{¹Ç¬¢Å,- YÚ+Z¿!çrj”…ê‹äœÌâ)ÙÜ!¿°L™sNÎ“OóŒG)±Ü»&ÍÇ;ÕòÇ-½Ï!ÖJðl4£^¤>Î”ãn2(²WŽãsYã©Hf˜°l’•ÝÛÿO"µt¸æg*¨r9ï‘v¡Â<î9nÕºcwÐ­jU¼>•ªÄê…$Ýl–¬ŒÒ6ÉÓ>Ig€CEÀèýjš÷¢yÈ¤vŽ…è€C²\§?ÞaAe ¢%PÌ»Q;ªwúCZQµB„¢‘Ÿ¿ò÷MzoYÇ‘	UJÖÉ‡8KÒáƒ¡AsÓh½t nLˆåB¨±^ì»7ÿÄþFÿ)è°Ï×áŸ®WiJÑéØäVW@I_%‹ºË“Á}g?	ò‚Huñ1‡áÄå-„{W¾JyÞj86Cî”#x»ØÉ_¥1ò'¡­íî‚vEd¤‘Î^+ÚívY
+Á:)Qévýe»5Ï2j¼ñih×wl(¶Ë¡éôhºŠÔÙed\*šnõë§d	Ç¸tão²r ùšæ¡‘ÿÊ¹ä²ƒ|`‡¿«ñyðÈÐ/{¹øÅ
+kwÙQØC+àOp3ƒ*; Öÿs—ýÍ€-¸hèëå~1¢·d:ªKD3g©É! —º‚s€Ú°3ÈãÑtW¢ƒX_ÚH}©ó¥;°ÒîX§]LO ÄSˆ+,›‚Ùû%#H~<I¿0°˜'¦>«a’Ã ÃbzG©„º ßøÙ|Hw‹D’!_=µåBËYçì¥f8Á*áª¿RòëCžŸC¯ÎÉßþã?Ù:@b>%˜ò·ÿõÿè—°,ÅYô¥f-¸|x´ºvKþ
+ƒÐ¾ÿ.‡?ü¿¸j2ÑŸ'×Áó[ßº,Îê¿fí°^)Àà£¿H³dæé¶«~Õ€Õ»ãd}0~$«Ih p73/Þ][0ªå/a“u¦zUITÁVy%•]V©Ÿ‡ˆªV„•±»F‹F_­@EX¿}ON¢,¢«´²«ýA:'Ç?#à¨,CÑQ>ñÙ?Içèø§æÃýÉ	ò“ÎÏûGÍðøˆ²^çø¿5œ£ª{~žâ•ÝÊ¤óúð7ÔÐ>Fë—®^·)ÖqŠŠ59”œ"gLèù"1!‡ÛÒú&÷ÆE1gŸ,ÅGrš’Ž’`ÏHë>öStÐÆ”ÅO{Õ_¼Uûë·8zÑY	rBuú}®ÓïquxÑ»t’€çŒµ/!ØbþÂ
+áC±Â(¥‹á!GÅvâ<ãYw“¥€Õ*ýOd.Ý…*±4tþw©'VxÆqÑãÉŸÏ¬`¨ê3˜žÁ[yržÃæ ûÍX[sùLƒ×éhe'É§I™øTA‹¹k„Oœ9dêgÖ<2Hs-åA* §ãB¥’Ü»‚¢_¨¥¬û$Ãžg&h.±çËwêàö'Ê8~ÿ†Aývj®cPÎ‹ÛØ7L;?)ÛÕË®…µm¯Ç…á_ìš}íf'Hc»2È,E#öu€á]ˆ´Â=ia¯¼9üu®ÝÃq;ásû(6”·{Û4 íN‘l7¦à·àçU¢O |òpÕfTr´eúº:.!¤Ôâ]³½ïT–W¸à–]â&µeÒ‡ß}ÖÖ[1Ië{€Åì76#?8+Z^ÿ”Ì.’‰ÜøŽá¤g’ìÓ©³¢+×8‹F/q¿qrûëöÈ¸”;v‡¯ïD)s[Ï[÷`µ˜Ç×0gúöÂ¥ùµo}‘jš¬Ù:R{æýº…Hi(­à3/ôüÓ¤UKRàÁïˆÜ÷ À©rmBÚÿ¬¿ÒhZÜ†¬ë=Hei9ûpóÑ¼þœZÓªÐi
+³þ¢&>SÊMº±Ž(´zûÑZZt;¸ÂMs¦‡4Û×›ÕRYj6{G©XÏÄ‚T-3Ì“b]Õ­îU³^¨Çâ%ýMŽÓKÂ­ÃQ3Œ-·49#Ó ê
+ß¡¹í·é÷Í!ÜˆÄM¢¶âæ-å ã¼ïE¿G ÖžïÆ,å‡­sc)Áºå7æð›xèêkd‡o+j²aìëCÊµ®Èw¯^‘	¸}`žbª›*ªXKøÉá•ØXˆõ†Éÿ@6	*6t¦+Çfáv¢»4d=éG×„Ò!”6òFõ¢=¼Çµ©9‚èV´ììIàÚ,@¹R	kŒüôz
+$Ù¹souA•èeYH„S;ãÅåCc¯ºäÂÓ ^¡¼´ ^Qn?õu®f_®ZŸç‘A‹ûu•÷¶æá•õin]ã!kêáuyÀákr6šä
+¢¿.¿ntæ~óÆ~óÆV®ºê\á¸-ùdÇ¦eZ¼`ÙOå	qHKó“BŽHpŸé|äéî(¦‰ñÇ†y^/"Êiãáwäý:ÁQ°ÒÛ­,ìˆržã’{Ž/ôCv·jçÒ¸8‡ë«Ãuën®ÏP‚‚wÑQœ,|ªÚâ¸ôÛ4–.»y©[{ÏžVo1»ù9RÐ†ÛÕ„TJ¾ù\å¬šûüÐ^€h%½Álro…@À~|-þ×‡³ïgô©ÂGL˜7¡Å¡Jlò)õîÈXúÖ ø•ÎeÿKj¾?Ïlaá8[¸yIMq¯*ŒÝÍªÛ·ˆ*¿ðÚ¸p•ÄÚx5ÜyÝkê¶=ŸòS2[N- ÙçñÌEH´äVÆ¦Û`w”nXw•£¿‹f½è,¯ÆëïEOÄ:—wx	?8cBmÆõPÞ­GP:ðÇz¦F%›±”×aö*†÷Û“Ä!nŠpCH|ÿ%†nYošI:c°ëS®òÚ£¹z=õ—úÄlƒò"€(u–Õ2O ='ŠnÇÑUgã±5‘¤¢ÛI·EkÉÒ+–·cÐ5Ó9È=¿¼z<öƒ‹4ÍEß-ú0l5=>¬5Àá$ŸE°@»FÊüòùh–“_’|æptƒOSsc>ãŽMåÇ¤7•¿2ãÊ
+x¥ûx¯´Æt¬ÞP8^cë¹j{9“ûÓƒ©å¢[€Û^©-Ìƒµ‰Äöµe³rÎñ§9 lŠ¡¿—å™<`À@_³PBš!Š¿<Â¹œóíK¶2xùxjº•hüàò¼t=rõè_Eµd£½XDÂÜEðXbO…Vƒ…‹ý¥üÁ1D;¸ð-eàª´m†ÖÌéå;U|¥Szš'ïrÓÇ^ýdAèÄRO‹Ó°XäºüÏNV ×:Ÿ“¬"6úVãï7­(Õ$Áõõ%K'¿N+LDöZ¦z¦¼ç5üÄ|—kDWrÛ<V†°·b,L1wŸ2f*È RœS3¦{ ·…\¢ºa8¢¢iøƒ98Q”óe67ª&Á¢²è3À´uR¤;½0úÜqBø­Mº7Á…ðÕþ³P9xè:9 R›
+)¶0Ë§\²Œ=ë’_¸¤åñõýôÊ¡€Õ%€›Ï¨ŽëVJÚ«vÔŠØ*ý¾kŒ}>QîVyH^qÂz0•ëQC`ÜYÓDåšw–Ä.Åfb~îEsBÁš¾…º:É|s…µpjüuKeŒÔŠc©I9#ÂÀ‰®ÆÉc²70Cö(}Lßž<&§T¤¤Ãø1ù°wô˜Ã ôz=7©J GÝçdšÁ®kÕº‹ËTYJ3×9†MÍJ´ÕÙÑ1ôÏKÈ«|-V‡¬=:ËÓÑœ¾ý(>ç^˜YJÅÄzŸt™šÃÃköÝø•'9/DvOÄÄ…Þ!”ˆÐñŒ:D&Þæô‘ÑªµÏ’OžÅ/crhò^yN+ªït]÷Âx5´ª(GÇÎ1rÛïaq
+e‹ƒd½¢£’pÃ	¹„ö3î£M)K ­¼LNY~Ó1K&g_!“x
+ì"¦x‘×á²U˜)ã!r8Ñ_$Ã!}Ñz;$2ÈèÝM¯¡zo3ÝôW[þ†±Ep¢OÝqß(çVfÈ¼µøa¶‘¹&æ&HÀ‡¨ÎÇ
+éBúÁÊ#£æ¶B:n¸$‡Š‹üÞs —µˆÇîÀc«þ"Í‘Rœç×>¶”av¯~Œóh”ûÀrà²eÀõË¬XS#Œî33ƒKâ.°4oÇêòŠžèª{Ñ}ò´`X×]hTAè}	åS×ò
+!¢³Ó*hÎ4Ý©Ô˜ôDKÇ ŸhcOk>gƒŽÉÐOŽDË%~¬	åäƒ[+fÞàèdŸ€Î“ËZç®ì±ÈßyÀ­u>¡¡HGG“y4]C¶ ´Ž‚Ž"¢E;ïÕCM
+›Çe¶bØ~ ãëL‘Î:T]Hr•GûŠ”œK@FÓ^2ôi€ÅXSfÆÀzÓ±XßC‘Ò›Áœ2™Ò;í±ï‡"›ó Þ±.pY£n$ð#_Ì.Ûóî£xë[/Ã—W/†F0`~UR4 é|¡PQßèÝ­èÑõö<ÞìâÒ¨éÇjæD×Jl€§ ÇÆî†3Àe7Ü«ÜÝ$ãdÒ½ìúC6öA­M1eiAÀØÖÌGb¥d(Œ‹Àýå,‹£|ž]ƒ›ãiöLvzÅâˆ,&Ñ¯äÑ×k5‚5ö(Þ×ÒZX¸N³ëê[cÏ©xãàEF3¸n4îº„Ý`Är+Øæ}àÍëÏ~ÖdñÙ›íè¯ø°–^ckK<•:ÚÚ—(ßª[/>O6/ëÏ}f*ö¹çƒÈ—8{‚R¤´ÛCÚDÖ”Ä§ª­)cBÍy÷îÞúÁŽìj l9`Û÷óne·ª‰hø¢òÿí?þoÓŸ‚¿9éä<0iåYGë{«‹LœŽG!Úµ…ŸºàSÐ|ŠŸØ;B.•zµE–ÎÁÃ8`@±ÃaçyèVU¦=•{–Í'PRÈàöø¼v´9†ðþÀ…@/1Æ› ÝtÉ+Ì}$¯Â’ÁEDõ+îQ³yú!K§Ñ'æwíxCú…°šðÃycÅU2±® ±ñ5“ÎÕ”[&c2X¦¾V+Â+–”ÝQ\JP0¯t+è”±geEC…ì°¶¿Ê©õEVF«Â›áÚ€AáQCü(<¨lñÊk‘ÜïŒMR££\’ÅÝH&…8D·>°4‹[ÍÅžPÌã`Gé ¹“sÂ¡òÝ­t©vórû„»lªÇC†?ÿ¦oÈñ¯TuéÑ$aƒÕc^MPø{ä³(›Õ^nzÉÚÝ»bMÈ‰âãóµÐgÂ¿Ú«"ê×î»"<X‘_Éì(‹ìG“ÏÊË)ùóÕ°»ÐÐHG(ð&?+âg"ßã(•§~DY,	v–’x’Ï3hnžAôiBu’;Iò¿ƒ\ƒ…S-ÕöêõuAÃ?R5\Å¡Ñj»+^2¡[šd¸ðwæñè¼8ì/³		Zùè”çž‘uòë¨báä?SuþÎò-Ï;`!ªy$ò]	ÛIžèÂéyÉb$éäd~6Nf²ë<ÕÆßg¿N¡±nº¾u”k”¾Z´(wÖl ›”Û½Âî×âMo0À ÂÄd{ Oi^ë€ïöWxÊ1¾ÀÂƒ€¥ùÉÌÇ‚%$–ƒ¶ˆ[Ì ÆÊ~0.=Z`Ôž^UF›ÍBþmždž·’E^Ýì§é(Ž&&<,]$èòÔy·©ËÄùÓ°¶?õÞÍ?ÇcH¡úÇù8òðoÝ.¬·›Ð”µRòã#óúó«ãWÜ Ú»ÂÐ…7—©µã”˜èþ«nsÊ¡‚ùÜŸq
+?¹P}™}Î¿ñ>}ÞŸ¼¯%¶¶‡ñ+Z9›øõ¢ÌMöûÆ×ª×ƒçkê*c/˜÷[`5yxŸª? ß³V{ðµ)/î“‡^½Ð…]ú}ñS\¦ÀÁ”ñl©”.È¿+\ylüî—#„ññ
+'/NªoÐœ¼]ÿžxº§$èw@’‡çù 15Â"D%%¾Ñá"t¸`5îïCýÅŽÔöú°wDxâÃ7ÍÁò
+ß4‡ÚÂ¦[ã¿§™ V>¬²?–gèwÊŽ5&#ºüW©1´FŠ¢Ic
+ü ®À
+¤¿Ç? ©³F†ÿ^!rè!äW®!RËÞ¯J_øéäTép¹h„BÌý¦/<h}áznÊ=]ï­|•þr¾Z÷ßnô÷ö^¿Ùìom¿Ýüï(ƒoÜU\øv!»áÍÕ4ž“dã´ÑïÉÉü¬û[:\@	ý>¥µÏ!IaC–Ù0© TžU»îÐÏÔ’{Òøo4\„ÆýÓÁNú8y€LqÀw¡‘'ñYh!Mux_a‘@‹Ú¦ îC‚¬I%g¢ƒKÒ9¦Ü´ì´>¹AàY“rÚ¿Æ;¼¯´7§çgs8Cö`9Í¬lÛó&~ ÍÐf(t´¥™"!Ö/P¾ öÉGJîTRp¥¬S½Á]ü¸=üvƒt _N÷â‹Ü¶kÞÖM%I)Ç*oôÞY)¤%¨l£î–•­V¥¨†¡Îa´ÊÂ‘ÿð…_
+vL&ô©º,v¿…Ïz­PZliËµdCNÔÞjÓ•¡Î5®b?–Òâˆí bh>ö gØ%{£Ëè:'ï§;hH>PFAwaâÂš6-ò–Ëi¥ÓØaV5Q®:"…7¦†±*¦«Íðt(ch™×°ÏF©¦† ÝnQ1·É(>¥Oò"¼aû 	Â ëd?¡Ì€‘Ç|JÞRËË?›åãG£JÜ8Ÿ¦d.©\¡#Ù¾aè› Ù‹/˜2.oZ½åýRý€„»]D9*Jpõõ
+éšÇU·“ù˜÷µª-Içƒ¸ÓÉ“/Ü°#?/½ˆI´Çdã.ºR¸‚‰	yI˜J@@?wó¨«à!õ/ü<RÝ¶ZÉöHö-VìPBz¨j–ge¥Su"ÝäÿSŸb¼˜nÕÆ‰¡jNÃ¨½¯háÍÁ·TñxðQÖº­&{*4ê·fñK6Ö¤¬,²Á,º.¤ð5¼èUÕ®ðâ„è2‚W+¨W~è’c·_­@[”þ Š[”zi(gØ²ôõù`ÖG|±! v[ÏˆÃÈò2awl²RU²)b•CÄh%U—æèÙ
+K³xK|ÄÄàÓ*ÊÌQÚÃ¦í¡lu1CŒEÊ/¼]Ê/avæêÌ¥¬ºwôLÚ“êP¡¡W~Õ}´¿u76Å:Ó“¹{?£ñi;Ô¥fÁTÕq•“üB0{di±ë0<¹ËÃðOiö™J¢|%¼÷Ð:ù0Ï¦i?Pb‡¹¶Fîj°¶þˆÊ“8»&téÒ9°˜“4‘KºÈ(QòøûwIüºsú!È€	*S€_ù,ž¾ZÙlxŠø›·vŽ´áÚ:ItÑ÷ÅµÐ‘)hc©‡ðãkèÀmâÞçøšù#Vß€¦ºŠiõ ¯¸7Í(ÿëø<šf!P3ª¹ØlüÏq{‚Ÿ¹+îÃ,I¼«íŽ-®Ò>„šZ7P'ë}¡áÌØÏDÅÍDè©UÊcK¢Ärvrðu_<A¸MJ09*ÒWuØÀt¼™FüÂp–¹bÁ»ÖŒ€;zoÂ°OFú(p@ÊbÌ€·ù0šÛõÙË@ K¬hÛo„Ùýè æÞ4ö¤ T²&˜d­9hj¸"¢aÎ§¢ìwQ˜"*ç¥=®bã'ØU™%³}Íƒû%|ªq5B "ˆ%	1è7H·;k¤’ž‹þ´¥ µÏ÷n½ì¢0ù­éœtx3íçµfÓe\Ô§Æãó/I2¼b*æÜ£ÑÕ¶zþÀÔIvs^ õ™:×Ë#jÂ27q<ÐCÙD«!Ž•Ç¶/Ä¡¹HëëÛå$ƒ~Ë	sÛáÜÀPAþ’¹zÙ¥šçn(‘Èf(ê‘*8È2º ª@šþ"Ý‹ëVÓyÓYÔ‹-<s¨yµ‚PVÍž þêO7Ês
+eUH™Êƒ½ñ9Ç¤CÐgCÖi’ ¹bñ¢0»"Bn&é"»¨†„OYÙÇãå¥úÙ3²§<^¶GµÕäÃNïãÖêt àVVé2@ —è›èFÆØ=ûB’(ü•p¡BæWòE ÷#‰Xf®@ÂêèÚ–üæœb°Û`@¹Ò¬a©÷JŒÇñ˜îW‰CÁÔÌÂ[m„üL§~	¡]ük
+â/¦Ñèå4‹ò‹;'´¼@Þè¯´³žªæ[D…lIÎ+¤rÏ•ºÖÜ°‹Šž)ÏòrŠl-s~' éÃ¨¯èí«Ó›=)¯»Mc/ƒ|í¶l\Œ×«Þ÷m«Ô÷M7dÊÄ1¤'Q)Ñæ\iêž%Hy;Æ)•µŒS&9·Ò¯ãð]$9ïÞ†ìÉfjWÔ!&,^ÙeñŠj)$]@"±ˆÀEgÀáƒ²òƒî\ài:e‡„ÄÅÁÌCKîÿÎHœ0ÏîYz»=#î
+òµ J^eÎh2ëê±V›¢_‘›…it?Tqg…D.³Wf%×äoke!±1ÞÊ¸/Šª¾³‡§ÑUãzóbˆ"r*‚ýlmà]¶ãg­9°ÙjIEHî%ªY“ÊÞ_ÙåËF×éÂ‘ÿJ6ÿ¡…â²R!ÕÊîÞtJ™Qt6Š¢ÂpkãñÆÆF+àâ*‘àÛ‰s^¦ç-Cö¸R9ò·ó†=o 5púú„ž¸þ¸þã'K8sžœâ\Ó×¹ÊKõ§,þ’Ä—ä{¦¶p«i?ÉLc½±ÓÀv°U¶] ò >\Ø„¹ét™+¼¹í,‘WT±Ìòøí(fõ*Hpo¸SIdÏ]²ßn!0Á«Ù%ô€m ‡¢¿<| ê?AD'°7†±Äô~$š±Ãý‘tªïw~ˆ3Ø+öþ›kkT%¦˜!¨ç~Êgò±0sÔSéúCûÁÄ³ãÙ§œ>U{}Øéª…èŠ©ýw¼Ù™ØÈÛ De4mE‹—¢VI1Þ¢R$‰Ñï.Y<™»ÞÜ7Öi¾úS–æ95ƒfAö¾¯c˜ít{¬v¸jÑÒfRU;^¸§Åúp¯³ùk-,pù!}]XEAÝz4êbOçÙtëë-|§ßÊŠ‹.:g$¿Ó5×›½‰E?Šgäøô§“\¯-wõ	>ÿ€Vã¾qI°ÛµŽÛ½ƒrp{%gyÜ
+û0ÉA{8Kãxœž¤ñá%Gƒ¢ŸìÏ‡Ôî8œœ§=@<€ òÆò^êw%ùéõ”nÅ›«A½¦ŠîH‰;p3ð­ŠG¨îç‰VÍ’@¡U™Œöz;6.i‘¼¨a6•ó×žšQ)Ö3Éé4$30—üÃ»@V“fË–¾û‰¾ §ÈYð¬# šðç$ú%#f¡E#H¨ƒ¼/Ê:UQ7¾M³ƒy–QÚ`XYNì Æód;3 <6`=Ý”Yê~ëõ-‚äÔRž¼CöÅ"vÞEW;í¬ãÚGvDÈƒ_ÓU¿"ß½zE&À)è©àùÅ¢ÙqzÉ‚ìÜ'Ï?£lºÔùDÈctJ€—ëÐ6Íü­Ë–g`³xJ¶v8Š¯œœ2ÚN(ÃÆßÂjÆW-Áf`½o€%VékÇƒnéîd>R02!Çíí¿Ø¶b™Ðg‘ÁYdA3ñh [=¹ú‡“Áh»‘L}‘;ªõ]+ÔöÖËõ‹m§Ã2¨”+nãÔhR‡z©Ä“ ÊBÂËÌ»Âñ;jo(ƒ¶ÑcrÆœ8ùtBÕå&ÇÌZó@®ÿÔ;ð(|‹l^×Ã$±TWrÊ¯ówrrý–næÉ £çµ3Ë¼•pÞÓÊ SeËíJrBM‡0Âç8•½Š–g&B»²^Ý3qw
+BãXys5…h/#°J„/üÉÜ¨ð(2HÇÔ|„0“:²ñ,å öÉù,´§7'ÿ»‘>B€’¸¡¿Oç7î†.ú¡_6íKê:4®$ûªQ™ôWÜ”°„“tà.ÖæŒ‰Ýz%'G‹Ïg¥¤[ñ¼A:ES/êïËÙE½†æ,+IsOÄ© ÜÈ÷Ç8éâ—JÀ-ù¼œTÂÍVvÿðr}vÑhL9†È\ÿ—Í­‚;x°:©-<üŠjYÑÂP¬Å´ìë#0r_ îÿh?Kda@i[ë¼Í×ùd~F*p?m¾ŠË±Ô’Îáé?œ¶ð¦µª9Þ¯UKk·²`ùßCˆñð¨ñhú	ºìn>]ÙÝcëƒÞ“ùŒ^òrv–¯õ‰±ŽÐÔ âhFQgÜ¬‰uŠ*$%x²*‡pt€Òwuk ¿Ì[…¤Ã2gnƒQ©FJ©]0íà)žÐ\Èð\ÀñYÍ]G½¥öMÝ6†dt¨Ç)—;ÕpºË%‘dŽL]tl’?O
+ùCOŽV,4óJ:ë3‹ñP#ÌLÃD«à¹½	½ë6 ®DÖàõ"ÑŒ–*ø–¤S:AùÇâÁØâì:âbâÅµ¾Î²~É(MBR0ÇIž8œ¢È‘ø1áãp¯Ì+®'ç½ó„žÂ)L9!â´N‹fS(¾ Ê/}ÃN1~Ôi/þxƒŠb¼òçìy@Úð§b[^hL
+¾jÃ$ŸŽ¢R»!™Ð›éÒ—ÕVøÇÚ—«ÝUì“‘·p0~9N²Vä‡sR”LQÒ7¬bHÑöˆ¡w×ìÑºfKã‰åcÀ)*ŒG9¢E‡õÈä<hôò´…ä‹Q¯:•R½’®Q÷b-V¿×Š8mDFb«
+Ä&&üj†UËkÓµÔÍoTÁ<¡>EU5Ÿ”ÍWæÊ‹ãËšÚÊˆ*ãàdžqk(hX[¤¬¡ ÇžÇÔªžpÞTj™$ÿåQé£Û¿†á¿z^QZ­Y¦£“Î£jQðš?l	Cø	\˜â«Fƒ‡€ÌØ\íŠ·%ô´'jfÓuÅ¬²dI¥Ðíp½`^w#Œ &Ç;d»}ÙÀ*qJ$–Ñ9¹rËv@ÎÖÐT¬÷Ä Ó‘=ËÞ’‘îž=<åñøÆú
+2‚vÈ m©ü°ŸNÄÓè7¾õ
+yVàq¾ŸÊz`%#æÚ@6ÿQ³¸ÛƒiCxQ²²[PPD‚ÕƒSQ×yÁ{·#Å?ÝiM¡=ZßTio”ë¨0jî
+?kÕß-Éæwûkš›
+¨Ìª ZÁß´†ßRÅa/å¼¼>œ@:Eœ–!¼®´Î¢ÉNé¡@u°î‡¼‰Žõpœ^â$ñZ‚tÀÄk¿¸_¢àY¼ÍÒqk„!“Ç«˜­‘…Ào`Ó_i´…ÞNKðøC*pyÝ;·ÞŒsñÅeÎÓtæ¹ ý¹*LÁk8^‘vrnâ#‡§žZó>*ÂŸZ>bá5i[¸†‘\‰¦\9M¯œj˜LDÆ6ª-$PeëÕÍö­C½-Òò‚•Y‘RÖ½Su¼TìU]°ÆŠ¸<©÷©p›<HÅfê.e%ÜQ«HÙÎ‚ÜûZ–ßt™vçBwûÂòt÷owï\âúB)ôA>yJo¼®†¹ÝnOD“ç©ét)æZFâ1¥ªq{w#®3…–§è?q”Š€­Àä™¥Žä ôøðm^NwßšN:§Gà:dã–Ž¨Û]1äï¯¨j-ø$š²ŽœRgsã1éoü@DõËš{6î­¼µ¦&®ÿ‘¥€vEÊ$Ÿ~—£‘£Šþ&±åÛºkfwrÅ2ÎóxÖÝ ÿÎ@œ>íiYß>ÊQ†Y:;3ƒ\W(§ÏÇ;@tå:}—ùM’1zãÃIPóq‘	Æ—ÝgW#nü//¶¿\ü¥@ûÔÜ/2/áŸå)ª$Î‹„Rì{ZÃ¨òðIØ8¾C?Çü>°ËâJ¥µ»èì^ÂòL»³81î­DÉúµmZ2±¥jÒüø¨
+
+{u‡}$ÍÄÞe}Sç@8ø¸_s–hŒÃJÜ®lNØvùk…'Úh[5ß¨±ôèñÌàz«i¶®ho«;ùÛü'9Éç<s“~éÜH1±…|Åª½\¸þ´Š(§¡ó @viÓUÖ?]P^Ò{b,0	iË/kŽX@ä¢ ‹›ÑP’u0º*FD_ƒ¢CM“½«èƒ1XFÇñùy¤uKþ*C½ïèz^¬ÿ9Ž²þköüÍ¸(Ý#â,I‡¨ð-Ž¯¥"ê6.ÞÃêY©¹9F9®ýªôFgÙÊ½È?éWÅÓ?x›¾kgÍ;Ôi‰:8ï’‰©üW*+Æ`ÇùÍU2Ó‹xðøè§_/9’ŽN,5˜ìpßµì{2Js„³µåÿlP<zn»[ìJr2£ìšìG”S­¼NGL¨ýèr&\•<a1½ÔòHxÄöÒÑ”y¬#1ü>H\^`ÃÜn-Id“`Mæ¾+cÅë-œF_, &¼ìN¯ô*QóÈ>ª=sàÔÁ]6q%Lí!<Ý)Ô*ÞÀÇ7â©Þ×”x–‹œ¤—K¤[”êQ	î&.ÂfúêyeOË…ëëÏ74ëU5cèŽ« <aÈû§Ét‡pxq•ÝAU@M®E}¹3Ô9‡AI&Ê»ê]'4H©W}áH$t™¢dÒÀ¿&zV)oÇ~B(Øblh8].Ä¶5Ý-04·â†ÄM#
+¹ùís³ÉÏ(É\SÚ˜2ïð&><[-N¥}IojsDW|[S«G~Êê~JÏhRîàe·¿]íP<3¬LÿzOê¯×¼ŒÜÿXc!}óç•·mR]Ž~é~¿þÒz½¹è´°ŸÅÑçùt	¯^Â(Ï£qYzÃµ¯	ðúf4©VGï…i‚«Ù­O+×´—_L²'¶"`?òrw4©ãÂÅ¨ºw>ÿÖjßáj«þ®eÕÀc·]_ŒÜ¬¾ø};EÂË(¾£á Õn·8õàÀ¢_+tÁGKUG×=/ÌèãU¤hŸˆZKÞ©pµ¥ XŸœ	ÄFÂÕõý›cÀUÁ=©ý2M¶f‰©–¡1#VBÀ3ÃÊ†s¬ 9lke~G)‘2ÍR&Ãðy.§@ÝCiub/jmê-è~=¾ïuk¯¸Œ£Öb	½é©¦2zNòÌ¾=9P5GÕ³§/¾úÎòúFq—¥ö--ÂBï»ä¢{6i[ÃúJ÷Éàbö%Þ«ùš‹ïUó9kšÚjÏðÊPErzd-¤J®ô4Tûôg¥öéšpmøThý­ Zê—^y¯à¢lí·ØþÛÏ66ZYŒ¥5ã®¼Wã5	–-òZ¨-}iåI«™/úÕsy¥Ô¨Æ$Ú°;}iÞMW®Á7zVðE£‡4P”1 åƒ×ƒÍðN¶£™ìn•Á&Ö€P²ÅËR€3äÜQxx’hP?xARÖíð”·gòÃj„ã—ž©kÀP‚È!À5š<²ç¸_>°]•¼Mq7ØÌîëü[«·žl,ÏŽi‘£¥…±cs+W­ãsÀŒÑa´¡‡í`/Ø
+‹¢S)Êkp`æµÇ5‚ùæÎá¸p5Åv€«’>‹E@-.LX³¸¼¡ƒÞ†
+6¹jýÁÚ8Hè’2–‰*å`=Ó;ÓÈ¹Â{œØ÷õ®_:2
++SäI3ìì†¬ã˜àR #CŒÅ³Öé€Mô­p¸ö«û>š-C¯ÀUËro Àbh/ÞŒ&›Á²ÀL>íÁ³°áÐÓ=Ë¸l ¸P|ÔÛ"é‡na7¢à[à
+ƒä¾7—ÒÃïÊ¥üÖwçRzð]CºÀÕ ÌÞ"´ËvÜ	ï²å†wid%ý”AÎkà›çbºwéMÜÀ/
+WáZL{¯î„ƒ)v2 Æõ44LkëÜP{£¶ß¿”àow9,¸‹ƒÆ4|ù<¦º¥<Å{Õ0xý q›l†ß„K¾çÈoéc#[\ë•ƒ[J&ÔhüM|q ÑCXÃ±Ñ’¹´}r‘^Bw¨Pöá ËX%pÂY2ÁOEß>ïbì1¬-f=-£X?tWÝmV@ªŽÞsÝH*'Õk}…ã¶–Œ¾÷öo>«ÖË»½{ˆ±g¼ŒçÖã7ÆïT7àíÞówO&¯ŸDÔ¬|Eç3²NNXøµ†ƒ‹ƒíƒ=G GúŠä¥s€=<,€¸D½Y#ê~©­ºæÆÀ-]Ûæn'öt§Fq”±­´-¡¢SÛãÿø–E9@™°]Õ!§[—(ïZQË^$ùjÇ?zjfGˆm“üg<¬õ®·ÂkØ_ßÉ&Øñ°à.@™ÿÌð]ŠžçQÎÏ;Ksfã«O¼ZD3ó»"ŠœñªY<!Œ§ah DõöÂÏ¾
+âˆ'Ã¦ÄÁY=ùžPµý3ƒ„Ztï2Ëú•]fÄ:f–Ì‡hS{¦˜+È^;ºNùá'ª»Ð•ì<{ ·É®*·}Ú¡·wá»~	¸;Äµ£,€e®­èÔ"1ÏÈôŒªÌ‰Y’ØD‹c½¼Ø®)ÖÒ~4¹@¿+ü2ôûÁghTt™c¡»‘•^¾MFñ)Þ@ÑeÓõ©ù¸ÄPPLçæ<Ñ)ÄCö·ÔçíU5/×/¶Ëäª·Ty¬ì¾ýó¹ÉãQ< ëíŸ=|Ö©ýµ¬qæšQµâßæñd¿žOéTN°Õòõu/sWUÐ®Ù‡†rmq
+Þ[Ë³¬šµÎ~–)Xoën‹U:Mû
+Jì¡‹˜òOð+fqW."ÊUäH§æÜÍÉà"K'é(ýD¿®tã1ÙÜØ„ÿô{½ÞZ¸Føò8>§Ûwqp>ä‚àX›6wBç>êtÉ§b:‰ž|6[:ù–¥|èBÛ_€Ì™"]™
+K${c*¢Â2?‘ºø÷{ù,šÍsV[¦i%.÷ç Í²˜Ybµê+ÄHƒhÂ‚Ö¯È<³ãtÄkW£á8™¬B¡üù0NÙ§ßi¯â¬ãC…`«<Ö3Ë³÷’¡Ï¹ WüM© ÐQŒù¹¯ÛGþX˜¦ÿ(Ë:a.?Ô–9
+àé¤Æ!ûŸ$S.NÜÚXE<aG'« )ÎWpÝõçèg$ôPnBmñ§ª:Ê'ÈÇš¦Î°÷–¾Ao?ºÉÉç]S`ü&“óÔëµ¨[fõêlÆõ2>ÃÁK.‚Eë€JÃ§\™s+j`5Œ…#0ƒô”p´Q,°<>™åFgÑ%/=°¢¤ÈD¨DmÈ€dÖVÂòò˜mWÒ
+ú,‘£Ï9HÃC¦1ôó4#ÇÑäSL Ùy‡ùÛÉj»‚çüç?QîK_¸‹ý‹îý÷ÞJ`é¿ý§Q{\’³'Áƒ“ä©$ÈÕ3ƒóëÛ£†Š[Ê¦µ*ðó|E¨¢7ÕôÏ®Ê·‰¿÷¯YìÏZ½Õ?Þcè¿ õèfB7à5ÕW;ú×ET¾Ò"{?í¯®Ý~/“‹Åtæƒ$Œªè¬eòÔßçç?…mHxR8}qÓßþõhN÷A†ÜÈv ö^±÷òEJ;Ï?´ì»ürY»þæ:¶lv9”m½þ:w²õw¾Ñ\iR;ÍÿDlõŠäœg›°@Twù·9U3(#Ý9 <‹É”>– è­œƒ5Ðï&}0²Ëý-ä&Öxü²÷}oèŽ)Æ¹Â:yýæý9JÉª|Cþz«d}úŽË7Å»˜X‹†ôWGt·þ¸þM$i"‰-èW*•¾É#·<b4ÿ»K¥·ú=Ê¥é<›Ž´-c$08å ãžOhy#„ÎeÄÜ/€2J®Óy&Ø÷„Ÿí×¦ôº‡“³ôÊ¹}búraŠçÊÒx8òkâ¼D¦ß#¼)ù C,åå)@TpÇÃœ¹°Øäv»eï-ÏXXdAo>®(0R®ìíƒ®ÇÎÒŽ^±Èâï"çX†OÄý–`Ín	c±µ)ñD£Î®”Â§kìy"ýà^÷oN“x%Cï˜[ª…ãð‚£U”[äÑÜ¬õ-"†™î²ãB+‰«"wCÎu¹—í‘áÍ‚ö~ÆœuµQîk·ðÍ“Ð q%üõ^J ‹@O¤K­ù‘ðôrº³Îjwu­G¥\œåqg­÷¯i2é¬®¯®q]…ü•°6JìçcÙP©Åh_$‘ãÚµ™~îêTúËáÍEíc^ŽtÄËdXLù›Ö
+Ý¥3BEXb2\ÀBµtdFbÓz~2%©‘£ÜÉ1zG›4„É99¨ƒJÉ	•×Tûžœ¼Ó4æRA<Ó"IÐÔB.Z!a #e‚QC^NweÛQþN;E£QÐØg€œ™¹,»>Ê!ÇÑõÆ`kÄAÌ¿/=}Qy º™ï'oøMËÑQmÀÓf÷Éi¾£ÍÑQ*÷-	¼j"“Ì4
+EVóQ¼^ êjg0õõ¦}&n°²Â”±¦}±Ù’ï³(Ëþ9MÙ³to>»H³dÆMæ×o©9õ¯Ÿ¢ìEIø£©<5`½¥LN¸B»M0ÝIiþ*UUÏ´8‹¢ƒ¨F æ­Þ2ä	UÛ#B¡¦Eù®G^]õlîh;Çá—2çÆÕ4ØZmžT'€Ž!†T¸šWo wÐ²´ê	ÄiàNs´–Z¦å•û²¼Ø0ÙW5eoÕÀ“ÙrT´Î	µ»0åhˆ½²7¼–0ÍÐ#Çñ8Ê>çä5Çð…¦3Q†‰ï–ÍHÊXøßð—´)·Ù"S™.Là³)Lc+¯‘fõluÛŒüŒÊ‘nZ÷³<L:xùëd˜Ú #J“|Ö„OIN¥SÕ,ÕK•vy ”O4Ï
+L4ÑŸIùU[´êR…Ûlv×Ñ§Ùß¹W³Þ¤^B˜ñ5W	Ì·oaî…Ã¹Î+75ft‹hi¯÷1ŽknÞqÇš¤
+Ç|Dòñµ68³Ì/¬ìÿØÅ—…Où~Ùr¨c»}®¼7Š³Ùi–D3ÕÅUü¾9s6ZçÆ@z˜‡Ô—Ì¨k3h›_‹·8»6Löï‡k¹08¦­"I<»¶Àœe˜…ËšmL»ç°ä`Su¶BöaÕÝ}œWlI	É!ðrá rÆBÓß’ø’šŽ‘gË^
+Õ¤ÐŠàÉÃÉÇµÔðëHNü!ãÀ réñÏ`ã…xð swJKt&£4bUF^¿m˜X:J‰’~æ&#U.÷Z,NÒ%!Ãøð°‰¤$õ…ÉQDgºrÆ®žòúýÙg?eN8ª±ÊB®#¥“Ñ52þ¦V–äì5þ}ng©¹³÷Bÿl‚úé8VÿD¥ú\¹NÖ,ŽFå“Å>yð'«~¶ ÐÕÇ³CDIl0Ó9No˜ÖHhKä
+“÷”²¬•§åm˜«¹C1m+§ž0QÄ«*í]§Fõôš/²vjaçá˜åÈÃzÊM©È»©Pªé7¦jocmSP0§ééêÓß¶)¸ªÛÎ ¢YŽã,%ƒ,fÐ*L8–ü^UWÍ@ÃrˆµòÎ¤TÃQg”wþAácF0½ú±«ÅABe¡\eB\œryVüúË/dïàÉþ¯§§ïvÈû£_þL¾$yE·¹¨žÈÉå5”ØþS:(²^A^½?%×ñŒð$áõ¨TÆ„áz%•Ä•ŠÆïª©áü³Ðø+[Ò»–Þœ½ŸÆ“ÂqÊÀ[âEG±¢ÐÈÊ‡'úÀògYìã¢Dz’ñxã9™ôÀÅT4Å¥J!ž~Ó©·-ûMQ ‚aFöY¢€dEA«Ì“H&C`)Zð{Žx‹'«ÙÑª5q(—‚´ÈÆÖJ‚ “póñ7Gm‰ž¨Ðn‘IafÑçvxc’Î*uv=¼Ð´*Qñ£"•Ædç‡Tºôª<o9Îwü™Ú{ýîðˆêF`›ìœ¾?:Ùá%7ßËô$ÂÏ2úˆµe7@Ã	0@^Ê¨‰½/K’œ ¯B—(†¿iQE`/Üâ£i{£º ËÖÊ^ +Àåq§yzÓÔ5öñƒÕØÚs]Ua©Hò**ØðcOÔ8–&ÿõ‚º1¿a/ïZÚ‡ÇµàÒ’'¥€­oú9ŸG#y ÏU1çraÇ¹a5ð=Ÿ\1ç W¿~Ÿ!µÈüˆJÒa§”ù’TþeNÕù‹X³:Aß y³-ðŒŒ%d{ö©v¤ÙB7:Ïòí1 ¤µBtP9í=ŸÎ@˜Ä<¤õÃó¤ÞÅªæªÓÀËM4LÞ»xÜþUˆHáÂ‘Ç©GØn€!q&.Ë“™:Çôez÷yØšxðÄøå<ï¿ýŸÿ}R7l»†Ff.à¥EªGM¯ã…p{15Ý–`ß)S9èV¸í`ysÛÝ|ÔyRÝ‹PÍ£svƒ°q$¤¼qåÅ‹¬‹<Ä
+ÂüV¥¶Ý’Áˆ@8Ô¯í¡›õ‡ö7jˆB–´IìC}ðŠÅ%ü2%PÉŠ ž×Î¡ðK®Ð—Y9æØ¢Ò{ÉôœÊ±Õ}™+-;W\É‘Ó-ùXª«±ÊZEÒ+~ ï\ÜéÇâ/=j)>N6SÁ2l,&d[“oÃW7ß	ÜÜÐð'ç^fÞÕD½A3*1_4³àü©îº}VËÚ4û8¸Ñq#”Euy<{’Î`)ÒËxˆË|ë‘[
+¯.¼´%m9Öû(…7<÷ïmÒµ×ÛãE¿XîBÌ»V=ð#Í§y÷‡:ð8/ùØê&™±ëpýÌÂ§íÙ­û<²†ÓjÛµîÆÁißä½ÅÑÐÞ£Ø1ªËWRÍÁ˜vŸ›ú|ªò!]q•³_à
+U{êT‚¢jv,yfÏé~>'ã+Þ DÖî–¥"DìZ±²{”Š#<÷G”Mÿ¹Ôæ£ç,x9Ý¥³‘t>c½shÌFù2ü{ŸCaò)žPkŸ¥•|ƒ®‘]Ûjìc¾ßø±áÃÒ˜•ïu]“AAÏG£nÎúìñï"M‘e~ó®”º`º8…lbÆq½ó5ïÀ²
+N¥WDûQ­Pšõæ{zY<Q²ë¬ÿÏã·ïÿGþÇõä1Ye0>âsúsÈ>2}óþü<¨¯J¤ç‰9
+ä“X”ú$Ê"*óVKÇW5ŽF¬ïÞ:;Ô‘pô¨#ßXF<dµ‘ÂÍîá~‚6ÙÈÑè½îÁŽdëkä€:Pi¹¸¤ÜzŸÓ¿¨ñ!OYöpÞ©<}­ÔÃØûÂÐëBgÉeÉ$gÝòï±ñnŒŸ×Ÿ=aÎ©a–NAÍÎXŸ%k‰¡ø*ròñ4ÃP½N.’á0®iZ…N[:š$ç¤÷fQö	Z”¿zEâö}Ð)ûlúƒþV,w€j"æ¶ÌLj¬¢Þ4–d.9`ôo¹ìn_d'—ý/1µß‚VÞÙÖý§È¤t`Ñ&‹G¸‚„wÆ¤ËuMNÓ©`@§i::‹2Ò%?ó§%‚]uæê‹NÒî”Ý\	TM%X‡£ëlùål‹»XÿFÛæ¬÷«°Iö–cfÑª”]‘r5‰s5½ºØª	æB(Ã$Ë‘³®&]~c™-[Ö±ë…‰UVZÈžpŸï”d’ìaAþJ>ÄY’«_+`7«ÄöuÇ3/Uóno,`]”ÝVƒ×ôóò)°Ù‰­yÄõõ27Sr¹Å¿ÓŽ‘£–84jo,[{,¶¥&HcÏM1íºW~C5æuŽµÅ<R.(±e“µÔÕ Š/]ãO¨&Ë¦ öXÅó9CGoØÝ2÷È§ØWãÍ’S,ÚôÒSnJf†àoÛÔ¦¸}%¼ÁJ­½ÄD¥+$ºÐ‚Š¼¡XGÜõÞH	Gõ’‘ÍZ37YyjP1”ä—-mj4Tè(H€ àbúÕª7únæ[­‚ß\'êë¡[‚)UÎ“É(™P-[6ê&‹¥WqzÙ“¯ìÇ”pÄä(¿\;Âˆ7k]å‚%•Áî,[ç¢ôVQºÉÒ²ÓaL‰Ë9¦¤£•©»`Jÿ  ÿÿì}ývÛ8’ïÿûHOŸ¶¼cË‰¤“t>ŽÇ=>›N<¶»ïÎÍÉÙÐmqZ5¤Çãñ9ûû÷ÑöInUáƒ € Dçc&þ#‘D
+…B¡êWU	%XKiäÌ¡Ð0â×W)(ÒÅòÂÈ>r\lÎ>BßîºÄä#kCg¼VLâ2BD02‚5ùwn‡'¼Õä¾ç¥GñNÓš´»¤’ý36ÖºÍƒ"Ipq.`Ç£4³e!c3)Ò¤Va—¬,w¨dúdøËme±¿g†¬Ê{r‹:Pßy4ÅÎ’5ƒÓ§‚N›ihyÄ ²³¦Wž“¡wK¬{6vœyh+ß†nßÑ8,2a˜é]ŒÍ’ÞA­w¿BLæ›zÊÔ¨t`MuKMK‹¯x¼'×Y‚þíÙÇw¡½Ç»¯)Šèå½ù>î¿9bû¿¾ÞcG/_½Ü=~êp8Ã“?¥U½œ'Žaš“Æ*7FÑC-\³gp³•–—ûX~ÆŒÑ¡Dða×T°}è¢³—M™Öü%X3U#ò¬é6(¼hC3ÎÂ³™ð»§Uô {ÀáHÂæób€Ä>Ì÷ŒûÉñ 3`.RbEýc· uÎ4RK/­UÒQm ³S¿%ÚôÆK¹[Š¡…Uëß#7Ê¹¶é<ä‚ûSÿ°Bàåñ	Û{y¸{tòËË×'’Ž¶}½¾Sëõ)öIöûãX¯€”uõ“«Õ]…ƒìç™_*6ØUåÿô±ÇèŽg,~¸*«`€`ªx»,º·—aöLÉEÒ&…µ0˜³ã„áäÎ‡[PyD”?WÅQ
+3=FX¡ã¼c7ûd<ûv¥êˆE`,¾|[rÐóA‚âuÞoWnY5É§y­yŸº\áÃÁr~ž9ñM·q \ìêý5wìŸBÕwú²úÎRƒsÞqFâWpêâU“~`'ùü§Ü—pˆ£ÏE~,.‡=/:ð+^>Ý|T ÃóÍË}Pa‹ªø‡Gd9¨Ïh²¬¿;ê$âDT4’?ÉµnŸ€´•Ô»ÿB¦Õd—h-;ÞÀZ‹Ó¿¦÷‘ÍéÌ-Ç°¨r
+a¼5pø];æÊ'ÖÆÀÅ(ôËéÂçæk]ôôÛ®÷ÚjÇÜ`á™"ÓÃ‹p7$ÿ*n¯+£†/ÈcÞ*ÒcÞXUâÁä½ï=W¯×E†óº(³ƒ¾Å¢8ì{×õëw2½„‡q|ÄsÆë`ÕMqh~ž}I}õ•äÔ#ˆa-&cHõÏ+-êˆ:.Éaÿßð»Äë*‰€vw¼ìr073ÍGÉœû'E9Ò¬¥%ú–&Éï”˜‹ôà9¹‰JZŠÏÒé`A!ÀkC¥7'¨æáò/.bô{É¶Ø8KN3Ø°\WM¥ ñ‚¤ðIJ6KùÃÃtždcèkrºÖð4ç>F¹9šþ%_°¤HèÃñ%+0¿YIÄÍY™LyˆfÀ‚†RÒvG)GfýfX+{¾(dÊ3XêÍ@pyë¶UêPÃ¯Ó9;:ùù˜qôÛ£z›°«¹Õuê~RÐT1ÅDèùˆ¿g‹0¸Ìxºy‚¦Ä3˜§I>L%ó ?ÌRŠS•ùÞŽð„WÌ[Í\x}Ê„r‡¢¯{‚YNÈà·Ô•if}K™;?s!¹8«b_ ½qóï@i=¬vÿnÄJ†ãñ¼°ö;„ý¡qlqê;ª/\q
+Û`ýZFf‰º¯µy±ù \Ñg ·?Þšºjw’M7/Ðöu›Œ_¼zÛãÊ_ôÝÓàîÀÒ6ú<™þÎvZý‚O»$®çqáÀeÂMLÁ=> î°ßò¨ÅMh/.DøÞAÿ$ùÈþÈ~>>Y¿™÷…ëw¢Ðå´%™Ø¾ß==ÜÅTO0€ƒ×áÇájá7E%Åãù)ê;Ú«AðeCÐW˜øÐh-²,šF-Nºæ*Ëù”ÝnÈÕâma’Ìz=KÅåË†=P^ý#3d~šÚêg ÷ Å}mž—nH6oòAà-[„Í8'C?…ÃØ¶¶Ø.lN“džÁêÇ8ÏÑ²Æ¤¬âey>ñ~ËÎ`µ–%j¿Ù¬¤úóhíˆè ¶¾˜Ñö
+½äûxÿŸÞg"Øc‚2ôØyœfýlÈ±Öú¢XS[³~Â…&§ºÖŠù;½eŠ›Bu~×ƒš®!¯$5"·|Å\ÿ†£QîYíâÚæZÃ<;ñöõ?Ô~O/Ÿ\ÁÚ¸6´×N7ª8Èãù°¨Ã†¾Jå< Ã,óNÃ ]ÉèéUÅ
+×ñ…‡qå‚JÐF•9¾o{»Ì†DbªÞõÈ ¨Ö¤»—bUCE2Ç*ùbº\á+·9¨šTCþðåÏbn†zè(”+^—•MÄ¾©{
+×ô¤Øõè®i.äh‡ÕËohÈ°Úû÷b™ILZ¹82I‘Úñª’ÖqÛÈ[ï^¶Î®«¿\+?l°ò@h`-ˆai‡Â‡-JÚ[æA›´³Ñ`mX(ø.Ú}úÂbÈ®Êý|@¯s´B¾ýÞøéú–G‹9á&n©ñó!64LËA‘ÍDz2š¿*³h<éb%þ­G'™Šl4>Oœ»&œ[,ƒõœÐÔIŽ¡çÙxÜ*mnóˆnN®Å­p¡Å·]º±Së`Tièð&l}Ð—‰¯Eª3ÏÖDÂÏŽfë+:ë ±P›¢îœ<¢=¯x».ÿñè
+lÆ‹à ÍßWšh_L0z.?íâ#mÿu6f=ñíeÊ?ó¢]VT/¦ÒþyŒšrz»rŠf£Gr§†IÕ4Ï×[»-tÏ+eº¨ÏÎE_­sZBösžgB¦.þ<¬ð~MËêqÓ‹i&óñ1ÐüÉÕÃksVï§a÷&ºÙ<HDëY‘p!`*‹0eÂT	d7!ëŸß6x–çó¥|.@ª¬˜×Qpî¾w-úªLÿ\JTh2¿­=8™dÄ6ÃDOJme›}´%ÙÇrÙÎÆûod8fRô®vÍ œ®ë¬BÅž‘äz¥v‚®‡ZNj»ÞÊLáüíx„ zªÁŸá—Jp°í}ÄÂS“MEa¦úlh¢ €¨òê‹n&—äwîÉþ¯‡¡„5½ï@uÖªØÏËLG‹z×¯è½×Õ×):çy>ŸçvœO‚F‹<¡›¥r<O&³È‰šÍ7ïÜ7ÓŠ`ä%'#
+ò-¼¡ÛÛA%Înk„îñpˆA«¢Â:ù„¹ …¡œXNŒ³‹$tžŒ‚&¶{Ãà6”{ð„Kç	óE±ÉœÏ£“ÝÔgS¥»þ»Ïá£
+¦©§¦©
+Œ[TK3QÆäžì6uöq“Xo›ù;ÚÔ¤¹ï^‘Éõì¾¨×erâ{97†ÊôhRWÃH»žÃ³XsØ®ºö8{)˜ž™àK˜¾eC|ÍiSàu5m*ìÂìá™³æ«Ëy!aÛšÞ+&f¬ý¤®×{¦¾Èür:à(kGÆr”_à5¼‰_¶"új®ÃZ¼m=ÞýÛKåÀÛ©åÀ»tAãrÏa^¹NÓÍñ<vîa»dšMP>K†éf6­íiHqolH=ù.³²AÙ™ä‚ÑÆLr‘ÑÄž:ºÒ3ÐVF/.Ãˆïzóêø]á¼oÀ22ºƒbï´dCO‰™_j cª!`Äø“ÂEö’ªrLé^aºYV–`ù_D!dËÍ1 ÅÙd–s	åC}cö
+ã&A\ÂÇöòî%ã2uÊb›4<ÅÂ£XgÌ™j£ž–¡}.'áþÓÁ~NnóÉ[·ÎÌõåá%Û‚“YRF‘kUžv|Yäu“·E¬Ê@K¸YôÍ‘Ù*9-óñbÎ
+c1‹|&KZ(›•gQfÓÙÂ³œ³6âÞ)î–iZ<ùNôíô’/Œ×ùl/Óùhã6DÄÍƒ5Iˆ±~ß“äëCšØ“+Dïñ&OÒbâV€½GxLSPÁ1žSÙOûÔ¬Gå¨#ÝgãÍ‡lVð42Uº×ö°ãV7¤À¢ãì`Q>B[¹EÔ—*ÝÄmÌAQpFœª”EµÞœ¼îO
+ÂsW¿ÊJ÷1ïê,ÃêKI¯.áDŠ‚A"5]èsø6&?¯+Ñ&õéÂwügBwÂ$Lÿƒÿ™¿U>ð	†âz“¯øMTàeòATàF’6—ø0#Ú3 Oæ¤çÖÀ´ùˆ€M†´éOÏÙe¾(€å¹H(€ÖE–`Jý÷ÐÏI=ey6M¦”q$û^Ï_Ž•g=ÉüÛí`>÷“ÇãKàfKBéàÈ‚GÊæêp:Ê3ŒÊd¦øxFå¼ÜlMÌ´1÷Ô±¶'µcH`çéVÀÒìWíxà°­&6å‰Ao¬žF´Ó& Ý6iÒVó>¡Ñí·ê ×Jý”õn›¦»‚âÚ@û‡;…ë(‰
+lIÔxy£Z$lTý¹f*)QiQÊ]‹H§QðÈêvŒû=†À‡˜J–ß{\Äßöœ©ô?žª†W¤;PŸ#ò&‚ýƒ;d;†=»^“€ži C8-R•üé~èáQöÁfÂ=ü£»¦ R¢úQx¢V€ÌÄpN¼žœÌ¶¬™âáüþ§š–Ól6ó$S·O\¡RµuàoƒØqØsÄJ²²Õ»vß;z™bL]×K}:àÒäÌñ&fPË dÎeÌ†ôT¿W§¬ âu$ÈM¤“Ñ8§ù©Þuô‹”²Ù›Å"§+¼ôÌÆKG¦å‰æ3èP×.xªÏy±˜PØr3áÛí»Ñ5ê;Ç_ÃgrƒÌ@‰gì}owëf‚°.Åc¥cAaÄ¸fHQ gÔ ºÔ"^!’9›-önh Tù2˜	
+ÝèÏ:ÜÝNÌ&.¦¨^|1=Ëœ×T–Í}âŒ‡Ç'~˜ê]‘€>>bâ´Á¸æ,~à_ØõzCø¯.s‹ò=”é^°ÞØ1êÚËÚƒ½÷ºWäÅàþ÷†Š¡–’¼þ¾!¼‘±Ær¨"R…_ŸÀé{çÙµ“½ã5P®ðÿÿúùødmýí;ö„½}×ôFÞà()x¨®¦~Ð/´–h[„O½úf
+¿¾}·Þ/óIÚKqÆÓ>ï|º—ja¾t£Š­W95òS¶sþÉ¦ñ3ÅkcÀ–‚xz¥¢Šù ª¯Mýß¾5 dS1ëöìög‹rÄ'8¶ªnåm†óGSSÚÊ¬¢ý{V£q°µ
+³<ùœO’9¼†\'C±ÌXIbÿ'‘àE~g×‘ë‚9:x–/“ÁˆcØc¤[­ŸŽèíˆ&Ú…pÇ5h«*ÎÆmüÔZLP¸»¿Åå6™Š³~\E‹æh3¿H‹	ž+­rç=á8sþ×¸ð˜Ï^[âŸÁ”|ÝÅ–gUì+ÚÀ½/òQÉèBß©Åq¢˜rD_Ð9{-†\Œ6Üˆ»ï‰iG£» d;ù`H0ÞÂ>¬_¾£›-Gô¦iLwÀ¯Ù(‰á9ªß{¼Ò²DÛÔ%+IaÒœÉ–
+r«Iß¸ÊÄ¸ eYÔ+X`¶BYò¾y©üO66&¤ž6œ-)¹é¼1Êñj¨Óž<4Õç]6¿µûøászÔ<Å^ó~žÏ# ;LEQ§Úy%ùøüÀ`î»Ê‡Ú9|k$Á‹ø¸-l øSCM\ýpCþX±ä «7@ªOX,í)`õa²Œ¾ñYŸ®FiS…Ò¨ú¤Ç>*8E¼!w—‹Ý¦SEJ?_ÅRòÝ»‹”¤mÏ<ØíÏQ¦t•"¥+—(uC™CõIƒ7—A¨aßë;ý¬I[‘”»ÄI	bb}K™†Ù?,'ÿ#£Hy7X´¼¾Á¢@JTH ·FN¤æáÞ~#xç­YÀÎÃ#Ë¯kQ%,Ñ@,GM¥w¡ÍæQŠÉ¯|2½…¿Úˆ¨•'‘Z]r;¨óÇ†
+ÚÈYâ†
+~5•ûòLO‹R_þ‰aüAUízKuy6ÿløä;-ófUÜë;ƒœUÍ/VµA¬UÍ¯*xÅ!®¼žš_í
+Ë`pÙ]÷â(Ç²T­"N~&"ñÊÐ°&É`Ûça‘Órä+¦â*fCÐto¤¡¯ˆÀÿþ÷ÿ'.IðU¥iBÞ³+&…´P¨|ÊÏé4ªßQ•<j*näP(|›Î‹lÈð\©%?OT_ï
+a¯R
+è8€@hr0²”»¦TCÚÓÔºT–-òV)Û¾Uä8—/EW­ýÞ½i¯W.&LÀŸaû#SÙ`dV/î¤Ùûm»é=Ç)ZIØãìa!-ë
+Žt0\ÆíÒ6H©³Nñs6!¬TÏ¢Y<¤72yL¾õn²­kÑøÞ¬îáÊ™ÖU)6¦u?‚[ô!*[ÒÏ­n&æüCCúè6mãöÅ÷i~Q$³ï¨vQg/øŽyGZÊTè6ÿë4›³-‘;`‹¿yÙaãšKÚ>„}2,ÆIÑñ¼ÍèH@á*Á^9Îo08„WµáÏÉÌ0þ8˜a¨&šyFï³˜|ÞÜ…9s¥ž®ÜgÊ	é÷:ˆ–ð>â;h±’¬ª	þÕp/o«†mò@›8²©©mØåžÀ?c½äóæOpà‰>ðê–ˆÑÃ&Ãü›N2~ÆA±-•ÐR™ËvJÚ^õnÁ5jÅÛLDzk•ÚÌ†ÍÙ­ë¶óÆ|q±	ê¶;JuÝæ}1L¤ hù1„Þªê¼uÙ³Ø‚£Ô.¥ÞV‹+.5Ý•ZZÑ	·+µ>Ÿ‚*¡ZˆÊL×)y¢HJ^[T‚I@×·àPbÿƒ¥îtÖM¨¯LhÇYRÛURêÎß—‘õª‡ÿÓJ0 NÑ[òh€rU;4ûèEKÃÒ,Á:n>¶­ór~âiîgkÕ"“ã©d5<Wª¦{8ž?Šž¬G¿gšÎe®ªÚKàšhÿÙ3ÖS”ß4;·ÞŒíâÎ1sHÑèŒÈÒ
+ü/\›RÔé¬õoZZîè4¹Ñ)èEC•é-\ß«EÖá+œ~™<·IcZ¾ûöÎp²wüˆmRÏ†eC§b“í^‰…Û±Ù¢˜Ózß~>>aUÿx£]u‘ä CåB–ßW&¥Îóõ¸ÙôbNœ7ö‘\T1Ï1N†3e%º`ËøÊ««” ˆ²¥<Ôp7­B²²4²)7MèŽ¥¶X]‹$3ÚÆÿžÚ5UhW/éÀH:Y`§çÍÛzC–Zß ¯½ÕÜgËpîÚ¦Ìµº•ÆNSI2’ÔÞ[)IíŽfJÕÌÜÊÀÌ ÙW´¶vë	
+ÌñÛ[ýCn"H0éhÐ¼ác%oºÑX+'†Çl‡ð#ZvJ¿a>!¡•`9,Ð:ÑóËGmR0èq¹÷ÑÔÂazÎvË2a0E£Ú^2OÈì‰Eu‹džûNÔ­_½ãü--²³ÆùEåEV®<hWJM·¯vÀ‘PÖÊR)€‘»²ð¡•¢r½%ÎI	B-“˜/¥†ÌBD8ÁOhÙ	UwÏÕTmÑUŽ|¿1ûýRÜãÁ³°c¥ãÿýïÿ'ƒ75oÄW'”ÈpsP$7 1ï&.\©áÛ&µ3Žpc|Y
+Ö"®œË!ŒV¡ÎÑdŽùé ™h÷3Ó” ‚8wzÐO01¢‚¾ˆ¹oxöeíü©†Î=“{ªz*_£[²¾œ ôØ¿0Ýÿ7ìù7ì95àÎK÷ÉÁçöªÞÔ ‚¿uBWÁÀ2Aÿ÷T†.q	Gù³ÕrÑp,/»ãñÚ×Nç£þ†Iÿª1é|¿òüDgKÑÝûù7ºù£C1¨ö¾çœ4ÂÑ¿AÎ¿<È¹­/ìÉ|åAÎÛk ˆþ‰àçß¹µ>|	È\8Ûa£»Ã!,îð« ÃšÁ
+õ6ù<™þ.¡ÂÕzìŽ°»¯ü§ÃFd°Z£U[$n¼«¿dÈçÍK&>4âÚ\§™÷0ƒ?ä[X® :SðT—ÏÙñ,( «m8}OàA†ÞlxÿÓX®ßßÂ›*±(…yÇ(ÓC.Ú.‘·±Û×YÁ'ˆŽæÒç&†UÕWÖÝàšÿ^?m«\—(®¡Âõ´õRuUMß­]Y2üFYô3€çá7àèQˆšh.½ ;+’œŸ«ê£Ü¢{ÎzÙŸêåU¥íN^îXWüMÅë˜µûéÐ:]À(D¢(¼e*~Ô l­¡ÂÄw”žÃþ†»]Œµ¯Ái—¥1U*£Õ"Ÿf þ/Ù‡,‘ç˜ç‹!ë_ÀsE>fÇ—ÐÙÉ'@h<õ$T$VS}Ò¥hâ9ÆÁÉ±Øï›ü©Á§t"¶R‰ÙŸœŠAçÞz9Ìd‚£ÞQŠY"	ÇÇü½—o¨\Öîp’MMtÇ•¾aÑÃüL€§¬¤z'ÈJhÓ!®ä‹ºÓ/êÆPuÕpâ¤¯­XlÖXõ©·VÏUj
+¾•]Z“ár¾+Í÷`¹¯dÁ½lÊDÍ=ö÷<ŸàÿÃEA‘bNeÞ[~˜™7ç9ìrg´bÀ	óÍyšŒéó×æ±úè+°ñøù"#ÔuÛ´lh•üxi½Oä½Bž§u	‚p¼ó)šÊº©Ý÷3òµW‰ªÃ¼P-v°÷eUês%[¯yÇCÞuÎ¤•†^†îŒ–öomÕ|I%ÿŸÁþ
+t?^œN²¹t'R\öùž2»ŒÅŽµYU¢J¨N,ŠU5D
+¯5¥¬Ô¾šœ¨¡Ä÷ðÞíæ
+¢>¡QU§¨LSþTÿÁºAUpä?Zµ”ç‹ÙGŽ¸â……‰üv¿iÅ­T¸ì-»°w‘:Wzª3„ü\>áØªØ·Nxz,LniÕ|JA¤ÎñQXwòôA¨£ö)ÜÏ.¾Ô1¼÷„[=Ø?¦ó†®Åì¼³ã7Üø‹Ö4ÓµyYf$@*e!òôÐq=V6J‘qršŽ±5Îe¥º4i¨½bîã[ö.ë‘˜õ»§ÿZ_ÔYç¥åË˜ŠŠ£s{—Œ/:Zß`£êŽõSÓþyŸýVÿÝÛX'õO‡'G "·ïnÞ¾}ÇÝõºoJÃ¦b6i¾ÓlÛ[Ž«h©Â ðÒ{X¦Ô¨JSÆ”ÿl½eŽÔÜÃ@Ü>>ê¸êÖB#«¯ÉˆU„º}ôn/yi¡QÊÓìo‹”ep™£½½`	©¢üÐ:e%Ï‰\@÷+vŸq>¿aŒ 7b NNò;ÍÆã²ïdé¼˜þíEªxšþ¸â5"|}N‘¥tÙvÚ¬7	»<eZÓœ¯¦_dÛZPÝˆÝyªWÅh—¤õ6
+• ÞE¸Šh¢`²©P_° Øð½;
+>FÞ””FæyçCôŒ±™µš¡+XÚx6þ“ä”4Úµc²Ár^C…T¿Á]zt­ýìîlVäXÊ˜[S×¼Ö5¬Aîí®­W/äÏ#
+¶ÄW®%¢áµÀË÷24íÌ÷»V7¯…¨q”òé gdÒ4/ôBm¼JáÝœœ¶AÑiéB°’“{ÝÕ	-iN¼0>¢ÏE~Ÿ£Òîb¹kåæ4ÅYžî
+p–ëˆkÚrþØšŽ¼>‡ðÈižÿÎ8‰Ýf»w .±bÒ¢èÞµDú:°‘%§e>bˆÙÙÜ­dØÖ6—1dØ¤c4+^òKºOÔg
+[^å44?ÑñÓK¦e™Ù`|%Rq°·ÁF ‹à]—ý~?¨ÅŽ‰¾UÙðx%ö•õdœ«ï¥ãÍ‡lV¨h¾ì
+%¤f.¥\r×5z§1(d¡s!EÝ8QN•}ò•½[¥ýSCŒ«÷ž-T„C„ªo‚ß_Õz€…áÍÚÔŽâãö1ëÄ¯)9fc<Ö\hçà}ˆGsC’è¹ÿ ç%ÖùPäÓ_gž÷Á˜ä=%÷Üå:JGýXÅxÃ{2À€Ý`N×¸ë\%\QÓŒ?4²éuNT›kAF…øÊOÓÌRðü°WMk=#/?‚6ÞÅœ¬Rä©Û¹¡!µ˜çI›GÑz†è=KÌ‘Óbd“@o„»Úÿ»:»¦à3ègÒ\e¿ÖÌ¾F¡Wýnrã7‡är˜m!ªÛ}—c³gôa“|“¨·¸¢—rkßAý±úºÃÆçÚ×ûBå£	UšmÉsóe’l»Ïa!C£ð¸Œ¸}U{ Ô…õZ‘mhBÝ!!–¶$&Š;|¹Yü*“T®(gF‹ëùˆ™ªÔ+#àVL\	Ÿ	‚Ï?Óy$›_Š+‹Ó]ó‡œžñÂ“œÁJÃ°!UbŽõ,ë#–›ó´ˆœ¤ß}÷´r <Þâ×¼þnoã7+T-%[•­\µ¼–V^?½B;¹h×Óâ³ß•»CÎ=¦™ïœu9CuË»’IkÌûÏÈ°|^b9VÜÝç¸8Î±~ø7Êvˆšu‰Ùž‹´Ø=È'³"¥°×9F0U¯­,œÔ,mrŽ×‘IDp
+ßøÇ•HlÜýJ¤f;^‰bÅÙ+ñŸgõÑ £W¿{ÅÕ‡Ëá–KŠv½,C[Edöç,›ËžØ}â}µau‡²-Š”æ4:Ïk„X ÷h"ÂuSèM‚(Ú€€Êú‹¹¢	ä2Èßš¿’ñ¿‚x’K¹s%…F·"ªE5uáëK¢ßY´^P= …SÒ±pr] ÕôMj-/µÄ›ˆŽ¾7q‘ÅßT‰/×M«ÊG½$.åÚâE,¾	L>·8Ý¼1¡©	±ŽU;]:ÖDçW#)5âÇKËc5vM`–ŸLb:.È•öM˜~ÂTsæy—žô6C”ºoìX|›Ýãêoµæ¹üM¦ûd:6ëZ”ç]ÛÉòš‘ìkØo^FËé\5ûŒ¼¦Óm|þh7ÑK³yßÅJ§>g0GT4l‘¹XbIk¾ð˜G"¿$pA4¼ÈG/ö‘Õ\i¯nz‰ÕO*¡€pµyð-9Ò
+êÙA8žŒÇØQ
+£g‚âÆ
+À!WÊ"ØäM“î³f¢0¤í´ò m~tçæ	9Ójžå`Ôáì£'¿aCPN  Š’É2ä`‹L§mñ.U™¡öže‚qhÎ9´(*7RöôV;y¸?kxyGÖÚé1W&¹\k5rï¥§Q[À>š(=Ä~FBw@LJÀmQëö<OÆˆ§î„š2Éw9Où;; hlø¾quMCSò³ö‰Ï\ oJ&OF³{Vî‰uñgM3c3w”lmªæ|´!UðÙ?I”&û!\“7Üù
+ºd»tt©Œj„\Ü³Þ./ÄšUzcÛ$™Æz¢ŽDŠ…íkÈÆ›6Ì_ï×µÎõ"¶¨%Ów¿W©šh¨U+ÎÙ9åT,e1Ýþi¨Ý?£ÞöÉWÉöLÔ±å8¨uiƒyžçã4™Ê"«lâ Öy‘,¶ï(=©Èœ?ŽAö*3tÕW;|š¶ýóêã‚	Vëµ¬I8X²%•‰IV³iŸþ¬ŒHY«]³Jq™<SÆƒÆá|€}ULìe:àgÍêç`þLØ?š$£G© 	Ø oO5GoxF/à÷Ù#ññÝ_ýRŸ¶·p;g:èÈÔ’ø5áŸÞyX‰m>eÞh-–Žáä_ñ@Í 1ÓTkó_x¢–šžøå.+|Áe© Fe³yÕ ñîŸ¾µ‰’üð\5úna|N‘þ•@škë ·Šy¯—lœÒq]¥ŒM¨bôzÿ<Ÿd“ó›ÕÅSû¢g¤^&²òˆÍF‰\^â¨E[©¥0Sýý"9§œ%<e#½kóû+Ižë÷×¾ã2ÏÊt0…µ JÀ®"0;Ê/Yšµ7×T3ÒrïÝÞÚ¹­éi-“ÛŽKót³1g[½	³¹(Ýœü­¡¡À£‘±ýÐ™jÙµJˆw\ÉÍ»ù‰%†Ê“7Úù(ëL±DÓÌh¥¼ÕÀÛzþJ<Zé‹ÌuŠZáÝÝô]€²:nŠ‹¶]§.Ä.d+®ê2¸¬¯QLj!ãFÇ”)í6I‚…ÿ‹ª>]¥¢…FAªaÓ$Óù#Uý–Ih]³&¹Ã [¬üØ/gãlÞ[Û„-¥Há%%¦ç›áh½h•È_éya¬ ò5ÐðÈM)ù†6‚Šÿ]ÙÊ–?‡JÄ€ªÄAb7²–&	R®^’b“ûœ&sg«ë¯²Í_µÔ#Å$ÇŒ.ŽzU‘›wºÇ»*óÂ’ŒiçÅÌöÔ´Y…ù~ÆÞÿá{ëÇë÷¸ž6—]Píävc†×ƒìJ¾µßg"ßw3{½<¸_†û½•·L]Ôýw29g£MžVV«&ƒ2ÊQ?°R²Ý5
+~[‚ïuÎ´Ææ #àß‚§rÙÏ¦@lÔ†þ’&EŸHLTt…ˆzLB‘ãyÊGã¼È·Ç"ÚXÈÛŸ¶þ±Ÿ‚õ½ë<[e]þùh÷õ;ys²û*X»»…Â·’ëg¥¬êYéåx|ï÷	oðÚBuæ²^%U	E•FVú%˜£dvçWù9OÈaf!I0SÉZ=;É0Í¿îí:~©J
+=	½^Ù>åWhˆÆÙ+ÕÞ÷K2MÎSžfî~šRaBy*ý¢?bóô]?ÎSPëÕÕê2~ç§tÒK‹¹«¬g‚è÷~V¾³ASÞ3y²JšÌ+)¾þ}óí6VýœÕ’’x“«Ô«À'#·p9©%Öbh—M
+¼JÊæŒ)Ú¶ÿ:ÇcòîLˆ"0+õÔ»jî8$©šËÆ'ó£’f¸?õæP])óÁ‹É×ûì©?Ï³ök<Ç‰†§Ž“ =Eú´¬×Šnc§—{4Î©ÒeiÁüî¸ÿZ4¿n³rôÀ½	¼ùçð©«ô"ŸžeÅÄ%…üÒ79d¿=Á¼©„Š¼Q)$§Ï¿íåÐmöøÒçóË–Eç­.BIÛÛÉ¤ÖDm’KV²>…°0Íjwn7dò^J­’À0Š`Ï`5½ðÿÚ¥–lKøe³N«;z—àÜïnÃý"6ŠÃ½}*T2Ú±I`ezÐ’ŸgãñáðlÉýáÇvûC­HÛÃªwá¬ô~‹»›‰ÿÚl%®¢Ž«´Ÿ»Å_z™RcßÕ+­Sƒ¯óG6Û÷1‰0ýó:×Ê¥únÚãžŽÐåï‡ð|ÕÙ÷ƒrÎÆÀËì	æƒÉÑ¶„x9æôµÄ¨Ç'û£"=ƒÇ-¢.Šqð)™Cž|´ÿ¯ïSK.Ù¿µëþlxöÞ×º'ÑÒzÈ‹Q6öð½á¡hþíÐlºH' —›nÞú¾ìjêá„uÞÃê±è”h˜q½ªºlvÉÂê­™³"¡Â¥Š%ÎÓ¹X1Ï/†½5dÜMàÓÍŒnÉ‘”ìO'¿¼:ØÇïâ^§!à‹¿öuú€j×žø?Ù–ŽüóV\}ØŽæú”^ÔÏø¾Ç¨Xjè±k6 ?Œõé"¶=Ï“ó¿"îîæ¿öLåé[._z¦MÓ¨ÕK­.¹t­­òbsöºsŸéP†f¿JÓÁòÿõèêùïé›SDÞÁ÷^}ë¨~3îåöÈÕLÖ²öÔÒ9ã-#Å}¤¾W©\õ¬äÖ6ïõ\U¯äØ5ëÙ”lSP»Rƒ'Wïk
+
+Ìóõæy>>MŠ'·ß_»ÞPñÿ´9r§’”ç¤l:Å‹(W±Ì¥Ò]¿¥6GQ×\®ZŒÁÜ<é>æZÝÎ»VœdÊl9ø“Y_dÃ´tU6¥ºGª{+ƒÚ‰Ç;8ƒSã>âµ{D)VDþÀ~Kåªh8ŸÃóx<¯®K\Q)”ö7òrþZŒa;3ôé?ýT{i“-®Ë~6Œ@ï^ÚÏ,Ô´Ðj²¢œ¿DœÑþÛÛïê÷ÂxŸèH.H¶÷Ì@4;^La P"@ž9ã?TÔoÀØ¡:Ã<êM|Ð¦§Ž&ß_	ÍAv¿ŸÙy6½®_˜%ó¡žžQ;—8sO¾¿J§à_^ä“Y>Å#ÍÌÀ5b´N8A‚ñ†Ó6ƒÕGbª´¢uë½:2í¶µÎ›¦žÒ°"N…õß×Í?ÞÚZmªjRÛh.ÚFs‘Ú.Ýá{|1óUú§4Á·ºÀ¡óx9ÇüÎ®*ZøÕì4Ò²ÓÆ*ä²ìok*#Qò\·—Ô–+ñŠ?$â¢·ø rÏo;ZÍæ!ZpÜÀ’©Îµ’Wåtá³œñ?)íÙŽu:ü}ñš¶èª¥_½§¨i³t£GZ‹Ü­vÌï¯HjˆÐBV€ŒKÆÙßÓášUïÀÅ²ºlÔ2(x-9«G{y T"BÜ€ôÍà
+X\Og°j)`UOÙpo}%Ë½ç‹†ƒ‡ûÖ¶|˜y„øó?ADîÔ²æ+-MKpð„ÕËŸÂ&é†ÓƒS¸+%­Hf£lÀ^$Å0JÈ[E¯OÍ¢×÷x9VQö¾‘:lIßÈ2Ý¡½XClFí ªÈ²Q÷³ø
+ÂRÂÐ%±{Já±irîËC"¥®:>ø—Œç òäÄ Æ”¬eÂjï>7áŸi{x€Æ‡:çt ßD“T’yÖŽoï²¨©Ê!ØÖ›ÐK¥‘°ò‘V
+é#ýàµp1þÐ”â(ôk{¹Ø÷‰
+­p–¯ZŽ£¤”O’O@ÎFXU¨UŽ^¥âx ›ØE6“–3E4ÈÆÎžÌA»S%Z#U"OB
+¥hð|Iç9GÍ{†NœúƒS[kA9‘}¸–Œž¾ìg)(?•‹gàtù”öK6¡9abvdK–Ì9š–>°P'œæÉt>¾ä§^~«ŒŽ°®ç ›_n°1Ê¾Éo@ÛCâ:T0øñr˜Áù$u–ìôî–a˜SåIçÉÄˆó,NŒ[9‰¶ÑîX}½[YdùBV¿ç·mËåí™ž€—4”›Å«Ø0
+Ò‘ynv)ð¢Uf6!³*e Ø5cˆ¿&Î'Äõ®3üc-n¼^ó'5[&3ÎM’ø‰g?iKGGÍÓ•Ôç¥<Ì_:]EV˜niª*ƒË·øH,-FZ•z©Ïù¤;~ó’ÌŸzÜX¦Ñ®CŽÉö½¬ÀÜ”ÆùúÂø#çÃšAC¦Í;¾L›?zc†D—¹êSïù#'aü5Ù]ÖÁƒWÔô©ÈZQMß-ðÙ›)ìûžë"W¥eûŒÈ”(2bW•®3Ã®¬®OE5©ªJóŒ˜dñÓkb¶Óñ‡î˜cwíà=•hœ¾ÈgdÚÕ9¬º)NÉTóûJº˜E£MÛ§¿ò´éÓSÖ>8iyÍ$ƒ|–¥Ã?Ñê3ÍGæ‘FŽU¾¹[ó¼ÒU?SL÷_!aëë«]Í+kXXûV¿yèÑ+]S}L|±ÿo(ÉEûk/èû-"¶¼Hj×àòn/_9b=§6KvÂ“êÏ3-ØÒ}xêÔÖÅ—œý{—å-‹Âz×«LÞs™tÚÎý^ŠÕ¯e ò®eá.iclsƒ¯šK¼‹ó>z?|ýóJ«.çŸ`#|ò“á·ù¯þÚ wb§ŸÃ…ŽÇÙì` ßæ6‚‡P7dõ÷•viäÍª•k?ÓL†-x†¬|K1Ì+4qúþÓp<ø ÞÍu»NX%Vú|Ò‚;^^Ú¦ãHæ@²@%ê	¬Ñ¦êz½ÎÏšo¸9•÷ŠÓ™ŠôxP ŸË‰ð1EJãCÖÖ'Ìx÷¯F`=øl)|h oÀqO[°YÑ¶ç)ŠMä=ÃLMÿøüJ¶’êw™(ó¤hE³)cVgHŸ6ÒÇé"ª!}vPŸ—€Ÿí›üT‘]è)¥÷Fà~vÚá~îÆã~~ÆÛ¦hþ±üÂ…é&«›ð
+ãçÍ	*ü+µlÓØûþœU¹÷¤#÷æS¡ÑÒŽZiS(ÇÂOlm±cX
+lQŒÙßiq‰³"-¸žg0B@ìFY9Ïá°æ/ý"Á¢Hç˜Ä4 ÿçKš^pXŸºç<¼·wu½QÅ1cC¼ªó@å§Æº÷w%Ï¡J¸¹ëHx¾sÛ6ëCˆ/‡ñ¸°œNÃçgƒ&›‘r' f¶+°ræá¥èƒçj¨1ø^$tÌ[×;¹˜ªEŽÉ‚T“ÚÃÒ8WÂúÂŽ|f!Å9‚N×ò¼]÷†­¶D€yMvY©$é«œFãM‰f³5œ"¶—Ã©ÍÔ»„ŽÒ3˜òÑ‹“Ç‚ó ž›Vjå,›úÞ	ðóù´(ý "WÔ0åb’qÉÑ(gœ/qPÐ†pdž~¿ßŒ`×¡™¹åžš[Ô•ø9zà$¼hÅ×ÀÎñÿù…¹Ù”JV¦2¤z£8ñT7Qï§Ô?'E
+¸]íäfÀÀ£»-P<Â—”@sd¯ó9ˆ&>¬Ó»«àJ1#j•¶¦‰F^Ì±8˜%‘Øa‚1ŽpZ;ØÛz½ÀŒì‡¿-òùOö	ñšÿÜg‡ º@Ê	$Î|”*¤N^0>U	:æà B/˜R«nàÍ2@UÏ+H’Hlîšô’IóMzï!-jO¾ãEÜ˜ˆõ‡eìNwZ^òç°3~l²«Žáoöã=³da é¬ÇÊ6Óæ!ÕšŒo! ×¾h`Mü¨½ ã3ÎõÙ¢úWÕkSÑŸÙ¤·Žûu>¼M…Â“™{BÕ ñÏ?ÁÞZž,B~HhÐç²ûæÄ/‘øˆ½âÁ¯j·WeÚl–Á½ÒÝ<®Wödi…{žÏSo:wK–]½§£QØçßÍp¯×<áÓ·®f¸“®R=Ä`osZGÕ}UÑ·‡>O| Òcµƒ—g*¶ÍlqÍÈ„0c 
+*¡´vÉ¿Ðã#_y|<Bk²f ô%‚É}=OÌR¬äõÕ‹îP„êïTƒv5±8a…:ÖXÚÃƒî–ÇÂ*ÚK¡¡§MÑSoö÷^ì¾zõ¶ðz÷ÕÁÿ}¹‡A¾/ö^îgííîŸ°ç¯^±ÞÁkvxôæç£—ÇÇëà\ÔXÃÇãàEŠ†£°; Ç&ÜiHkæ³Ð@GKÜ-µ…)÷ðïóF¹ùC D¾7Ðr’â’ýGz‰ø÷"øK˜´CïðŠ¼Â¦ãßí0Ò%ð²7ñL×„•µxL‡qóãUx|ÐY‚Z'K)6Þ#(HšãAèý+ÄA~JòØ¬ýÚ_à|«ENË8gÓÔ­å«pª~Ñ4
+Bp¾Îg"{Íª!pŠ~Ñô6ëX|:¢+ïrTÏiôESÂ;Ø–ÀItIÁØ(üsÅyxÂ¸¿^RÇ„ƒ8ßÖ‘[„ƒp‚Ýt”‚ô{‰%mô)?\´âæ@-¯/P¦ÖÏ¦¦òÃïˆQ~|óRÍ	o'ÅF!&Ñª±ËÑo¡i;-ƒÙ¯5b‚¾{j)ˆBNšËâC³€õ4e€èK-@”½Ê`YÆj®*ž§/¨_†¶%Ç™‹ˆõQT}êXïJGL‰BF×h±/²´\_rÆt hsl&þ‘÷èËÐœŒÐmÂæÜ}`ãrš¢‚ðìMÁróR~P@I4Ò Ð~â˜3„e±®ãË†íØc€—a5´:°ÌÝìfÉe*[¢â’3½%ºÚÐV\åHœ*ÉkF¢‡_×eŸZþ×<Ó÷h_dÒæˆlºy±ÉalÞQÐÛÅîoÌ UÏ0¸W»ärýÃ’ý‘Ýi Á7-«NVKêïãZ—›NE#YŒfÆz”2†²·(=¬èPjZ
+èMŽ®EýO÷¶«lÎ2ÏƒÐÁ¢w5C{ÆÞ¢dxÄ¾¿šñBš„¸yÏK¯Ú+¹Â–3í§ªD5î&¯!²L¥µm³‰µÕÈ¿pËæý±"FÅºnºeÉ²”K«ÝÇé`Q å~?ÏçSÐ=Ù«ÁÃN0™E+r"‘ts{5k3ÞÁyVŠÙ&œ›CË@ª­¾R÷²s,"'•³´H§ƒ´½ÎgÅ<ìü§Ãý½Mô0l^‰ ¥~¹8-9«ÞÞ`ÖÅ#Ã‹¥ýòZýðiÝq«¸(ŽLO¯¦é™ÉzëÞ…zc§O3.Ä
+¥]"S2¹)²2RL8-½ã& <Â	‹÷haµqˆhâ›ù—Qå„^t%ÃTO5 d Ó£ D"´&þ¡5n”Ìh·Õð/7)'ZÅ9®>åK¸Ñs‘Antï²@'
+§ñé–Qq{8MÁ”Ov˜Ï3¥Ô¡¼î¦0$—•»cLGrù–eÁÒ/æ±ÖÓf?ý˜àœžÓÏ¢<Íðù%£±Øì³þ‚Î¼FcÏó|œ&Ó^\£êÖ¦=’Iq‰Çªø;½S ²¯¯û:G¥ry´[üKExœ¾h Û—ð‘‰ÇZSD>g’DvtÝÍ”’Mh‚s~÷k
+ºÄ¶"™§·Æ“¹1´3)Q¨ðD?yqÙ]¬Þýå³rß»Ý}„Þ¶ŠÐ‰ÙUJîv5Ð*ã’ï í˜¸BfËáÖv¥xð¯?V ¯jòc(²ãeQhyD¡|!Ä\[m0'™~,m¾ÀG Œ­Y6a¶‹ü|ë?Ãz`É¨JðèM`Þq”žg%•y÷f[¢t\•YsîM êì¿ßÊú¸éì‚ù6Ÿ'ÓßåhV6=–ˆÑj´”]3ùdc,*„ºDB%âÑÞc8òåÓó§WJl¾rKWGF‘l£,Cü™õ>R²„I¤/ñ)X€øÃŸ½ø%ä%%çÅºë¾ƒ&óZo‚zI©“íô’)ÒØÛDEŠ °ñL¨r;àyLˆJ´Cj²ƒ=Ø¸»»áÅÃ:é±áIò{Š¯ÁH9©”/Ä¦†PŒãX<ùT#Hî[1]$bu&åå€1Bæ5òTØ1iËÙnÌ£êË–kc¶ÄËoP«•\Úì^:‡Å†>Õb5\t²O|³µTö¼‡x[ÐJe¤"‚O9·”¢©X4ËdÅüL¤2¥Ãäj0([æÝk¡’~É¿ÕÄMˆÿ|p&1ýLÓu°ü‚l+Í”Èj£âhš•2æ(XË$Œ|×\Óû¼°”Žç£ÝŒ¨XèÆY¹áyÑiÕ!Ñ3)Îýï32û*…¾T–áx'=}"¥¦þt#/Z(÷¬ðóròˆ>ùEƒÝÛCï®Ë¤ì¹91²`Š8 Ã¨.8ˆÅ0vÞH/Ž}T¢Ûcóáòéº^$ÓA:vNºß‰Q|q¢Ê¬o¥‰:ÉñÀg¸‹H¸ëœÈº÷¢k«ue›Ïjtò¶v™p}F‡pWyTûe÷aìÖœæ=ÀSþcaç<´ÜzÿŠ¥Ýü¿ùö+ô¡(çy>l?qŽüX7“íìˆYÑ
+ñ"/Ðh¾WÊò!Q±ÜÑÛ{ù†Ì»ÃI6]7}hªzÜôIhýù·-L·‘Õ5ürcNµÚfŒóâÍ”vCEW	>Häõ}fá&Ò²9Q–)*q#…ÅÚ¢uf.°Ž-®±5ú¨'ð­Ö>þNÿ¼Î9î-|g¡éÖŽ¸1´;ËXígï¾Õ´gÕ÷«_ÜãòïW‹Šr~NzE§yóm0î3†ÚŽŠƒr›]„²¢_wªbO2Ð¥y]*´Žøð­Ýq@­
+<Å±ª¸Ÿ`¸
+‚!Iæ£>‘¡ÇMM½à£à‚×éüh~^¢™E?ÄGGÏÜöã¹œKÒMßšìlV~¢Ž¶Ó"ËÑX‹j‚Ø`ü¢ˆDÚuù‡|9/yðÍ3CÌvÍÄ¯«’Í/©þ¼ Y®”ÓCLe:Uáp§®Ëñ^j*õQš”XÓ˜÷·^¼È[º¨ç
+Ä¸zëœÛ5ò÷I—'(&d-žd%¥S[Ûp?ô[¾Œ@hoñ<aÔÝø”Œ°Ä×Ãóô¹8Y¼Ï,f³¼à>;‘Ýu‹'"Äz1ðÆ.ù>€Öá%óä#ôôçãØÌ†> ‹1ÇÇ¦E‘®|ïxè¥È“¾°Ì1šB‚xÞâ;íOÚMiváØZ`–Ð'Ì·zEL¢æ®òõÊöD¶*raÄ÷Wæo×0ÁG‹±ü£ÿ%ìŠõû}Oï7˜èþ#½ƒ×þ\¿–YüŽÛ´h]”mQÓóªS[+Ô#œ”öAò—Hì·Aü‘™/hhi€pHh93'@„¤H“6Â¹­höDšúø†@QÌì X¾à2¢ôìÊ˜õ3>ýwÿ.æ“ßsAGwŠü¢|ru×5K"ÑbÃBv=éJ¸¸âr3³3zbaŒ”’”u||)b£NSÊµIB·Ä­` ^‡(“¿-21Á»ÝÑKûç*]'ÝzvÉ÷©,iÍ%¯’“ŒSZRÏb¯›ÔiŠk¡™rq:Éæ¸³¬{²\Ö’"tÝqbÙ1Êtd0fÍ·Ä‹"»“OÊC“•«RZ0cýÇÔQ[ÆutÕ@®«–ÎUr2J‰ê|\àÖ38ÌJ˜âK˜¨Y‘O sTÔxžW“v1Â ðQzÉ> .'F?§Hot¬ššeÀ/WCâ£Õ5‡Xc(Èg5< Ñ¨6|r••Çˆ›žWÏ7Y*nÜmÖ´G9E°ÛE(F³:ýeÉéYVLŒÏ“Áïûy&eöxÜ¹Õ ¥zœ&Ê'œËy/¢ËSzÃ­6:
+¢C‚wLÛ/ž>EÏ¦9ÕÍ/Ò¡/yÜ#­¡ûuÝÌòÿXžW£®z˜ÎÓ4R¥]hŠˆ¥sèÁíÁx¬A1 áré-È–Ø—i°î²~pú„qÛ£9ü@ØIÙD7eY÷áÓøð¿¶('ëø77P¥	Š¨³”øãúu:Ì·¿BPµŽ¹â™rÔ÷çwÿÔ©Çùã¹ï+wýÔFõÙ?KiP_•H,ó(G.4ÿ=AžÕò…ùæŠssø„á7Ÿ8ŸËäÉ}Ò:­`eµ•û©mdi2©4í¸Y…´b£¤dpÐa—)š¢@!+R´p‹ªy[€ÚF®WõIqÀsB6'˜-¦8ù%~Ÿç*k¯HÎæ*Š•ZEÑWduÒ{ƒ%CÔ…1¾ƒŸ‡[ÃtœÎS™)m5ÓŒtÊé>®/Ô'W)e_’Kîu
+ì s+£"xŠu[Üî)©|~/Ù€˜lñ<šîø6 Íœ$›ž<±…Æ?Ð^XÂj~éMÐÄÊ¥7
+û£6ÑÂ3XY…ÙZvÛþytuÑúE¹çêZ²òÔ.}×œ}žtùæÄ=ßœsüïwÎ	y¼¥úˆ¶&¹’ÄþÎ¹çœw·qÍ-¹ÔÚ»å¨n.»]’ª g3A_Ò3æJgáþ·©µ+q—›DŽðâxr¯ ‹ÒçÆ÷!Än¬æjK¸{_›:˜~fgÛ¿‹oým—TY0ÙºÈY jRÇûæXkiÖÑ];BÂà“ßjË8Ô$Ý[Zù—¼âó«ñ-3ª ÏL“xº³Œ×L<zß¡7Ý ßÌa®vœéÔÄ´6Úî/f‚ëªƒÜ'ö”iÔGPtáúÙbÊ%é‹‰»È^‘Ï€Ó¦%lèp[IçÔÚß¾Û ±…Y¯ä7š`Ñêòât·ö[®|¾žãA[4 Á³V-à1 CÑÄ<›—ø’Š\íü+ô­ÐgÌÀ¿A¢`ƒFÙxmlÀÒ?†³!ë0øÓódŒÂGþ ¥ÛPi[°år”_Óh7è³×%ÿv¬*ÈSþáˆ·‹Å¬ÿÛõ#¬PÁ‹›òÓÐ[NU|'lÇâË;F9ÚHá‘ÅHåýÔy¿ø¸_ÌÌ¥xbW}½£“|‘þKèÉ\%£špÙ3í‡ÀsÀ¦È›Ð<.Ozrßø)ðl!§SmÜ­§¼ã)øª‡A Ì¦Ç
+˜H<JÏóD»ìwì§|ß6TÜW=|à¼Upeu#WT¡uÜ!Î@Ó>í©ë”tn‹j ~l–Ð=?ƒ!ÊWˆÁÑ¤	-¾<;ƒŸ\‹X‡·¶@ª¼Æá_ÈÓyWr¥Áoqæ°gPÍŠÎìú'ãý¥Ù=¤þ-ƒ²}iž€‰SrïÍé_ájÿ÷ô²ìÙ#Xï—ù$íÁ52ÃÔ˜”´VßÂïØ­'OXÏý>ý>e2ÿ!iížë¥Ý->©Q»²DÔ&ª>.y3ßððßëSÎt<WùúN1æ[Oé0µÙôT°»`RÖÓ2A³ãËõ ß¢ ç• µçÖ´aÉw?“Ð‚kÛOÙK„¨†×%2k¤>èu“?ùYV
+'FûÏTîMàMCÈ<ÓwPdÂI•J’HÌŽÊ|üÀËŠh,¥/—tgÔ%é•Õ°Ty»4‰Ù„È¥©µ¨¥ÃüuŠ‡k*hù/aÞwÏÏ‹ôœæ]Ql"tLeiÅ§/‰+ÐšŠ¯±zÀý€üét¸Ÿ|4æ\A¿5fKÓ‚#é©M;ãFEd"HEqí¦Ü%–Žd7ÝÞ«ÿl?X­4ëQ×…Ú[õ¥i¿Úy­Rü@w.)LübòH=4rÕóížñ|U@è>ÿÓS>üsæ~Ò]§5~ËSÉqgÎr82gjéa0>d/õçM{­hFÍþÈz|ÏD1îSÖÒlÐW7÷¦š<Z‚}áé¹b]©µ*¾MC‘¶“Niß)Ÿ´ö„o–©˜>ºš^ÑQƒoå¯±KPÝ±aUÈ›—ZÕóË¯K­­—gmäjb,þ®Ý(‹£>²V¤¥;×ê=«CÏúž=ò£åˆ-i·÷3ú7£y±H=9—¯=rE_í´òR±ä¬ÆùñT©ºNI¿Y[AUp_”ã4ÍYªQëÆŠrÜ ïMènéò-úà¥~ÅÒq™joÁN¹Þƒ¬4öˆn©›CÓÏ µ®­¢úyt<¡j²¨:…ËwíPmœÊQèçìJK¬NV¬$+?â‡,Ÿê-5Aƒå‘‰Q;Ò[-üPÍ‚œ4ãlWÍ…{u¬9()hÀõ¸Z	"Á=ö¶~£j<­Ž_9×.×Ö\Yã¹©ùiSð^WòÙ}½ÒkÇiC­u‹¥º*›´Ú‰Âž}Ð22ôB÷Z§[iàH®Õ«ï˜o2ä#ö~àxÔõ\Òô6kòUÚèz šFù€üÅý@5¯IíPã˜iCFšó]M‚9Ý>’7—ßÚ–´|ú[–¿&š¬üöX¢ÒÝ1$eÕ	ÇœæYižÍ×Ð8¡ŸÀ((Bhø¨×›õ¡ÒùQ‚Z?I°ÜSØÏ]G‡¬(çQgN«Ý··ß9ŽØ'ÙäºuÞ¨ÙýÔ¤³íT¦ÿë_[mJqqfˆ{ìÓ3\Á•¢Là‘UkÝ!†´Õ=˜·ZÛt»‡	qø·ìg`Ò­·ºfz@FræÙnÊ8•Ôzíù{ž;qsJ”¯]\x¸UøG¾	ÑöBTùÃ¤§¢§Nq©íùè¹h§ß]¿Õ}Ÿ$HÏ·>4gPÏ¢Š~\Ï¤„¸Cc›[šr‰+Ü¯°âa…R%S…”[¼Ó²yÃ¦§5½b„8ÀI¿`ÉÙËùˆÂ%K'³ù%êùgEZŽXµÒu:	MÈöm–jÏÓ]»š»Þc(•öEk“²/Ë	t»ž´Y¬†,œÏ1I RU)›PíÔ‹dJ0ëßÓtÆÐÁò]åˆT%àb„ÎØ4¦ææO´¾ÐÏ|h A#ªÝÙPl¤ú"8ƒGö¦¹°	);Éú†—2Ê™û›õ¡8Ù#È M,9¥¾ƒzÍ‡d†’JjWc*Nq¬ñÂ%/OÑ{iU&äô’‘xA@ÜŠtF%Ð8bDµzžÎf[¤Ï/…qô@¾™¿}§³åÎŸ¢÷Kn§óž”°Ò“ÒºÉÏµO£ö-Ñ¤¡ÉgÐÎd:SªQ<¡×õGIÙ«¬ä\J†CÇ%Ñô-Õ’ˆtÃõOMS²&dRš©}êxýèêó3=ƒYµÝ6Ö\)˜4‰8/a¸èIü´DVáÒ6<L. µN9‚«®)bž% ,~ROê–Õ>zK3­úõ:ìVBà·z:ŽCÜ¬æN!»'ªŒÐ†¸
+[–kjðôm˜”]wiVvô¨ÓºÌ­œë.JX<z½¾!! u+ÃßáLÛ˜£cï\,bàd,.Ñp5£Ô\8Ý1ŠF%ó[Û¨9åÊoô¨:OÔå_*’"ê¨2ÿŸ.æô[eÀP’rþ¶	~gEˆÚjgýS_¾óŒÖÒOšXÃfp‰éË-ÄSîúÆ–Ý¸¾îÆºÂÎ»ôÆ+¬½±gñh|À’ðíVkµ„6œ€•È¥«oÎ5|lÁÝlao\¶E¾{)ksÔv1›–†ûÛ¨¾~*áïäBó°ISü•q¢þ€yv,²Šè-·yLÏM<ïÖßÍÆ¹“{sÓ·„Çc‹b:´Èã
+¨rdŽdóQ‚’ÔU
+6M¤OP¦ê’Z?×¹Ô›Ãf>HØ?¤C½§2›ÙäçŠO™—§t×lµ7>ó²”ô»Ïiœô,ÈYÎ§ÍeöÌ³òŒ_ÍÀS:„SKCƒH‡Rå¤çØØ&oÉ9pï’O“ùˆQfV´ êÂ<ÛÑŽÛ_A·Õ•”²ïùÖ¤²8$m?ð=NðšóÀ;ÔôÓ-{þ\ûÅKîÛ>b‡à)Ÿ®XrrÚvµõVWrë‹1¨å6Y…ð«zuuf¸e—¿v0¢iqÁæ
+_S…¿ÁòÚ£V§TmPÚ×Œž_kßÙ&þ•öú
+XBÕ¨±·x‹bo§æç`OÎ™à>Í8Ýµü¬Ž0´!G—ñ{¤0Ô¸¾aM8¢.|¨µÃÇáDãP¢ÆRHÂ[ˆíù/=]‹.(¼vjg×aIêš^…›áGS¡^vó|³êóól ¬uCeÄ¥äkÜLžð|³i	½ý7f‹B©‰ÄlyG2·°8Zf*ù«¡™%Eß—ysµ˜¬wû”Ûª+ÝtÀXÁöøMÛZìz¯ê}©O$WfèÕî2šKžNaZ½[¢nç+Sï-º^T3äáiíÿ  ÿÿ A«½xœìírÛ6òžÕt*ª‘d;­¯=Õ–&MkfÒ´÷zs“É\ 
+²ØP¤JRþUî­îuîIn_@¢lÇ×^O?l»‹ýHrzzJh§!-¢4y1ëõÈæÑ¿œO§Á<Š–±YÙ˜¿9|;Œf½¯ìQ¯irÁêdâ±1j+¯¶„Å93ˆæ$01$Ÿ|B>ò€æé’šÜôÈé˜PÀ‹ìI`·[G‰õDcûHýÝöÉV}kò>)nV¬OØ,*¢äâEÁ–}²ÎY&'yS ¬ƒòt]¤ƒœÅ,Ä‘džf$O¡	Î®W,ñëŒ‘4‰oz0 @œÍçÐ78å‚BäÎÇyÐ5Æu‘‡ž
+øxe Wr+j
+1Š˜,Í‡ó(™µ`¼âž^PÅp¾NflvþýYîkÆ,¹(â‘¹|°:çˆtàŽ@ãäèIí…²×„÷TKCÍµ3!—&cÀÀ„ÜÉXB?™E—$Œiž¿¢KvÚ™Çìš\ÐÕàIg¬±=ËIñ2†\æë8&«ÁÑð˜LÓlÆ2’¥œ"R°ëb/;æÐK¯Ùé&l	èoÍgiòluº	˜ó©à›°aA³V9ÀÞWÕž€sšI¨<}
+òy7uÏÏ×Ó]RVÝUM»JÒG†úô\}5»o·ÆMÆ~YG ©§® ¡‚(<¹v”Í_¯gÀžŸ"vÕ-!ŒX'éŠë¨X‘Ng¼)•ÎL&¤‹ˆ"‚ýy—ŒH÷\ˆ…hênO<sŠ²,rÜpIWA—§pxÏn@&@ý¶Z@ðfÿ³x¯¤åä@¦!©ÓuQ 4¤ã´#n:(Uq¾¡âSÎÒp½dI1Ïb†—_ó5.èt èëM†!
+z[SØW×ƒ'dz1¸ÈèÍàèðÐøEzÉ²‘êð:pàwRw¨ETÄ ïél&ù×?>9kå< í?’w› _¤WB¨ùÏ)úXró.^‘­ùõWR®f)!V3Èø îÑ÷gIvšK¹vXFÚ™$ËàËºàÁÛrµÚ¯ù¹“*M4[û©Ç™Ö¤bw<ÆÄo?l“áµ–®-´n¥­i[[…œßsh4îù×T]ä^U×§¼÷¢¾’à‡T_>¥G}µ‹ ÞÒd%]ÖüÚüW[ªÕª•âZèSÝ{ÐS¿W.—ÂòÊæRXJ†[íÈˆSÙlË U]‹Ñ&¸½„h™í­Ãš ©ÙiR$f‘
+hU¡¦U¡ÂªÐ‡·*%ºiXÔòíoZ™öE
+ÆÓó°"¹©÷í" ËRxmÉ{÷µ%š¦“7<Ä^®^“¨U3¯ÓÍÜRÎ\jgþ_PO‡éû>·RSq¡”õàSòm4›±„DÉj]ä¤H	Kr,„)(¬ä<bñ,'š@b—QQ ªŸ(H'| äÝ‚Ãê„Ó«ìN5ã>·.ãÝN5Zn3¼tÒŸßn…©o½m(µØ¶æYm)É003Ÿç¦n§k¯LƒÊíf’²"©ñ“÷ˆšëRæs)«3³Æ;u+G£­²cªC7‡ð{6ØàW¿etfÛjÙ¸Û8§÷\?ñVPšâ
+.ÝíHˆ6¦^MŒñ>¶DI[~\±õR¸È<MŠÁ’Í¢õÒ°ö_vì5 „#0"B»Tå8+×!S•c³ª7á¼G~tÿž®3¤»u@ï¡ÛpÃôxVŽ¯™Ã-Ÿ>ÞQ#‰ƒªóÐ5JÎã]_Ž¯ß rJlUþª¦ï*KCŸsWÁþW€Õ«‚â»ÏÓ,d$Z¢ŒÐ‚‘$-¢y$l6ßÛà„‘Áý7½LA d4½bzáà49Wû$‚=/¦È%§c ©ôæ}¢sŸ”¶O,?©·
+p§!J.À”àz÷‰\—"lïø­—'®ðBKµgì@L†ÞtŒ.ªü‡VÅ3ŒðOVºS.úi,ÁÐÙ2Jº~~¡Ez–&ó([§8Ý¤kÂƒ*¼¸¢Ië$–Œ&×W³XD9v(NÈxFä‹h^ðÞzf7o„B¨qÃN_Éž‡y•Âò'¾QNËÖmhïÀ\v;'ÆµÆò`Ò¬ùÝQ6³B™ðe†<œ±ü[fú7~ãÎ¥f†—Óñšþ|A³ª2Ûð¨DÎ#. ª¼1¦*ßhYý„‰u‚	_~cmXø«?ÅÞí,ñÏ Lã¶¡—°Ô¶èÜ*:×:…U(]«¸ÕY¿ûî*ˆ7þò…y6¦6«}áÞs«SÜ×®€†¡(:‚%Ï³tY ~/#|Ñ¤?\`ìî(Oyì€ñœÅUmšÐ|¨Œ<·Žê¦§öryæ·¾–õGIX»šøfK›‰¨²ááÓ½€+Ï&±õßq´åÍ. ò)F©îÃª»«ØY>öéË—ßÿíì›€lœs&,o… ,i7“PŠƒ’ƒœoi°ðÂã°Œ…,ºä¡wú³ˆÔz	®^¨(ÜcÒÿZy‘ü˜Ýy¯OkÁË €Ã7JXðimL%€„Üùˆò×„T
+˜¶nRõýEHÈ†pÑS!·=¡–@Ö7T )Ž\ Rÿ¸`à•^ãÆD+é¼TR“áüÈŽ\9‰Å\Üèa¼ÿæ­oê1Xƒ’ÇHõrÊ2ˆÖÊÉs1¤K°¿…·M«cëÛ\ Û³„±BèR4kRsEj½àå¸*a^Ò(E”´`ô¡)~c î#ºáJÓ7 V‚Ò­&qŠHN‡eß1 È5yêB¬d*¢å¡äíX·O/iÓiÉâ¿ÿù¯1Ñ°H_]1;/2¸zÛ^]dÑshÝö‚š¼Ýll—OïÈ¨0§þ Yõ½åÕžÌÚ—[×f×wÎ¯wdØ;sìvYö~yö>™v5×öÍþaÓí=îßTÊíKº½iwcâíd$ó¾{î]²£6ù†dLynz›$¼1oLÄ½µj“7Ÿ©fÞõI×”ú”³.›n™Oß2£¾÷œº)«®æÕþÌÚÊ­+fzw²í,®Ï¶óÙàÆÍ±Û:ÜSwmØ©ÝÂöí‡´;âR#Ù;+JRªŸZ ¸®-Õ¤ÑÜ1ü´}D¿¬OÊQªÀX¨P‹D	
+½a=D‹ÑˆEÄ2š…‹›š@T@–³´„]‘sVøÌ€L”ÔÔ$s{óÆùÂþJƒÆÆ| ,à­ó¢Nz"»›ù‰ß¢Éø¿,>`ˆ—Fj‘27‡ñ»!ž’ósö6Ã†š"ƒíÕ{TgÍÔÿlÄfòpµÎ¾îá!}I’8_¥ËžKžÛÇÌÀKÌ;ìAh~ó–v·ÍN×.î.{$NEîa#‘‡ÝMð’k³Qö­àæf-uVüN€èÕ:üñMè+7t½‡?ÜÜøÛè—Ul)±^@&û^ÒbyÔk‘·Õº#Þ¹.Y¹‡t…øJxúµKLöMMöKNªïk4ä(ÂX`‡Zh·{á¨n²œ”Ã±^/UßH³ñ®Þø2J`¿%®÷5™‰†ÉÔdŸ´CñüöÓ{c» ™fÑE”ÐX©f}®TI×ˆaêZçX˜€9Ó4‰×]s,Vòûžw8¥ì¸Æ$‹CðKV3ÜP½‚¯±&ó¥pG¯ËH4àKZ[êÃßÆgìÝƒÑMá]†Ô]54ºÃTHPØç›(_ÅôæOøH6¹Eêd3`xŸ¤W‰,Õ5Î¯äK3bV»ØÞ¦Úp$XWÓXi{öµs+röb§Âhƒo&:ÍxƒrhePKso¢?½AaòlhU“ÄšGb¿¬SÖŒ)….-Ö¹8™˜±ŸùS‘0·±èÂÓo•‰ïñàn\¯WG§±ÃPnŒ˜Ùßn`Û%wË”‚±¶9ÂýXOš€?Iï|IÁÕ¢êÆ€Ædmüm+¥‘º°š?¹û»¥IzÐ—ô´5¡µ »]aÞSEs_"÷ž=qjŽç›£ÃÕõ[3°*£ñŒÁ·=¦iÌÏF¨Ç‡2vÖç&gä™	ÕyÆ£uTŠ|Â@§Ÿ×yÍoSV\1–x‚xŽd¾¢Éø)ÀqÐ_FË¨b»ÿëóJÁª‚^?³geùêVË‚Îò?²:{¯æ¥÷.úunkÁÕ‘?²vºŒ1M+ÎûyöÂê«_÷öùäÝ<ím½¬éaÅÌÙÉCyZŒÆõìþ0{GÜÖ;"÷;uÇ÷äŒ¥}‡Õyd‹—7zajMù•œãÂÈ|‘¼½^«mwÙ3pa+Oß«×¦Ê&©P‡ i¢Ž‹åŒ‘)i²n›’˜{l{÷yÁpÅ³Œ%¢§°Àéí# Q|vEíCB”¾„\± :õf®ö/íï„íˆè.²¤­{ê{c oŠ¸	y£€±UZœ;X)?trÌl™ø_}ê"2ïsuôk¢ÐSemCµJ¹B®ÏŠá;«¢¶úè¾¿”â¾Œe<R™¦ïë(ËL™ñ¾èâôo:û¸g}Olütˆõ-ï—@rã ùÿ?ýÑêÓâæ6è¾Ä7csºŽ‹Ÿƒ›”
+óõîv_)i%î§'ür¢UÚ<©UÕô‰JÚÅñ-XÝ}±…Œ…–˜‰Û1¿¨Ý{é}h±û}²Â+vâ•¨„Ÿ×†«Aª|Ÿñœòäqÿd \9dÈ Xhª·—Åõ}÷$dZ`¸ÆÒ7þ@±ÒŠ—ßn(Ò‚Æg	8tªQÌûèÙÄéRÅøSž£ýÀ2Ý&x)lrŸß¿0ºˆöGÜ¹:“MÊÊšµl·§·º›h¨öà9Ÿn-È‰WF?.”xpª]À 79\¸zÜ#ËëÓ°XÓøGƒ2pð&¡ö‡,@¬‡0WI»¿«x4’ñ¤˜5Êñm”S‹ú¨ÿAåÉà¨”±,
+_X}$Ð‰¤yÅ™˜`|8¢Ø–pŽ`Øw´XCÅê‰ðïà•`ON&°U0ðÈGîÕTðÊ·Òú´´8i­©$#+ÎøF€MM`$„ÐG=ò©wêÇÄ`6¤.,/‡9«–QbMâ…ß÷ èø¯äBˆê$þõOQMc¦–éX2:f’b)zõ‰Mï¾6Øh²zÖåZõp+#ÛŒ%VÆ ï ™®Ö¡Zr?–3òw‚$!Â”]Áú
+nAŒ$¸{üXÍÇ™)`D%;Nn|?)_Žøu–^5Ö¸x8ó9Yðg…dÙ¤è4†áHÂŒˆV•rN¾´¤½œ/Ò+<8ÄK_ÖTe¹§1ƒVUÆÂÜoÇ ¥zH:ß5¤*æz0÷Ft²*	Ùø´Ý-wµãfõ8›ƒ±U#“ÇÃ©ÈÉ‘¯Æ'ƒT'7–Q™2ÂŒ,+îfáÕó5õ¦vG|,øPíVJ¼¤7ÀäêÉQ³œÐ+ŠÐ¬ ÈÃpïjtƒ¦†ë|”®‹¼á IÕ„…
+^Ô7eÉùÐ>!Þ|Bost¸Öí88ŸoÇOŽ[v>ÈÇm!Cd‹x´ìÞ5èŒá¿»÷33vEõVû¦ô–†ß·»ãeÌŠÚÙI‘L,D<ÁÙ‚£žsdfå¸_4;Ý˜.‰[Ö73{ðÕ¢í”áøPC¥+BÐmµÁdyšð,c^a˜Ñ$ïhÝ!y±%NfÏ£4‘4;+õlÁ.3PÑ—l^ØQþçdvÜ~Ã{Æj_ÆºÌïœÍ?dì2J×yKNßžÑV’®#©ŸÀóÖÒ!|Ža8Jw°­+"ÌæWœë•t^ åžÜ¯üþ¡V°e?©$`ó"ºÁÕàÍgOp¿o1ø²a‹NÞ:à}#Ê]Sò±Çg9‚Çyá)¤ƒ3²7}Åc•ÿ«†/ !_ÐYzxu} !¯È­]Ps¨rC×u}ïš?9àY'Ÿ°Ùo ˜"¢‚ÜÓDß›ÞÉš<ÞÇš”Øÿ&ÍÊ+`\K“ò:ºX<”ñ.¹ö?Ãé—´½›¼5«}¢ÓmN7fžÑllŠkËý¼¢iÈˆ‘þº,6ŽøåÒIŒFÕˆ²b…#Gä5ƒtfÈÿ¾JgL‚*G)Õ¤¶—sM.¯Ÿ©5\Ç¥¥s6áu)Õ·}F„å?¬K:7ï '*ÅEÔ#1ùxÃÉÚ@ÃûÁá;ã­ªàAC0/kÁ2‡ÐÜd|tB“›qØ«g-×¼kœ²–×åKŽ7'6Ïµ¨Î8Ô²^­XÒœ¡P‡ï1ã(¸,ˆ-˜*0oø¿íXþ·rRkÚÍ;q¤a–óhÞ)¸À;~î¤ö‰™ój‘Dà¡ñÏ6‰Ÿ»(Q´Œ5$>‡Ë¶îü  ÿÿ ()õ~
