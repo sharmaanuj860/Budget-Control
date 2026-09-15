@@ -25,7 +25,7 @@ jobs:
           b = p.read_bytes()
           print(f'App.tsx bytes={len(b)}')
           try:
-              t = b.decode('utf-8')
+              b.decode('utf-8')
               print('UTF8=OK')
           except UnicodeDecodeError as e:
               print('UTF8=INVALID')
@@ -34,13 +34,31 @@ jobs:
               print('context_hex=', b[s:e2].hex())
               print('context_text=', b[s:e2].decode('utf-8','replace'))
 
-          for sig,name in [(b'PK\\x03\\x04','ZIP'),(b'%PDF','PDF'),(b'\\x89PNG','PNG'),(b'\\x1f\\x8b','GZIP')]:
+          for sig,name in [(b'PK\x03\x04','ZIP'),(b'%PDF','PDF'),(b'\x89PNG','PNG'),(b'\x1f\x8b','GZIP')]:
               pos=b.find(sig)
               print(f'{name}_signature_pos={pos}')
           PY
 
+      - name: Archive App source
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-tsx-source
+          path: src/App.tsx
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Archive project manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-manifest
+          path: |
+            package.json
+            package-lock.json
+          if-no-files-found: warn
+          retention-days: 3
+
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Typecheck
         run: npm run lint
