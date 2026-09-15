@@ -1,0 +1,49 @@
+name: Budget Control test build
+
+on:
+  push:
+    branches:
+      - feature/admin-data-backup-restore-test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inspect App.tsx bytes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/App.tsx')
+          b = p.read_bytes()
+          print(f'App.tsx bytes={len(b)}')
+          try:
+              t = b.decode('utf-8')
+              print('UTF8=OK')
+          except UnicodeDecodeError as e:
+              print('UTF8=INVALID')
+              print(f'error_start={e.start} error_end={e.end} reason={e.reason}')
+              s=max(0,e.start-64); e2=min(len(b),e.end+64)
+              print('context_hex=', b[s:e2].hex())
+              print('context_text=', b[s:e2].decode('utf-8','replace'))
+
+          for sig,name in [(b'PK\\x03\\x04','ZIP'),(b'%PDF','PDF'),(b'\\x89PNG','PNG'),(b'\\x1f\\x8b','GZIP')]:
+              pos=b.find(sig)
+              print(f'{name}_signature_pos={pos}')
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
